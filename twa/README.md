@@ -21,3 +21,11 @@
 当前真机试验包的 SHA-256：
 
 `6622D585F62FF5FCF758ADC1A1F091EC6B3032663CF6FD402B4654C06E811295`
+
+## TWA 专用网页构建
+
+使用 `pnpm run build:twa`，它会读取 `.env.twa`：
+
+- 强制隐藏非 release 分支的“开发中内容”角标；
+- 只在 Android TWA/standalone 环境启用返回手势桥，转调 SullyOS 已有的 `handleBack()`；
+- 普通 `pnpm run build`、master 网页和 Capacitor 构建均不受影响。

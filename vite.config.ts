@@ -1,4 +1,4 @@
-import { defineConfig } from 'vite';
+import { defineConfig, loadEnv } from 'vite';
 import react from '@vitejs/plugin-react';
 import { execSync } from 'node:child_process';
 import { bakeVoiceMiddleware } from './server/bake-voice-middleware';
@@ -44,12 +44,20 @@ function readCommit(): string {
 
 const gitInfo = { branch: readBranch(), commit: readCommit() };
 const buildTime = formatBuildTimeUtc8();
-const isReleaseBranch = RELEASE_BRANCHES.has(gitInfo.branch);
-let showBuildBadge = !isReleaseBranch;
-if (process.env.VITE_HIDE_BUILD_BADGE === '1') showBuildBadge = false;
-if (process.env.VITE_SHOW_BUILD_BADGE === '1') showBuildBadge = true;
 
-export default defineConfig({
+export default defineConfig(({ mode }) => {
+  // Vite does not copy mode-specific .env files into process.env while this
+  // config is being evaluated. Load them explicitly so build-only switches
+  // such as .env.twa can also affect values injected through `define`.
+  const modeEnv = loadEnv(mode, process.cwd(), '');
+  const hideBuildBadge = process.env.VITE_HIDE_BUILD_BADGE ?? modeEnv.VITE_HIDE_BUILD_BADGE;
+  const forceBuildBadge = process.env.VITE_SHOW_BUILD_BADGE ?? modeEnv.VITE_SHOW_BUILD_BADGE;
+  const isReleaseBranch = RELEASE_BRANCHES.has(gitInfo.branch);
+  let showBuildBadge = !isReleaseBranch;
+  if (hideBuildBadge === '1') showBuildBadge = false;
+  if (forceBuildBadge === '1') showBuildBadge = true;
+
+  return {
   plugins: [
     react(),
     {
@@ -146,4 +154,5 @@ export default defineConfig({
       }
     }
   }
+  };
 });

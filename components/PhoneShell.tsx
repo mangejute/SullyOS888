@@ -149,6 +149,9 @@ import DreamSimIndicator from './os/DreamSimIndicator';
 import ErrorDialog from './os/ErrorDialog';
 import BootSequence from './os/BootSequence';
 import { setAppPayloadWarmer } from './os/appPreload';
+import { installTwaBackGuard } from '../utils/twaBackGuard';
+
+const TWA_BACK_NAV_ENABLED = import.meta.env.VITE_TWA_BACK_NAV === '1';
 
 /*
 // Internal Error Boundary Component
@@ -480,6 +483,21 @@ const AppLoadingFallback: React.FC<{ onReturn?: () => void }> = ({ onReturn }) =
 
 const PhoneShell: React.FC = () => {
   const { theme, isLocked, unlock, activeApp, closeApp, openApp, virtualTime, isDataLoaded, toasts, unreadMessages, characters, handleBack, suspendedCall, resumeCall, activeCharacterId, errorDialog, dismissError } = useOS();
+  const webBackHandlerRef = useRef(handleBack);
+  useEffect(() => {
+    webBackHandlerRef.current = handleBack;
+  }, [handleBack]);
+
+  // TWA has no Capacitor backButton event. In the dedicated TWA build only,
+  // translate Android's edge-swipe/back gesture into the same SullyOS handler.
+  // Normal browser/PWA/master builds do not compile this behavior in.
+  useEffect(() => {
+    if (!TWA_BACK_NAV_ENABLED || Capacitor.isNativePlatform()) return;
+    const launchedByAndroidApp = document.referrer.startsWith('android-app://');
+    const standalone = window.matchMedia?.('(display-mode: standalone)').matches === true;
+    if (!launchedByAndroidApp && !standalone) return;
+    return installTwaBackGuard(() => webBackHandlerRef.current());
+  }, []);
   const useIOSStandaloneLayout = isIOSStandaloneWebApp();
 
   // 三档顶部状态栏：安全显示 / 紧凑显示 / 隐藏。旧存档仍由 hideStatusBar 兼容解析。

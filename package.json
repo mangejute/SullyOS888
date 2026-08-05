@@ -6,6 +6,7 @@
   "scripts": {
     "dev": "vite",
     "build": "pnpm run build:workers && vite build",
+    "build:twa": "pnpm run build:workers && vite build --mode twa",
     "build:capacitor": "powershell -ExecutionPolicy Bypass -File scripts/sync-tiao-capacitor.ps1",
     "preview": "vite preview",
     "cap:sync": "cap sync",
