@@ -60,3 +60,13 @@ xiaohongshu-skills/
 # TIAO-Capacitor local Android toolchain and caches (D: only, never committed)
 .android-sdk/
 .gradle-user-home/
+
+# TWA test packaging (generated locally; source manifest stays tracked)
+twa/bubblewrap-config.local.json
+twa/.gradle/
+twa/app/build/
+twa/build/
+twa/app-release*.apk
+twa/app-release*.aab
+twa/app-release*.apk.idsig
+twa/*.jks

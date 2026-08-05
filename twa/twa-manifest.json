@@ -1,0 +1,48 @@
+{
+  "packageId": "com.sullyos.twa.test",
+  "host": "twa-test.noir2.cc.cd",
+  "name": "SullyOS TWA 测试",
+  "launcherName": "SullyOS TWA",
+  "display": "standalone",
+  "displayOverride": [],
+  "themeColor": "#0f1115",
+  "themeColorDark": "#0f1115",
+  "navigationColor": "#0f1115",
+  "navigationColorDark": "#0f1115",
+  "navigationDividerColor": "#0f1115",
+  "navigationDividerColorDark": "#0f1115",
+  "backgroundColor": "#0f1115",
+  "enableNotifications": true,
+  "startUrl": "/",
+  "iconUrl": "https://twa-test.noir2.cc.cd/icons/icon-512.png",
+  "maskableIconUrl": "https://twa-test.noir2.cc.cd/icons/icon-512.png",
+  "splashScreenFadeOutDuration": 300,
+  "signingKey": {
+    "path": "C:\\Users\\tiaotiao\\.android\\debug.keystore",
+    "alias": "androiddebugkey"
+  },
+  "appVersionCode": 1,
+  "appVersion": "0.1.0-twa-test",
+  "shortcuts": [],
+  "generatorApp": "bubblewrap-cli",
+  "webManifestUrl": "https://twa-test.noir2.cc.cd/manifest.webmanifest",
+  "fallbackType": "customtabs",
+  "features": {},
+  "alphaDependencies": {
+    "enabled": false
+  },
+  "enableSiteSettingsShortcut": true,
+  "isChromeOSOnly": false,
+  "isMetaQuest": false,
+  "fullScopeUrl": "https://twa-test.noir2.cc.cd/",
+  "minSdkVersion": 23,
+  "orientation": "any",
+  "fingerprints": [
+    {
+      "name": "test-debug-key",
+      "value": "D6:44:DD:DE:EB:6E:00:19:1F:90:CF:62:1C:CA:26:49:F3:72:A6:53:C2:C3:70:66:DE:F2:F8:F9:C8:1E:F1:C8"
+    }
+  ],
+  "additionalTrustedOrigins": [],
+  "retainedBundles": []
+}
