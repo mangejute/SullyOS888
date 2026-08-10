@@ -1684,7 +1684,10 @@ ${memberTimeline || '(暂无互动记录)'}
                 selectionMode={selectionMode}
                 showPanel={showPanel}
                 setShowPanel={setShowPanel}
-                onSend={() => handleSendMessage(input, 'text', undefined, true)}
+                onSend={() => {
+                    if (!input.trim()) return;
+                    handleSendMessage(input, 'text', undefined, true);
+                }}
                 onKeyboardSend={() => handleSendMessage(input)}
                 onDeleteSelected={deleteSelectedMessages}
                 selectedCount={selectedMsgIds.size}
