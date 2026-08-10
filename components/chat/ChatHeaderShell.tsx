@@ -27,6 +27,8 @@ interface ChatHeaderShellProps {
     extraAction?: { label: string; icon: React.ReactNode; onClick: () => void };
     /** 触发按钮图标：生成中想显示"停止"时传 'stop'。不传 = 原行为（闪电） */
     triggerIcon?: 'lightning' | 'stop';
+    /** 私聊可隐藏顶栏触发按钮，改由输入栏的发送按钮触发 AI。 */
+    showTrigger?: boolean;
     isEmotionEvaluating?: boolean;
     isInstantSending?: boolean;
     isMemoryPalaceProcessing?: boolean;
@@ -83,6 +85,7 @@ const ChatHeaderShell: React.FC<ChatHeaderShellProps> = ({
     statusText,
     extraAction,
     triggerIcon = 'lightning',
+    showTrigger = true,
     hideBuffs = false,
     headerStyle = 'default',
     avatarShape = 'circle',
@@ -423,16 +426,18 @@ const ChatHeaderShell: React.FC<ChatHeaderShellProps> = ({
 
                     <div
                         onClick={onShowCharsPanel}
-                        className={`flex ${extraAction ? 'w-[calc(100%-11rem)]' : 'w-[calc(100%-7rem)]'} max-w-[420px] cursor-pointer items-end justify-center`}
+                        className={`flex ${showTrigger ? (extraAction ? 'w-[calc(100%-11rem)]' : 'w-[calc(100%-7rem)]') : (extraAction ? 'w-[calc(100%-7rem)]' : 'w-[calc(100%-3.5rem)]')} max-w-[420px] cursor-pointer items-end justify-center`}
                     >
                         {renderCenteredInfo()}
                     </div>
 
-                    <button onClick={onTriggerAI} className={`sully-chat-trigger absolute right-0 bottom-2 p-2 ${actionButtonClass}`} title={triggerIcon === 'stop' ? '停止生成' : '触发 AI'}>
-                        {triggerIconNode}
-                    </button>
+                    {showTrigger && (
+                        <button onClick={onTriggerAI} className={`sully-chat-trigger absolute right-0 bottom-2 p-2 ${actionButtonClass}`} title={triggerIcon === 'stop' ? '停止生成' : '触发 AI'}>
+                            {triggerIconNode}
+                        </button>
+                    )}
                     {extraAction && (
-                        <button onClick={extraAction.onClick} className={`absolute right-10 bottom-2 p-2 ${iconButtonClass}`} title={extraAction.label} aria-label={extraAction.label}>
+                        <button onClick={extraAction.onClick} className={`absolute ${showTrigger ? 'right-10' : 'right-0'} bottom-2 p-2 ${iconButtonClass}`} title={extraAction.label} aria-label={extraAction.label}>
                             {extraAction.icon}
                         </button>
                     )}
@@ -453,9 +458,11 @@ const ChatHeaderShell: React.FC<ChatHeaderShellProps> = ({
                             {extraAction.icon}
                         </button>
                     )}
-                    <button onClick={onTriggerAI} className={`sully-chat-trigger p-2 ${extraAction ? '' : 'ml-auto'} ${actionButtonClass}`} title={triggerIcon === 'stop' ? '停止生成' : '触发 AI'}>
-                        {triggerIconNode}
-                    </button>
+                    {showTrigger && (
+                        <button onClick={onTriggerAI} className={`sully-chat-trigger p-2 ${extraAction ? '' : 'ml-auto'} ${actionButtonClass}`} title={triggerIcon === 'stop' ? '停止生成' : '触发 AI'}>
+                            {triggerIconNode}
+                        </button>
+                    )}
                 </div>
             )}
 

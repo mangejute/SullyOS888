@@ -16,6 +16,8 @@ interface ChatInputAreaProps {
     showPanel: 'none' | 'actions' | 'emojis' | 'chars';
     setShowPanel: (v: 'none' | 'actions' | 'emojis' | 'chars') => void;
     onSend: () => void;
+    /** 键盘回车可保留为普通发送；不传时与屏幕发送按钮保持同一行为。 */
+    onKeyboardSend?: () => void;
     onDeleteSelected: () => void;
     onForwardSelected?: () => void;
     selectedCount: number;
@@ -63,7 +65,7 @@ interface ChatInputAreaProps {
 
 const ChatInputArea: React.FC<ChatInputAreaProps> = ({
     input, setInput, isTyping, selectionMode,
-    showPanel, setShowPanel, onSend, onDeleteSelected, onForwardSelected, selectedCount,
+    showPanel, setShowPanel, onSend, onKeyboardSend = onSend, onDeleteSelected, onForwardSelected, selectedCount,
     emojis, characters = [], activeCharacterId = '', onCharSelect = () => {},
     unreadMessages = {},
     customThemes = [], onUpdateTheme = () => {}, onRemoveTheme = () => {}, activeThemeId = '',
@@ -114,7 +116,7 @@ const ChatInputArea: React.FC<ChatInputAreaProps> = ({
     const handleKeyDown = (e: React.KeyboardEvent) => {
         if (e.key === 'Enter' && !e.shiftKey) {
             e.preventDefault();
-            onSend();
+            onKeyboardSend();
         }
     };
 

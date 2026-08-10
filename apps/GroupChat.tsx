@@ -778,7 +778,7 @@ const GroupChat: React.FC = () => {
 
     // --- Logic: Messaging ---
 
-    const handleSendMessage = async (content: string, type: MessageType = 'text', metadata?: any) => {
+    const handleSendMessage = async (content: string, type: MessageType = 'text', metadata?: any, triggerReply = false) => {
         if (!activeGroup) return;
         if (type === 'text' && !content.trim()) return;
         // 借用户"发送"手势解锁音频上下文（移动端自动播放策略），稍后 AI 回复时提示音才响得了
@@ -815,7 +815,10 @@ const GroupChat: React.FC = () => {
         }
         setInput('');
 
-        // NOTE: No auto-trigger. User must click lightning button.
+        // 小雨手机：点输入栏发送会立刻触发群聊 AI；键盘回车仍只发送消息。
+        if (triggerReply && type === 'text' && !isTyping) {
+            void triggerGroupAI();
+        }
     };
 
     const handleImageFile = async (file: File) => {
@@ -1600,7 +1603,7 @@ ${memberTimeline || '(暂无互动记录)'}
                     icon: <Question className="w-5 h-5" weight="bold" />,
                     onClick: () => setModalType('help'),
                 }}
-                triggerIcon={isTyping ? 'stop' : 'lightning'}
+                showTrigger={false}
                 onClose={() => setView('list')}
                 onTriggerAI={() => triggerGroupAI(messages)}
                 onShowCharsPanel={openGroupSettings}
@@ -1681,7 +1684,8 @@ ${memberTimeline || '(暂无互动记录)'}
                 selectionMode={selectionMode}
                 showPanel={showPanel}
                 setShowPanel={setShowPanel}
-                onSend={() => handleSendMessage(input)}
+                onSend={() => handleSendMessage(input, 'text', undefined, true)}
+                onKeyboardSend={() => handleSendMessage(input)}
                 onDeleteSelected={deleteSelectedMessages}
                 selectedCount={selectedMsgIds.size}
                 emojis={filteredEmojis}

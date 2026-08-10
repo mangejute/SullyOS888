@@ -1068,7 +1068,7 @@ const Chat: React.FC = () => {
 
     // --- Actions ---
 
-    const handleSendText = async (customContent?: string, customType?: MessageType, metadata?: any) => {
+    const handleSendText = async (customContent?: string, customType?: MessageType, metadata?: any, triggerReply = false) => {
         if (!char || (!input.trim() && !customContent)) return;
         // 只累加内存里的计数，这里不发任何请求；页面切走时才按区间报一次。见 utils/analytics.ts
         noteMessageSent();
@@ -1275,14 +1275,13 @@ const Chat: React.FC = () => {
         await reloadMessages(visibleCountRef.current);
         setShowPanel('none');
 
-        // Instant Push 模式：发完文本自动触发 AI（响应在 worker 端跑、后台 push 回写聊天页）。
-        // 本地模式仍维持手动触发以保留现有 UX。triggerAI 内部会从 DB 拉完整历史，
-        // 闭包里的 messages 还没包含刚写入的 user msg 也没关系。
-        // 仅文本消息触发；image / xhs_card 等卡片消息不触发，与本地手动行为对齐。
-        // autoTriggerOnSend gate：instant ready 也只在用户显式开启"发送后自动触发"时才自动回复，
-        // 否则保留手动 ⚡（避免"启用 instant = 自动回复"的反直觉强绑定）。
+        // 私聊的屏幕发送按钮会明确请求 AI 回复；键盘回车仍只发送。
+        // triggerAI 内部从 DB 读取完整历史，因此这里的 messages 闭包尚未包含新消息也没关系。
+        // 仅文本消息触发；图片和各类卡片消息仍只保存，避免改变现有附加内容的行为。
         const instantCfg = loadInstantConfig();
-        if (type === 'text' && isInstantConfigReady(instantCfg) && instantCfg.autoTriggerOnSend) {
+        const shouldTriggerReply = type === 'text'
+            && (triggerReply || (isInstantConfigReady(instantCfg) && instantCfg.autoTriggerOnSend));
+        if (shouldTriggerReply) {
             // 上一轮还在跑时直接跳过：triggerAI 内部会因 isTyping=true 静默 reject，
             // 提前 guard 避免点亮"准备中"指示灯后没人来清，UI 灯被卡住。
             if (isTyping) return;
@@ -2805,7 +2804,9 @@ const Chat: React.FC = () => {
     }), [emojis, activeCategory, hiddenCategoryIds]);
 
     // Memoize ChatInputArea callbacks
-    const handleSendCallback = useCallback(() => handleSendText(), [char, input, replyTarget]);
+    // 小雨手机：点输入栏发送 = 发给 AI 并请求回复；键盘回车仍只保存并发送消息。
+    const handleSendCallback = useCallback(() => handleSendText(undefined, undefined, undefined, true), [char, input, replyTarget]);
+    const handleKeyboardSendCallback = useCallback(() => handleSendText(), [char, input, replyTarget]);
     const handleCharSelectCallback = useCallback((id: string) => { setActiveCharacterId(id); setShowPanel('none'); }, []);
     // 兜底：正常情况下 OSContext 启动时一定会保底一个角色，char 不该为空。
     // 但若 init 期间某个 store 读取失败（数据其实还在 IndexedDB 里），characters 可能暂时为空，
@@ -3205,7 +3206,8 @@ const Chat: React.FC = () => {
                 lastTokenUsage={lastTokenUsage}
                 tokenBreakdown={tokenBreakdown}
                 onClose={closeApp}
-                onTriggerAI={handleManualTrigger}
+                 onTriggerAI={handleManualTrigger}
+                 showTrigger={false}
                 onShowCharsPanel={() => setShowPanel('chars')}
                 onDeleteBuff={(buffId) => {
                     const currentBuffs = char.activeBuffs || [];
@@ -3631,6 +3633,7 @@ const Chat: React.FC = () => {
                     isTyping={isTyping} selectionMode={selectionMode}
                     showPanel={showPanel} setShowPanel={setShowPanel}
                     onSend={handleSendCallback}
+                    onKeyboardSend={handleKeyboardSendCallback}
                     onDeleteSelected={handleBatchDelete}
                     onForwardSelected={handleForwardSelected}
                     selectedCount={selectedMsgIds.size + Array.from(selectedThinkingMsgIds).filter(id => !selectedMsgIds.has(id)).length}
