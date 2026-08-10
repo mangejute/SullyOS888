@@ -13,6 +13,7 @@ import McdCard from './McdCard';
 import HtmlCard from './HtmlCard';
 import LuckinCard from './LuckinCard';
 import LuckinCheckoutCard from './LuckinCheckoutCard';
+import { ArrowClockwise } from '@phosphor-icons/react';
 
 // 思考链卡片支持的 12 种风格预设 — 同时被 MessageItem 与 ThinkingChainSettingsModal 复用
 export type ThinkingChainStyleId = 'echo' | 'whisper' | 'minimal' | 'ink' | 'neon' | 'terminal' | 'stellar' | 'tama' | 'pixel' | 'muji' | 'ins' | 'custom';
@@ -3285,24 +3286,36 @@ const MessageItem = React.memo(({
         const imageGeneration = (m.metadata as any)?.imageGeneration || {};
         const status = imageGeneration.status as 'pending' | 'success' | 'failed' | undefined;
         const description = imageGeneration.description || imageGeneration.prompt || '';
+        const wasSafetyBlocked = /安全|safety|policy|moderation|无法用于生成图像/i.test(String(imageGeneration.error || ''));
         return commonLayout(
             <div className="relative group">
                 {m.content ? (
-                    <button type="button" className="block text-left" onClick={() => setImagePreviewOpen(true)}>
-                        <img src={m.content} className="max-w-[200px] max-h-[300px] rounded-2xl object-contain" alt="角色生成的图片" loading="lazy" decoding="async" />
+                    <button type="button" className="block w-[224px] rounded-sm bg-white p-1.5 text-left shadow-[0_5px_16px_rgba(15,23,42,0.16)] active:scale-[0.98]" onClick={() => setImagePreviewOpen(true)}>
+                        <img src={m.content} className="h-[250px] w-full object-cover" alt="角色生成的图片" loading="lazy" decoding="async" />
+                        <div className="min-h-[42px] px-2 pt-2 text-[11px] leading-relaxed text-slate-500 line-clamp-2">{description || '角色发送了一张照片'}</div>
                     </button>
                 ) : status === 'pending' ? (
-                    <div className="px-5 py-8 rounded-2xl bg-slate-100 text-slate-500 text-xs text-center min-w-[160px] animate-pulse">图片生成中…</div>
+                    <div className="w-[224px] rounded-sm bg-white p-1.5 shadow-[0_5px_16px_rgba(15,23,42,0.14)]">
+                        <div className="flex h-[250px] flex-col items-center justify-center bg-slate-100 text-center text-slate-400">
+                            <div className="mb-2 h-7 w-7 animate-spin rounded-full border-2 border-slate-300 border-t-slate-500" />
+                            <span className="text-xs">照片生成中</span>
+                        </div>
+                        <div className="min-h-[42px] px-2 pt-2 text-[11px] leading-relaxed text-slate-500 line-clamp-2">{description}</div>
+                    </div>
                 ) : status === 'failed' ? (
-                    <div className="relative px-5 py-8 rounded-2xl bg-red-50 text-red-500 text-xs text-center min-w-[160px]">
-                        <div>图片生成失败</div>
-                        {imageGeneration.error && <div className="mt-1 max-w-[180px] break-words text-[10px] text-red-400">{imageGeneration.error}</div>}
-                        <button type="button" className="mt-3 px-3 py-1 rounded-full bg-white border border-red-200 text-red-500" onClick={() => onRetryImageGeneration?.(m)}>重新生成</button>
+                    <div className="relative w-[224px] rounded-sm bg-white p-1.5 shadow-[0_5px_16px_rgba(15,23,42,0.14)]">
+                        <button type="button" aria-label="重新生成图片" title="重新生成图片" className="absolute right-3 top-3 z-10 flex h-7 w-7 items-center justify-center rounded-full bg-white text-slate-600 shadow-sm" onClick={() => onRetryImageGeneration?.(m)}><ArrowClockwise size={15} weight="bold" /></button>
+                        <div className="flex h-[250px] flex-col items-center justify-center bg-rose-50 px-5 text-center">
+                            <span className="text-sm text-rose-500">照片生成失败</span>
+                            <span className="mt-2 text-[11px] leading-relaxed text-rose-400">{wasSafetyBlocked ? '这段描述被生图服务拦截了。换成更日常、非裸露的描述后可重新生成。' : '生图服务暂时没有生成成功，点右上角按钮重试。'}</span>
+                        </div>
+                        <div className="min-h-[42px] px-2 pt-2 text-[11px] leading-relaxed text-slate-500 line-clamp-2">{description}</div>
                     </div>
                 ) : (
-                    <div className="px-4 py-6 rounded-2xl bg-slate-100 text-slate-400 text-xs italic text-center min-w-[120px]">[图片已丢失]</div>
+                    <div className="w-[224px] rounded-sm bg-white p-1.5 shadow-[0_5px_16px_rgba(15,23,42,0.14)]">
+                        <div className="flex h-[250px] items-center justify-center bg-slate-100 text-xs italic text-slate-400">[图片已丢失]</div>
+                    </div>
                 )}
-                {description && <div className="mt-2 max-w-[240px] whitespace-pre-wrap text-xs text-slate-500">{description}</div>}
                 {imagePreviewOpen && m.content && (
                     <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/70 p-4" onClick={() => setImagePreviewOpen(false)}>
                         <div className="max-h-full max-w-full overflow-auto text-center" onClick={e => e.stopPropagation()}>
