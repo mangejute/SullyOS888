@@ -86,9 +86,14 @@ export const showCharacterNotification = async (args: {
     charName: string;
     body: string;
     avatar?: string;
-}): Promise<void> => {
-    if (!isBrowserNotificationsEnabled() || getBrowserNotificationPermission() !== 'granted') return;
+    /** 每条角色消息的稳定身份；不传时自动生成，确保通知不会互相覆盖。 */
+    notificationId?: string | number;
+}): Promise<boolean> => {
+    if (!isBrowserNotificationsEnabled() || getBrowserNotificationPermission() !== 'granted') return false;
     const icon = args.avatar || './icons/icon-192.png';
+    // Notification 的 tag 相同会让浏览器用后一条替换前一条。角色一轮可能有多条气泡，
+    // 因此必须按消息而非按角色区分 tag，才能做到「发一条，弹一条」。
+    const tagSuffix = args.notificationId ?? `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
     try {
         if ('serviceWorker' in navigator) {
             const registration = await navigator.serviceWorker.ready;
@@ -96,13 +101,16 @@ export const showCharacterNotification = async (args: {
                 body: args.body,
                 icon,
                 badge: './icons/icon-192.png',
-                tag: `character-${args.charId}`,
+                tag: `character-${args.charId}-${tagSuffix}`,
+                renotify: true,
                 data: { charId: args.charId },
             });
-            return;
+            return true;
         }
         const notification = new Notification(args.charName, { body: args.body, icon });
         notification.onclick = () => window.focus();
-    } catch { /* browser notification unavailable */ }
+        return true;
+    } catch {
+        return false;
+    }
 };
-

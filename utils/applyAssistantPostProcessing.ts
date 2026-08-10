@@ -309,6 +309,8 @@ export interface PostProcessMusicHooks {
 export interface PostProcessHooks {
     setMessages: (msgs: Message[]) => void;
     addToast: (msg: string, type: 'info' | 'success' | 'error') => void;
+    /** 一条可显示的角色文字气泡落库后回调，用于后台逐条通知等会话外能力。 */
+    onAssistantTextPersisted?: (message: { id: number; content: string }) => void;
     setRecallStatus?: (s: string) => void;
     setSearchStatus?: (s: string) => void;
     setDiaryStatus?: (s: string) => void;
@@ -424,8 +426,13 @@ export async function applyAssistantPostProcessing(
     // 统一落库入口：ctx.messageTimestamp（若有）盖到每条消息上，保证同一轮拆出的
     // 正文 / 表情 / 卡片 / 系统提示时间戳一致；没传则维持 DB.saveMessage 默认（写库当刻）。
     // 全函数落库一律走这里，别直接调 DB.saveMessage——漏一处就会出现气泡时间戳互相打架。
-    const persistMessage: typeof DB.saveMessage = (msg) =>
-        DB.saveMessage(messageTimestamp != null ? { ...msg, timestamp: messageTimestamp } : msg);
+    const persistMessage: typeof DB.saveMessage = async (msg) => {
+        const id = await DB.saveMessage(messageTimestamp != null ? { ...msg, timestamp: messageTimestamp } : msg);
+        if (msg.role === 'assistant' && msg.type === 'text' && typeof msg.content === 'string' && msg.content.trim()) {
+            hooks.onAssistantTextPersisted?.({ id, content: msg.content });
+        }
+        return id;
+    };
     const {
         setMessages,
         addToast,

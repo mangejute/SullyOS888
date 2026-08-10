@@ -22,6 +22,8 @@ export const CHAT_GEN_EVENTS = {
     replyEnd: 'chat-gen-reply-end',
     /** 本地 fetch 路径：回复已全部落库（后处理管线跑完）。instant 路径不发——它走 'active-msg-received' */
     replyArrived: 'chat-gen-reply-arrived',
+    /** 本地 fetch 路径：一条角色文字气泡刚落库，用于后台逐条通知。 */
+    assistantTextArrived: 'chat-gen-assistant-text-arrived',
     /** 情绪评估开始（本地 eval / post-push eval / 主动消息 eval / 上云点灯） */
     emotionStart: 'chat-gen-emotion-start',
     /** 情绪评估结束（本地路径自己派发；上云路径由下面的 emotionDone 接） */
@@ -54,6 +56,9 @@ export interface ChatGenDetail {
      * 交给自己那台 worker 的即时对话可以跑满十分钟。横幅这边猜不出来，也不该猜。
      */
     ttlMs?: number;
+    /** assistantTextArrived 专用：该气泡的本地消息 id 与正文。 */
+    messageId?: number;
+    body?: string;
 }
 
 export function announceChatGen(event: string, detail: ChatGenDetail): void {

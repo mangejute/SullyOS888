@@ -35,7 +35,7 @@ import { getBackupReminderState, setBackupReminderIntervalDays, daysSinceLastBac
 import { bucketRetryCount, isAnalyticsConfigured, isAnalyticsEnabled, setAnalyticsEnabled, trackEvent } from '../utils/analytics';
 import { normalizeApiBaseUrl, normalizeApiCredential, normalizeApiModel } from '../utils/apiConfigNormalize';
 import { describeImageWithVisionApi, VISION_API_TEST_IMAGE_DATA_URL, visionApiConfigFromPreset } from '../utils/visionApi';
-import { getBrowserNotificationPermission, isBackgroundKeepAliveEnabled, isBrowserNotificationsEnabled, requestBrowserNotifications, setBackgroundKeepAlive, setBrowserNotificationsEnabled } from '../utils/browserFeatures';
+import { getBrowserNotificationPermission, isBackgroundKeepAliveEnabled, isBrowserNotificationsEnabled, requestBrowserNotifications, setBackgroundKeepAlive, setBrowserNotificationsEnabled, showCharacterNotification } from '../utils/browserFeatures';
 
 // hot_news（news.orz.ai）可选热榜平台。key 必须与 API 的 ?platform= 完全一致。
 const HOTNEWS_PLATFORM_OPTIONS: { key: string; label: string }[] = [
@@ -521,6 +521,7 @@ const Settings: React.FC = () => {
   const [keepAliveEnabled, setKeepAliveEnabled] = useState(() => isBackgroundKeepAliveEnabled());
   const [browserNotificationsEnabled, setBrowserNotificationsEnabledState] = useState(() => isBrowserNotificationsEnabled());
   const [notificationPermission, setNotificationPermission] = useState<NotificationPermission | 'unsupported'>(() => getBrowserNotificationPermission());
+  const [testingBrowserNotification, setTestingBrowserNotification] = useState(false);
 
   const handleKeepAliveChange = async (enabled: boolean) => {
       setKeepAliveEnabled(enabled);
@@ -553,6 +554,25 @@ const Settings: React.FC = () => {
   const handleBrowserNotificationsOff = () => {
       setBrowserNotificationsEnabled(false);
       setBrowserNotificationsEnabledState(false);
+  };
+
+  const handleBrowserNotificationTest = async () => {
+      if (notificationPermission !== 'granted' || !browserNotificationsEnabled) {
+          addToast('请先开启浏览器消息通知并允许浏览器授权', 'error');
+          return;
+      }
+      setTestingBrowserNotification(true);
+      try {
+          const shown = await showCharacterNotification({
+              charId: 'sully-notification-test',
+              charName: '小雨手机',
+              body: '这是一条测试通知。',
+              notificationId: `test-${Date.now()}`,
+          });
+          addToast(shown ? '测试通知已发出，请查看系统通知栏' : '测试通知没有发出，请检查浏览器通知权限', shown ? 'success' : 'error');
+      } finally {
+          setTestingBrowserNotification(false);
+      }
   };
 
   // Cloud backup local config state (WebDAV)
@@ -1808,7 +1828,17 @@ const Settings: React.FC = () => {
                     />
                     <span className="w-10 h-6 bg-slate-200 rounded-full relative transition-colors peer-checked:bg-sky-500 after:content-[''] after:absolute after:w-4 after:h-4 after:bg-white after:rounded-full after:left-1 after:top-1 after:transition-transform peer-checked:after:translate-x-4" />
                 </label>
-                <p className="px-1 text-[10px] text-slate-400 leading-relaxed">首次开启会弹出浏览器授权。正式部署需要 HTTPS；本机预览的 localhost 可以正常授权。</p>
+                <div className="flex items-center justify-between gap-3 px-1">
+                    <p className="text-[10px] text-slate-400 leading-relaxed">首次开启会弹出浏览器授权。正式部署需要 HTTPS；本机预览的 localhost 可以正常授权。</p>
+                    <button
+                        type="button"
+                        onClick={() => { void handleBrowserNotificationTest(); }}
+                        disabled={testingBrowserNotification}
+                        className="shrink-0 rounded-lg border border-sky-200 bg-white px-2.5 py-1.5 text-[10px] font-semibold text-sky-600 disabled:opacity-50 active:scale-95"
+                    >
+                        {testingBrowserNotification ? '发送中…' : '测试通知'}
+                    </button>
+                </div>
             </div>
         </SettingsSection>
 

@@ -74,7 +74,7 @@ import { exportMcdLocal } from '../utils/mcdMcpClient';
 import { exportMcpLocal } from '../utils/mcpClient';
 import { exportDesktopSkinLocal } from '../utils/desktopSkinBackup';
 import { assertSupportedSullyBackup } from '../utils/backupImportPolicy';
-import { isBrowserNotificationsEnabled, showCharacterNotification } from '../utils/browserFeatures';
+import { showCharacterNotification } from '../utils/browserFeatures';
 
 interface ProactiveQueueEntry {
   charId: string;
@@ -1744,19 +1744,24 @@ export const OSProvider: React.FC<{ children: React.ReactNode }> = ({ children }
                       // Use refs for latest state (avoids stale closure & unnecessary deps)
                       const isChattingWithThisChar = activeAppRef.current === AppID.Chat && activeCharIdScheduleRef.current === char.id;
 
-                      // If not chatting specifically with this char right now, mark as unread
-                      if (!isChattingWithThisChar) {
-                          addToast(`${char.name} 发来了一条消息`, 'success');
+                      // 只有用户正看着这一个会话时才算已读；退到后台后即使 Chat 仍停在
+                      // 这个角色，也要记未读并允许系统通知。
+                      const isViewingThisChat = isChattingWithThisChar && document.visibilityState === 'visible';
+                      if (!isViewingThisChat) {
+                          if (document.visibilityState === 'visible') addToast(`${char.name} 发来了一条消息`, 'success');
                           unreadUpdates[char.id] = dueMessages.length;
 
-                          // Web Notification
+                          // 每条到点消息各发一条通知，不能只取本轮第一条。
                           if (!Capacitor.isNativePlatform()) {
-                              void showCharacterNotification({
-                                  charId: char.id,
-                                  charName: char.name,
-                                  body: dueMessages[0].content,
-                                  avatar: char.avatar,
-                              });
+                              for (const msg of dueMessages) {
+                                  void showCharacterNotification({
+                                      charId: char.id,
+                                      charName: char.name,
+                                      body: msg.content,
+                                      avatar: char.avatar,
+                                      notificationId: `scheduled-${msg.id}`,
+                                  });
+                              }
                           }
                       }
                   }
@@ -1798,8 +1803,10 @@ export const OSProvider: React.FC<{ children: React.ReactNode }> = ({ children }
           // Always bump timestamp so Chat reloads messages if currently open
           setLastMsgTimestamp(Date.now());
 
-          const isChattingWithThisChar = activeAppRef.current === AppID.Chat && activeCharIdScheduleRef.current === charId;
-          if (!isChattingWithThisChar) {
+          const isViewingThisChat = activeAppRef.current === AppID.Chat
+              && activeCharIdScheduleRef.current === charId
+              && document.visibilityState === 'visible';
+          if (!isViewingThisChat) {
               const isVisible = document.visibilityState === 'visible';
               if (isVisible) {
                   addToast(`${charName} 主动发来了消息`, 'success');
@@ -1815,7 +1822,10 @@ export const OSProvider: React.FC<{ children: React.ReactNode }> = ({ children }
               // 静默失败，必须走 SW registration 才稳定。
               if (!Capacitor.isNativePlatform()) {
                   const char = characters.find(c => c.id === charId);
-                  void showCharacterNotification({ charId, charName, body: preview, avatar: char?.avatar });
+                  void showCharacterNotification({
+                      charId, charName, body: preview, avatar: char?.avatar,
+                      notificationId: `proactive-${Date.now()}`,
+                  });
               }
           }
       };
@@ -1845,8 +1855,10 @@ export const OSProvider: React.FC<{ children: React.ReactNode }> = ({ children }
           const { charId, charName, body } = (e as CustomEvent).detail as { charId: string; charName: string; body?: string };
           setLastMsgTimestamp(Date.now());
 
-          const isChattingWithThisChar = activeAppRef.current === AppID.Chat && activeCharIdScheduleRef.current === charId;
-          if (!isChattingWithThisChar) {
+          const isViewingThisChat = activeAppRef.current === AppID.Chat
+              && activeCharIdScheduleRef.current === charId
+              && document.visibilityState === 'visible';
+          if (!isViewingThisChat) {
               const isVisible = document.visibilityState === 'visible';
               if (isVisible) {
                   addToast(`${charName} 给你发了消息`, 'success');
@@ -1934,32 +1946,37 @@ export const OSProvider: React.FC<{ children: React.ReactNode }> = ({ children }
       };
 
       // 本地 fetch 聊天回复的全局回落：triggerAI 的异步闭包在 Chat 卸载后继续跑完
-      // 并落库，但它捕获的 setMessages 指向已卸载的实例。这里是它跟当前 UI 的唯一桥：
-      //   - replyArrived（后处理管线全部落库后）→ bump lastMsgTimestamp 让当前挂载的
-      //     Chat 重新 reloadMessages；用户不在该会话时补未读 + toast——与 instant push
-      //     的 'active-msg-received' 行为对齐。
+      // 并落库，但它捕获的 setMessages 指向已卸载的实例。每条文字气泡落库时立即
+      // 更新未读和通知；整轮结束事件只负责最后一次界面刷新。
       //   - replyEnd（finally，含失败路径）→ 只 bump 时间戳，把 catch 里落库的
       //     错误系统消息也刷出来。
-      const chatReplyArrivedHandler = (e: Event) => {
-          const { charId, charName } = ((e as CustomEvent).detail || {}) as { charId?: string; charName?: string };
-          if (!charId) return;
+      const chatAssistantTextArrivedHandler = (e: Event) => {
+          const { charId, charName, messageId, body } = ((e as CustomEvent).detail || {}) as {
+              charId?: string; charName?: string; messageId?: number; body?: string;
+          };
+          if (!charId || !Number.isFinite(messageId) || !body?.trim()) return;
           setLastMsgTimestamp(Date.now());
-          const isChattingWithThisChar = activeAppRef.current === AppID.Chat && activeCharIdScheduleRef.current === charId;
-          if (!isChattingWithThisChar) {
-              setUnreadMessages(prev => ({ ...prev, [charId]: (prev[charId] || 0) + 1 }));
-              if (document.visibilityState === 'visible') {
-                  addToast(`${charName || '角色'} 回复了消息`, 'success');
-              }
-              void (async () => {
-                  if (!isBrowserNotificationsEnabled() || document.visibilityState === 'visible') return;
-                  const latest = await DB.getRecentMessagesByCharId(charId, 20, true);
-                  const reply = [...latest].reverse().find(message => message.role === 'assistant');
-                  if (!reply) return;
-                  const body = reply.content.replace(/\s+/g, ' ').trim().slice(0, 240) || '发来了一条新消息';
-                  const character = characters.find(item => item.id === charId);
-                  await showCharacterNotification({ charId, charName: charName || character?.name || '角色', body, avatar: character?.avatar });
-              })().catch(() => { /* notification lookup failed */ });
+          const isViewingThisChat = activeAppRef.current === AppID.Chat
+              && activeCharIdScheduleRef.current === charId
+              && document.visibilityState === 'visible';
+          if (isViewingThisChat) return;
+
+          setUnreadMessages(prev => ({ ...prev, [charId]: (prev[charId] || 0) + 1 }));
+          if (document.visibilityState === 'visible') addToast(`${charName || '角色'} 回复了消息`, 'success');
+          if (!Capacitor.isNativePlatform()) {
+              const character = characters.find(item => item.id === charId);
+              void showCharacterNotification({
+                  charId,
+                  charName: charName || character?.name || '角色',
+                  body: body.replace(/\s+/g, ' ').trim().slice(0, 240) || '发来了一条新消息',
+                  avatar: character?.avatar,
+                  notificationId: `message-${messageId}`,
+              });
           }
+      };
+
+      const chatReplyArrivedHandler = () => {
+          setLastMsgTimestamp(Date.now());
       };
       const chatReplyEndHandler = () => {
           setLastMsgTimestamp(Date.now());
@@ -2004,6 +2021,7 @@ export const OSProvider: React.FC<{ children: React.ReactNode }> = ({ children }
       window.addEventListener('active-msg-progress', progressHandler);
       window.addEventListener('active-msg-open', openHandler);
       window.addEventListener('emotion-updated', buffSyncHandler);
+      window.addEventListener(CHAT_GEN_EVENTS.assistantTextArrived, chatAssistantTextArrivedHandler);
       window.addEventListener(CHAT_GEN_EVENTS.replyArrived, chatReplyArrivedHandler);
       window.addEventListener(CHAT_GEN_EVENTS.replyEnd, chatReplyEndHandler);
       window.addEventListener(CHAT_GEN_EVENTS.emotionFailed, emotionFailHandler);
@@ -2014,6 +2032,7 @@ export const OSProvider: React.FC<{ children: React.ReactNode }> = ({ children }
           window.removeEventListener('active-msg-progress', progressHandler);
           window.removeEventListener('active-msg-open', openHandler);
           window.removeEventListener('emotion-updated', buffSyncHandler);
+          window.removeEventListener(CHAT_GEN_EVENTS.assistantTextArrived, chatAssistantTextArrivedHandler);
           window.removeEventListener(CHAT_GEN_EVENTS.replyArrived, chatReplyArrivedHandler);
           window.removeEventListener(CHAT_GEN_EVENTS.replyEnd, chatReplyEndHandler);
           window.removeEventListener(CHAT_GEN_EVENTS.emotionFailed, emotionFailHandler);
