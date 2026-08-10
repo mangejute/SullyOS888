@@ -459,6 +459,7 @@ const Settings: React.FC = () => {
   const [localImageGenKey, setLocalImageGenKey] = useState(apiConfig.imageGenerationApi?.apiKey || '');
   const [localImageGenModel, setLocalImageGenModel] = useState(apiConfig.imageGenerationApi?.model || '');
   const [localImageGenPrompt, setLocalImageGenPrompt] = useState(apiConfig.imageGenerationApi?.prompt || '');
+  const [availableImageGenModels, setAvailableImageGenModels] = useState<string[]>([]);
   const [availableVisionModels, setAvailableVisionModels] = useState<string[]>(readStoredVisionModels);
   const [selectedVisionPresetId, setSelectedVisionPresetId] = useState<string | null>(null);
   const [visionStatusMsg, setVisionStatusMsg] = useState('');
@@ -1123,6 +1124,11 @@ const Settings: React.FC = () => {
         const text = await response.text().catch(() => '');
         throw new Error(`HTTP ${response.status}${text ? `：${text.slice(0, 80)}` : ''}`);
       }
+      const payload = await response.clone().json().catch(() => null);
+      const models = Array.isArray(payload?.data)
+        ? payload.data.map((item: any) => typeof item === 'string' ? item : item?.id).filter((id: any): id is string => !!id)
+        : [];
+      if (models.length) setAvailableImageGenModels([...new Set(models)]);
       setImageGenTestResult(`✅ 连接成功，模型「${model}」可用`);
       trackEvent('测试生图 API', { result: '成功' });
     } catch (error: any) {
@@ -2509,7 +2515,8 @@ const Settings: React.FC = () => {
                 </div>
                 <div>
                     <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1.5 block pl-1">模型</label>
-                    <input type="text" value={localImageGenModel} onChange={e => { setLocalImageGenModel(e.target.value); setImageGenTestResult(null); }} placeholder="例如 dall-e-3 / flux" className="w-full bg-white/60 border border-slate-200/60 rounded-xl px-4 py-2.5 text-sm font-mono focus:bg-white transition-all" />
+                    <input list="image-generation-models" type="text" value={localImageGenModel} onChange={e => { setLocalImageGenModel(e.target.value); setImageGenTestResult(null); }} placeholder="例如 dall-e-3 / flux" className="w-full bg-white/60 border border-slate-200/60 rounded-xl px-4 py-2.5 text-sm font-mono focus:bg-white transition-all" />
+                    <datalist id="image-generation-models">{availableImageGenModels.map(model => <option key={model} value={model} />)}</datalist>
                 </div>
                 <div>
                     <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1.5 block pl-1">生图提示词</label>

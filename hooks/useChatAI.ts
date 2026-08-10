@@ -1959,6 +1959,7 @@ export const useChatAI = ({
                     headers,
                     effectiveApi,
                 },
+                imageGenerationApi: apiConfig.imageGenerationApi,
                 hooks: {
                     setMessages: setMessagesWithPreviewHandover,
                     addToast,

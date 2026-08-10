@@ -1414,6 +1414,8 @@ interface MessageItemProps {
     onResolveLifeRecord?: (m: Message, action: 'confirmed' | 'rejected') => void;
     /** 点击家园生活卡，进入家园应用。 */
     onOpenWorldHome?: () => void;
+    /** 生图失败时重新生成。 */
+    onRetryImageGeneration?: (msg: Message) => void;
     /** 思考链卡片视觉与交互 */
     thinkingChainOptions?: {
         styleId?: ThinkingChainStyleId;
@@ -1461,6 +1463,7 @@ const MessageItem = React.memo(({
     onResolveTransfer,
     onResolveLifeRecord,
     onOpenWorldHome,
+    onRetryImageGeneration,
     thinkingChainOptions,
 }: MessageItemProps) => {
     const isUser = m.role === 'user';
@@ -1481,6 +1484,7 @@ const MessageItem = React.memo(({
     const activePointerType = useRef<string>('');
     const replyGestureActiveRef = useRef(false);
     const replyReadyRef = useRef(false);
+    const [imagePreviewOpen, setImagePreviewOpen] = useState(false);
 
     const styleConfig = isUser ? activeTheme.user : activeTheme.ai;
     const [showVoiceText, setShowVoiceText] = useState(false);
@@ -3278,12 +3282,34 @@ const MessageItem = React.memo(({
     }
 
     if (m.type === 'image') {
+        const imageGeneration = (m.metadata as any)?.imageGeneration || {};
+        const status = imageGeneration.status as 'pending' | 'success' | 'failed' | undefined;
+        const description = imageGeneration.description || imageGeneration.prompt || '';
         return commonLayout(
             <div className="relative group">
                 {m.content ? (
-                    <img src={m.content} className="max-w-[200px] max-h-[300px] rounded-2xl" alt="Uploaded" loading="lazy" decoding="async" />
+                    <button type="button" className="block text-left" onClick={() => setImagePreviewOpen(true)}>
+                        <img src={m.content} className="max-w-[200px] max-h-[300px] rounded-2xl object-contain" alt="角色生成的图片" loading="lazy" decoding="async" />
+                    </button>
+                ) : status === 'pending' ? (
+                    <div className="px-5 py-8 rounded-2xl bg-slate-100 text-slate-500 text-xs text-center min-w-[160px] animate-pulse">图片生成中…</div>
+                ) : status === 'failed' ? (
+                    <div className="relative px-5 py-8 rounded-2xl bg-red-50 text-red-500 text-xs text-center min-w-[160px]">
+                        <div>图片生成失败</div>
+                        {imageGeneration.error && <div className="mt-1 max-w-[180px] break-words text-[10px] text-red-400">{imageGeneration.error}</div>}
+                        <button type="button" className="mt-3 px-3 py-1 rounded-full bg-white border border-red-200 text-red-500" onClick={() => onRetryImageGeneration?.(m)}>重新生成</button>
+                    </div>
                 ) : (
                     <div className="px-4 py-6 rounded-2xl bg-slate-100 text-slate-400 text-xs italic text-center min-w-[120px]">[图片已丢失]</div>
+                )}
+                {description && <div className="mt-2 max-w-[240px] whitespace-pre-wrap text-xs text-slate-500">{description}</div>}
+                {imagePreviewOpen && m.content && (
+                    <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/70 p-4" onClick={() => setImagePreviewOpen(false)}>
+                        <div className="max-h-full max-w-full overflow-auto text-center" onClick={e => e.stopPropagation()}>
+                            <img src={m.content} className="mx-auto max-h-[75vh] max-w-[92vw] object-contain" alt="角色生成的大图" />
+                            {description && <div className="mt-3 max-w-[92vw] whitespace-pre-wrap text-left text-sm text-white">{description}</div>}
+                        </div>
+                    </div>
                 )}
             </div>
         );

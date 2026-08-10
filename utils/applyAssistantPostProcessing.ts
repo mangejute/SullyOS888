@@ -25,7 +25,7 @@
  * Phase 2 会让 worker 端把识别出的副作用 (RECALL/SEARCH/...) 结构化传 directives, 这里只重放。
  */
 
-import { CharacterProfile, UserProfile, Message, Emoji, RealtimeConfig } from '../types';
+import { APIConfig, CharacterProfile, UserProfile, Message, Emoji, RealtimeConfig } from '../types';
 import { DB } from './db';
 import { ChatParser, type FrozenMusicSong } from './chatParser';
 import { resolveCharTimeZone } from './timezone';
@@ -49,6 +49,7 @@ import {
 } from './agenticTools';
 import { getLocalDateKey } from './localDate';
 import { normalizeAssistantActionFormatting } from './assistantActionFormat';
+import { extractImageGenerationRequests, startImageGeneration } from './imageGeneration';
 
 // ─── 模块内辅助 ──────────────────────────────────────────────────────────────
 
@@ -351,6 +352,8 @@ export interface PostProcessCtx {
     lastXhsNotesRef?: { current: XhsNote[] };
     /** API 调用配置 */
     api: PostProcessApiCall;
+    /** 独立角色生图 API 配置。 */
+    imageGenerationApi?: APIConfig['imageGenerationApi'];
     /** UI / 业务钩子 */
     hooks: PostProcessHooks;
     /**
@@ -412,6 +415,7 @@ export async function applyAssistantPostProcessing(
         mcdInheritMeta,
         xhsCaches,
         api,
+        imageGenerationApi,
         hooks,
         instantRender,
         skipSecondPassLLM,
@@ -511,6 +515,8 @@ export async function applyAssistantPostProcessing(
     // ─── Step 1: 初次粗洗 ───
     let aiContent = replayedTagPrefix ? `${replayedTagPrefix}${rawAiContent}` : rawAiContent;
     aiContent = normalizeAiContent(aiContent);
+    const imageRequests = extractImageGenerationRequests(aiContent);
+    if (imageRequests.length) aiContent = imageRequests[0].cleanedContent;
     // 在任何 lead-in/二轮渲染之前先剥掉仿卡片文本，防止它被 chunkText 拆成灰色普通气泡。
     const mimickedXhsShares = extractMimickedXhsShares(aiContent);
     aiContent = mimickedXhsShares.cleanedContent;
@@ -2017,6 +2023,26 @@ export async function applyAssistantPostProcessing(
             await renderAndPersist('嗯...', pendingThinkingChain);
         } else {
             setMessages(await DB.getRecentMessagesByCharId(char.id, 200));
+        }
+    }
+
+    // 图片先落一条 pending 消息，再异步请求生图接口，不阻塞本轮文字回复。
+    for (const request of imageRequests) {
+        try {
+            const imageMessageId = await persistMessage({
+                charId: char.id,
+                role: 'assistant',
+                type: 'image',
+                content: '',
+                metadata: {
+                    ...(mcdInheritMeta || {}),
+                    imageGeneration: { status: 'pending', description: request.description, prompt: request.description },
+                },
+            } as any);
+            setMessages(await DB.getRecentMessagesByCharId(char.id, 200));
+            void startImageGeneration(imageMessageId, { api: imageGenerationApi, character: char, description: request.description });
+        } catch (error) {
+            console.error('[image-generation] 保存待生成消息失败', error);
         }
     }
 }

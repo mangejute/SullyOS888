@@ -63,6 +63,7 @@ import { trackEvent, noteMessageSent, presetOrCustom } from '../utils/analytics'
 import { markAmsgStateDirty, markAmsgStateDirtyForAll } from '../utils/amsgStateSync';
 import { AMSG_INSTANT_CHAT_PENDING_EVENT, AMSG_INSTANT_CHAT_PENDING_LS_KEY, getInstantChatPending } from '../utils/amsgInstantChat';
 import { formatAmsgToolTrace } from '../utils/amsgToolTrace';
+import { retryImageGeneration } from '../utils/imageGeneration';
 import {
     CONTEXT_RANGE_POLICY_VERSION,
     computeContextRangeSnapshot,
@@ -2670,6 +2671,11 @@ const Chat: React.FC = () => {
         setModalType('message-options');
     }, []);
 
+    const handleRetryImageGeneration = useCallback((msg: Message) => {
+        if (!char) return;
+        void retryImageGeneration(msg, { api: apiConfig.imageGenerationApi, character: char });
+    }, [char, apiConfig.imageGenerationApi]);
+
     const handleBatchDelete = async () => {
         const msgIdsToDelete = new Set<number>(selectedMsgIds);
         // 思维链单独勾选、但宿主消息没选 -> 只清 metadata.thinkingChain，保留消息
@@ -3548,6 +3554,7 @@ const Chat: React.FC = () => {
                             onResolveTransfer={handleResolveTransfer}
                             onResolveLifeRecord={handleResolveLifeRecord}
                             onOpenWorldHome={() => openApp(AppID.WorldHome)}
+                            onRetryImageGeneration={handleRetryImageGeneration}
                             thinkingChainOptions={thinkingChainOptions}
                         />
                         {showToolTrace && (
