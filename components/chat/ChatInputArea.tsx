@@ -663,41 +663,54 @@ const ChatInputArea: React.FC<ChatInputAreaProps> = ({
                         <>
                             <style>{`
                                 .sully-action-popover .sully-action-list > button {
-                                    min-height: 58px;
+                                    min-height: 34px;
                                     width: 100%;
                                     flex-direction: row !important;
                                     align-items: center !important;
                                     justify-content: flex-start !important;
-                                    gap: 12px !important;
+                                    gap: 8px !important;
                                     border-bottom: 1px solid rgba(60, 60, 67, 0.10);
-                                    padding: 8px 8px !important;
+                                    padding: 3px 6px !important;
                                     color: #3a3a3c !important;
                                 }
                                 .sully-action-popover .sully-action-list > button:last-of-type { border-bottom: 0; }
                                 .sully-action-popover .sully-action-list > button > div,
                                 .sully-action-popover .sully-action-list > button > span:first-child {
-                                    width: 42px !important;
-                                    height: 42px !important;
-                                    flex: 0 0 42px;
+                                    width: 28px !important;
+                                    height: 28px !important;
+                                    flex: 0 0 28px;
                                     background: #f2f2f7 !important;
                                     color: #3a3a3c !important;
                                     border-color: rgba(60, 60, 67, 0.12) !important;
-                                    border-radius: 13px !important;
+                                    border-radius: 9px !important;
                                     box-shadow: none !important;
                                 }
+                                .sully-action-popover .sully-action-list > button > div svg,
+                                .sully-action-popover .sully-action-list > button > span:first-child svg,
+                                .sully-action-popover .sully-action-list > button > div img {
+                                    width: 16px !important;
+                                    height: 16px !important;
+                                }
                                 .sully-action-popover .sully-action-list > button img { filter: grayscale(1) brightness(0.25) contrast(1.2); }
-                                .sully-action-popover .sully-action-list > button > span:last-child { flex: 1; text-align: left !important; line-height: 1.2; }
-                                .sully-action-popover .sully-action-list > button::after { content: '›'; margin-left: auto; color: #8e8e93; font-size: 22px; line-height: 1; }
+                                .sully-action-popover .sully-action-list > button > span.font-bold {
+                                    flex: 1;
+                                    min-width: 0;
+                                    text-align: left !important;
+                                    font-size: 11px !important;
+                                    line-height: 1.15;
+                                    white-space: nowrap;
+                                }
+                                .sully-action-popover .sully-action-list > button::after { content: '›'; margin-left: auto; color: #8e8e93; font-size: 16px; line-height: 1; }
                             `}</style>
-                            <div className="flex shrink-0 items-center justify-between border-b border-black/[0.07] px-4 py-3">
-                                <span className="text-[13px] font-semibold text-[#1c1c1e]">快捷功能</span>
+                            <div className="flex shrink-0 items-center justify-between border-b border-black/[0.07] px-3 py-2">
+                                <span className="text-[11px] font-semibold text-[#1c1c1e]">快捷功能</span>
                                 <button
                                     type="button"
                                     aria-label="关闭快捷功能"
                                     onClick={() => setShowPanel('none')}
-                                    className="flex h-7 w-7 items-center justify-center rounded-full bg-[#e5e5ea] text-[#636366] active:scale-95"
+                                    className="flex h-6 w-6 items-center justify-center rounded-full bg-[#e5e5ea] text-[#636366] active:scale-95"
                                 >
-                                    <X className="h-4 w-4" weight="bold" />
+                                    <X className="h-3.5 w-3.5" weight="bold" />
                                 </button>
                             </div>
                         </>
