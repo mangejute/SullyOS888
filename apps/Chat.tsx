@@ -2806,7 +2806,10 @@ const Chat: React.FC = () => {
     // Memoize ChatInputArea callbacks
     // 小雨手机：点输入栏发送 = 发给 AI 并请求回复；键盘回车仍只保存并发送消息。
     const handleSendCallback = useCallback(() => {
-        if (!input.trim()) return;
+        if (!input.trim()) {
+            handleManualTrigger();
+            return;
+        }
         handleSendText(undefined, undefined, undefined, true);
     }, [char, input, replyTarget]);
     const handleKeyboardSendCallback = useCallback(() => handleSendText(), [char, input, replyTarget]);

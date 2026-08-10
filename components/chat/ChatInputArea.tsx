@@ -121,7 +121,6 @@ const ChatInputArea: React.FC<ChatInputAreaProps> = ({
     };
 
     const handleSendButtonClick = () => {
-        if (!input.trim()) return;
         onSend();
     };
 
@@ -407,7 +406,6 @@ const ChatInputArea: React.FC<ChatInputAreaProps> = ({
           : 'text-slate-400';
 
     const selectedEmojiUrls = emojiSelectionMode ? new Set(selectedEmojis.map(se => se.url)) : new Set();
-    const hasSendableText = input.trim().length > 0;
 
     return (
         <>
@@ -461,19 +459,13 @@ const ChatInputArea: React.FC<ChatInputAreaProps> = ({
                             <Smiley className="w-6 h-6" weight="regular" />
                         </button>
                     </div>
-                    {hasSendableText ? (
-                        <button
-                            type="button"
-                            onClick={handleSendButtonClick}
-                            className={sendButtonClass}
-                        >
-                            {sendButtonStyle === 'pill' ? <span>发送</span> : <PaperPlaneTilt className="w-5 h-5" weight="fill" />}
-                        </button>
-                    ) : (
-                        <div aria-hidden="true" className={`${sendButtonClass} cursor-not-allowed opacity-45 shadow-none`}>
-                            {sendButtonStyle === 'pill' ? <span>发送</span> : <PaperPlaneTilt className="w-5 h-5" weight="fill" />}
-                        </div>
-                    )}
+                    <button
+                        type="button"
+                        onClick={handleSendButtonClick}
+                        className={sendButtonClass}
+                    >
+                        {sendButtonStyle === 'pill' ? <span>发送</span> : <PaperPlaneTilt className="w-5 h-5" weight="fill" />}
+                    </button>
 
                     {emojiSelectionMode && (
                         <div className={`absolute inset-0 z-10 ${isPixelStyle ? 'bg-[#eadfce]/70 backdrop-blur-[2px]' : isDiscordStyle ? 'bg-slate-950/70 backdrop-blur-[2px]' : 'bg-white/60 backdrop-blur-[2px]'}`} />

@@ -1685,7 +1685,10 @@ ${memberTimeline || '(暂无互动记录)'}
                 showPanel={showPanel}
                 setShowPanel={setShowPanel}
                 onSend={() => {
-                    if (!input.trim()) return;
+                    if (!input.trim()) {
+                        triggerGroupAI();
+                        return;
+                    }
                     handleSendMessage(input, 'text', undefined, true);
                 }}
                 onKeyboardSend={() => handleSendMessage(input)}
