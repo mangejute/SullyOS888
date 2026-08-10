@@ -1412,6 +1412,8 @@ interface MessageItemProps {
     onResolveTransfer?: (m: Message, action: 'accepted' | 'returned') => void;
     /** 用户点「生活记录」卡 → 确认 / 否决（角色代记的记录） */
     onResolveLifeRecord?: (m: Message, action: 'confirmed' | 'rejected') => void;
+    /** 点击家园生活卡，进入家园应用。 */
+    onOpenWorldHome?: () => void;
     /** 思考链卡片视觉与交互 */
     thinkingChainOptions?: {
         styleId?: ThinkingChainStyleId;
@@ -1458,6 +1460,7 @@ const MessageItem = React.memo(({
     onLuckinCandidate,
     onResolveTransfer,
     onResolveLifeRecord,
+    onOpenWorldHome,
     thinkingChainOptions,
 }: MessageItemProps) => {
     const isUser = m.role === 'user';
@@ -2784,7 +2787,13 @@ const MessageItem = React.memo(({
         const panel: Record<string, any> = (md.statusPanel && typeof md.statusPanel === 'object') ? md.statusPanel : {};
         const posts: string[] = Array.isArray(md.phonePosts) ? md.phonePosts : [];
         const card = (
-            <div className="w-64">
+            <button
+                type="button"
+                onClick={(event) => { event.stopPropagation(); onOpenWorldHome?.(); }}
+                disabled={!onOpenWorldHome}
+                aria-label={`打开家园 ${md.worldName || ''}`.trim()}
+                className="block w-64 text-left transition-transform active:scale-[0.99] disabled:cursor-default disabled:active:scale-100"
+            >
                 <div
                     className="relative rounded-2xl overflow-hidden border border-violet-200/70 shadow-[0_6px_20px_rgba(150,130,200,0.22)]"
                     style={{ background: 'linear-gradient(160deg,#fbf7ff 0%,#f1ebfa 55%,#eae3f6 100%)' }}
@@ -2840,7 +2849,7 @@ const MessageItem = React.memo(({
                         <span className="text-[9px] text-rose-400/80 font-bold tracking-wide">＋记忆</span>
                     </div>
                 </div>
-            </div>
+            </button>
         );
         return commonLayout(card);
     }

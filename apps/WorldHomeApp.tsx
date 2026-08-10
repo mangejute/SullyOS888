@@ -46,6 +46,21 @@ type WHEditTarget =
     | { type: 'msg'; threadId: string; msgId: string }
     | { type: 'comment'; key: string; idx: number };
 
+type EpisodeDayGroup = {
+    key: string;
+    label: string;
+    episodes: WorldEpisode[];
+};
+
+const splitEpisodeStoryTime = (episode: WorldEpisode): { dayLabel: string; segmentLabel: string } => {
+    const match = episode.storyTime.match(/^(.*?)(?:\s+)?(早上|中午|晚上|凌晨)$/);
+    if (match) return { dayLabel: match[1].trim(), segmentLabel: match[2] };
+    return {
+        dayLabel: new Date(episode.createdAt).toLocaleDateString('zh-CN', { year: 'numeric', month: 'long', day: 'numeric' }),
+        segmentLabel: episode.storyTime,
+    };
+};
+
 /** 自定义文风的本地收藏 / 家园全局 API 的 localStorage key —— 与备份工具共用同一组，避免漂移。 */
 const CUSTOM_STYLE_KEY = WORLD_CUSTOM_STYLE_KEY;
 const loadSavedStyles = (): string[] => {
@@ -948,6 +963,13 @@ const WorldEditor: React.FC<{
                         <input type="checkbox" checked={w.injectToChat !== false} onChange={e => upd({ injectToChat: e.target.checked })} className="w-4 h-4 accent-amber-500" />
                     </label>
                     <div className="text-[10px] text-stone-400 leading-snug">世界靠你主动「观测」推进一段（早/午/晚/凌晨四段时光流逝），需要的时候来点一下就行。</div>
+                    <label className="flex items-center justify-between gap-3 pt-2 mt-2 border-t border-stone-100">
+                        <span className="text-[12px] text-stone-700">家园生活联动（日程与情绪）</span>
+                        <input type="checkbox" checked={w.lifeLinkEnabled === true}
+                            onChange={e => upd({ lifeLinkEnabled: e.target.checked })}
+                            className="w-4 h-4 accent-amber-500" />
+                    </label>
+                    <div className="text-[10px] text-stone-400 leading-snug">开启后每天先生成一份家园生活计划，再展开成角色的 5-7 条细日程；家园观测到的实际事件会影响后续日程和情绪。仅适用于真实时间。</div>
                 </div>
             )}
 
@@ -1196,6 +1218,7 @@ const WorldView: React.FC<{
     );
     const [openHouseId, setOpenHouseId] = useState<string | null>(null);
     const [openEpisodeId, setOpenEpisodeId] = useState<string | null>(null);
+    const [openEpisodeDayKey, setOpenEpisodeDayKey] = useState<string | null>(null);
     const [openChapterId, setOpenChapterId] = useState<string | null>(null);
     const [chapterPage, setChapterPage] = useState(0);
     const [seedPage, setSeedPage] = useState(0);
@@ -1205,6 +1228,17 @@ const WorldView: React.FC<{
 
     const members = useMemo(() => world.memberIds.map(id => characters.find(c => c.id === id)).filter(Boolean) as CharacterProfile[], [world.memberIds, characters]);
     const latest = episodes[0];
+    const recentEpisodeDays = useMemo(() => {
+        const groups = new Map<string, EpisodeDayGroup>();
+        for (const episode of episodes) {
+            const { dayLabel } = splitEpisodeStoryTime(episode);
+            const current = groups.get(dayLabel);
+            if (current) current.episodes.push(episode);
+            else groups.set(dayLabel, { key: dayLabel, label: dayLabel, episodes: [episode] });
+        }
+        // 最新五个日期足够回看近期生活；更早的剧情仍完整留在本地，不会被删掉。
+        return [...groups.values()].slice(0, 5);
+    }, [episodes]);
     // 氛围跟随"即将到来的那一段"：早/中=白天，晚=夜晚
     const isNight = isNightWorld(world);
 
@@ -1818,48 +1852,64 @@ const WorldView: React.FC<{
                     <div>
                         <div className={`text-[10px] font-black tracking-[0.25em] uppercase px-1 mb-2 ${t.textLabel}`}>世界纪事</div>
                         <div className="space-y-2">
-                            {episodes.map(ep => {
-                                const open = openEpisodeId === ep.id;
+                            {recentEpisodeDays.map(day => {
+                                const dayOpen = openEpisodeDayKey === day.key;
                                 return (
-                                    <div key={ep.id} className={`rounded-2xl border overflow-hidden ${t.panel}`}>
-                                        <button className="w-full flex items-center gap-2.5 p-3 text-left" onClick={() => setOpenEpisodeId(open ? null : ep.id)}>
-                                            <div className="w-8 h-8 rounded-xl shrink-0 flex items-center justify-center font-black text-[11px] text-amber-950" style={{ background: 'linear-gradient(135deg,#ffd76e,#ffb347)' }}>
-                                                {ep.round}
+                                    <div key={day.key} className={`rounded-2xl border overflow-hidden ${t.panel}`}>
+                                        <button className="w-full flex items-center gap-2.5 p-3 text-left" onClick={() => setOpenEpisodeDayKey(dayOpen ? null : day.key)}>
+                                            <div className="w-9 h-9 rounded-xl shrink-0 flex items-center justify-center font-black text-[10px] text-amber-950" style={{ background: 'linear-gradient(135deg,#ffd76e,#ffb347)' }}>
+                                                {day.episodes.length}段
                                             </div>
                                             <div className="flex-1 min-w-0">
-                                                <div className={`text-[12px] font-black font-serif ${t.textMain}`}>{ep.storyTime}
-                                                    <span className={`text-[9px] font-normal ml-1.5 ${t.textSub}`}>{ep.trigger === 'tick' ? '离线推进' : '观测'} · {new Date(ep.createdAt).toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })}</span>
-                                                </div>
-                                                {!open && <div className={`text-[10px] truncate mt-0.5 ${t.textSub}`}>{ep.summary}</div>}
+                                                <div className={`text-[13px] font-black font-serif ${t.textMain}`}>{day.label}</div>
+                                                {!dayOpen && <div className={`text-[10px] truncate mt-0.5 ${t.textSub}`}>{day.episodes.map(ep => splitEpisodeStoryTime(ep).segmentLabel).join(' · ')} · {day.episodes[0].summary}</div>}
                                             </div>
-                                            {open ? <CaretDown size={14} className={`${t.textSub} shrink-0`} /> : <CaretRight size={14} className={`${t.textSub} shrink-0`} />}
+                                            {dayOpen ? <CaretDown size={14} className={`${t.textSub} shrink-0`} /> : <CaretRight size={14} className={`${t.textSub} shrink-0`} />}
                                         </button>
-                                        {open && (
+                                        {dayOpen && (
                                             <div className={`px-3 pb-3 space-y-2 border-t ${t.divider}`}>
-                                                {ep.npcScene && <p className={`text-[11px] leading-relaxed italic whitespace-pre-wrap pt-2 ${t.textSub}`}>{ep.npcScene}</p>}
-                                                {ep.beats.map(b => (
-                                                    <div key={b.charId} className={`rounded-xl border p-2.5 ${t.panelSolid}`}>
-                                                        <div className="flex items-center gap-2">
-                                                            <span className={`text-[11px] font-black ${t.textMain}`}>{b.charName} · {b.location} · {b.mood}</span>
-                                                            <button onClick={() => setPhoneView({ ownerId: b.charId })} className="ml-auto p-1 rounded-md bg-slate-900 text-white active:scale-90 shrink-0"><DeviceMobile size={11} weight="fill" /></button>
+                                                {day.episodes.map(ep => {
+                                                    const open = openEpisodeId === ep.id;
+                                                    const { segmentLabel } = splitEpisodeStoryTime(ep);
+                                                    return (
+                                                        <div key={ep.id} className={`rounded-xl border overflow-hidden ${t.panelSolid}`}>
+                                                            <button className="w-full flex items-center gap-2 p-2.5 text-left" onClick={() => setOpenEpisodeId(open ? null : ep.id)}>
+                                                                <span className={`text-[11px] font-black ${t.textMain}`}>{segmentLabel}</span>
+                                                                <span className={`text-[9px] ${t.textSub}`}>{ep.trigger === 'tick' ? '离线推进' : '观测'} · {new Date(ep.createdAt).toLocaleString('zh-CN', { hour: '2-digit', minute: '2-digit' })}</span>
+                                                                <span className={`ml-auto min-w-0 truncate text-[10px] ${t.textSub}`}>{ep.summary}</span>
+                                                                {open ? <CaretDown size={12} className={`${t.textSub} shrink-0`} /> : <CaretRight size={12} className={`${t.textSub} shrink-0`} />}
+                                                            </button>
+                                                            {open && (
+                                                                <div className={`px-2.5 pb-2.5 space-y-2 border-t ${t.divider}`}>
+                                                                    {ep.npcScene && <p className={`text-[11px] leading-relaxed italic whitespace-pre-wrap pt-2 ${t.textSub}`}>{ep.npcScene}</p>}
+                                                                    {ep.beats.map(b => (
+                                                                        <div key={b.charId} className={`rounded-xl border p-2.5 ${t.panel}`}>
+                                                                            <div className="flex items-center gap-2">
+                                                                                <span className={`text-[11px] font-black ${t.textMain}`}>{b.charName} · {b.location} · {b.mood}</span>
+                                                                                <button onClick={() => setPhoneView({ ownerId: b.charId })} className="ml-auto p-1 rounded-md bg-slate-900 text-white active:scale-90 shrink-0"><DeviceMobile size={11} weight="fill" /></button>
+                                                                            </div>
+                                                                            <div className="mt-1.5 space-y-1.5">
+                                                                                {b.narrative.split(/\n+/).filter(Boolean).map((para, i) => (
+                                                                                    <p key={i} className={`text-[11.5px] leading-[1.75] ${t.textMain} opacity-85`} style={{ textIndent: '2em' }}>{para}</p>
+                                                                                ))}
+                                                                            </div>
+                                                                            {b.dialogues && b.dialogues.length > 0 && (
+                                                                                <div className="mt-2 space-y-1">
+                                                                                    {b.dialogues.map((d, i) => (
+                                                                                        <div key={i} className="rounded-lg border-l-2 border-amber-400/70 bg-amber-400/10 px-2 py-1">
+                                                                                            <span className="text-[9px] font-black text-amber-600">对 {d.with}：</span>
+                                                                                            <span className={`text-[10.5px] ${t.textMain} opacity-85`}>{d.lines.map(l => `「${l}」`).join(' ')}</span>
+                                                                                        </div>
+                                                                                    ))}
+                                                                                </div>
+                                                                            )}
+                                                                        </div>
+                                                                    ))}
+                                                                </div>
+                                                            )}
                                                         </div>
-                                                        <div className="mt-1.5 space-y-1.5">
-                                                            {b.narrative.split(/\n+/).filter(Boolean).map((para, i) => (
-                                                                <p key={i} className={`text-[11.5px] leading-[1.75] ${t.textMain} opacity-85`} style={{ textIndent: '2em' }}>{para}</p>
-                                                            ))}
-                                                        </div>
-                                                        {b.dialogues && b.dialogues.length > 0 && (
-                                                            <div className="mt-2 space-y-1">
-                                                                {b.dialogues.map((d, i) => (
-                                                                    <div key={i} className="rounded-lg border-l-2 border-amber-400/70 bg-amber-400/10 px-2 py-1">
-                                                                        <span className="text-[9px] font-black text-amber-600">对 {d.with}：</span>
-                                                                        <span className={`text-[10.5px] ${t.textMain} opacity-85`}>{d.lines.map(l => `「${l}」`).join(' ')}</span>
-                                                                    </div>
-                                                                ))}
-                                                            </div>
-                                                        )}
-                                                    </div>
-                                                ))}
+                                                    );
+                                                })}
                                             </div>
                                         )}
                                     </div>

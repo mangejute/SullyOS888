@@ -49,6 +49,8 @@ interface ChatHeaderShellProps {
     chromeStyle?: 'soft' | 'flat' | 'floating' | 'pixel';
     /** 动森彩蛋模式：头部换成木质草绿栏。 */
     acnh?: boolean;
+    /** 顶栏右侧固定操作：电话（占位）与聊天设置。 */
+    topActions?: Array<{ label: string; icon: React.ReactNode; onClick: () => void }>;
 }
 
 const COLLAPSED_BUFF_MIN = 2;
@@ -94,6 +96,7 @@ const ChatHeaderShell: React.FC<ChatHeaderShellProps> = ({
     statusStyle = 'subtle',
     chromeStyle = 'soft',
     acnh = false,
+    topActions = [],
 }) => {
     const buffs: CharacterBuff[] = hideBuffs ? [] : (activeCharacter.activeBuffs || []);
     const [openBuff, setOpenBuff] = useState<CharacterBuff | null>(null);
@@ -253,6 +256,13 @@ const ChatHeaderShell: React.FC<ChatHeaderShellProps> = ({
         : isPixelHeader
           ? 'text-[#fff7ed] hover:bg-[#f8f0e0]/20 rounded-[4px] border-2 border-[#8f674a] bg-[#f8f0e0]/10'
           : 'text-indigo-500 hover:bg-indigo-50 rounded-full';
+    const centeredInfoWidthClass = topActions.length >= 2
+        ? (extraAction ? 'w-[calc(100%-10.5rem)]' : 'w-[calc(100%-8rem)]')
+        : topActions.length === 1
+          ? (extraAction ? 'w-[calc(100%-8rem)]' : 'w-[calc(100%-5.5rem)]')
+          : showTrigger
+            ? (extraAction ? 'w-[calc(100%-11rem)]' : 'w-[calc(100%-7rem)]')
+            : (extraAction ? 'w-[calc(100%-7rem)]' : 'w-[calc(100%-3.5rem)]');
 
     const onlineStatusNode = headerStyle === 'telegram'
         ? null
@@ -426,7 +436,7 @@ const ChatHeaderShell: React.FC<ChatHeaderShellProps> = ({
 
                     <div
                         onClick={onShowCharsPanel}
-                        className={`flex ${showTrigger ? (extraAction ? 'w-[calc(100%-11rem)]' : 'w-[calc(100%-7rem)]') : (extraAction ? 'w-[calc(100%-7rem)]' : 'w-[calc(100%-3.5rem)]')} max-w-[420px] cursor-pointer items-end justify-center`}
+                        className={`flex ${centeredInfoWidthClass} max-w-[420px] cursor-pointer items-end justify-center`}
                     >
                         {renderCenteredInfo()}
                     </div>
@@ -435,6 +445,15 @@ const ChatHeaderShell: React.FC<ChatHeaderShellProps> = ({
                         <button onClick={onTriggerAI} className={`sully-chat-trigger absolute right-0 bottom-2 p-2 ${actionButtonClass}`} title={triggerIcon === 'stop' ? '停止生成' : '触发 AI'}>
                             {triggerIconNode}
                         </button>
+                    )}
+                    {topActions.length > 0 && (
+                        <div className="absolute right-0 bottom-1 flex items-center gap-0.5">
+                            {topActions.map(action => (
+                                <button key={action.label} onClick={action.onClick} className={`p-2 ${iconButtonClass}`} title={action.label} aria-label={action.label}>
+                                    {action.icon}
+                                </button>
+                            ))}
+                        </div>
                     )}
                     {extraAction && (
                         <button onClick={extraAction.onClick} className={`absolute ${showTrigger ? 'right-10' : 'right-0'} bottom-2 p-2 ${iconButtonClass}`} title={extraAction.label} aria-label={extraAction.label}>
@@ -458,8 +477,17 @@ const ChatHeaderShell: React.FC<ChatHeaderShellProps> = ({
                             {extraAction.icon}
                         </button>
                     )}
+                    {topActions.length > 0 && (
+                        <div className="flex items-center gap-0.5 ml-auto">
+                            {topActions.map(action => (
+                                <button key={action.label} onClick={action.onClick} className={`p-2 ${iconButtonClass}`} title={action.label} aria-label={action.label}>
+                                    {action.icon}
+                                </button>
+                            ))}
+                        </div>
+                    )}
                     {showTrigger && (
-                        <button onClick={onTriggerAI} className={`sully-chat-trigger p-2 ${extraAction ? '' : 'ml-auto'} ${actionButtonClass}`} title={triggerIcon === 'stop' ? '停止生成' : '触发 AI'}>
+                        <button onClick={onTriggerAI} className={`sully-chat-trigger p-2 ${extraAction || topActions.length > 0 ? '' : 'ml-auto'} ${actionButtonClass}`} title={triggerIcon === 'stop' ? '停止生成' : '触发 AI'}>
                             {triggerIconNode}
                         </button>
                     )}

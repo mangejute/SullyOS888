@@ -16,7 +16,7 @@ import { getProxyWorkerUrl, setProxyWorkerUrl, DEFAULT_PROXY_WORKER } from '../u
 import { VOICE_ACTING_GUIDE } from '../utils/minimaxTts';
 import { FISH_VOICE_ACTING_GUIDE } from '../utils/fishAudioTts';
 import { DATE_VOICE_GUIDE } from '../utils/datePrompts';
-import { Sun, Newspaper, NotePencil, Notebook, Book, ForkKnife, Coffee, PlugsConnected } from '@phosphor-icons/react';
+import { Sun, Newspaper, NotePencil, Notebook, Book, ForkKnife, Coffee, PlugsConnected, Bell, SpeakerHigh, Sparkle, LockKey, ChatCircleDots } from '@phosphor-icons/react';
 import { loadMcpServers, saveMcpServers, createMcpServer, testMcpConnection, resetMcpSession, getMcpUseNativeTools, setMcpUseNativeTools, type McpServerConfig } from '../utils/mcpClient';
 import { loadPushConfig, savePushConfig, registerScheduleOnWorker, startHeartbeat, stopHeartbeat, isPushConfigAvailable, ensureSubscribed, sendTestPush, getPushDiagnostics, resetSubscription, deepResetSubscription, type PushDiagnostics } from '../utils/proactivePushConfig';
 import { ProactiveChat } from '../utils/proactiveChat';
@@ -35,6 +35,7 @@ import { getBackupReminderState, setBackupReminderIntervalDays, daysSinceLastBac
 import { bucketRetryCount, isAnalyticsConfigured, isAnalyticsEnabled, setAnalyticsEnabled, trackEvent } from '../utils/analytics';
 import { normalizeApiBaseUrl, normalizeApiCredential, normalizeApiModel } from '../utils/apiConfigNormalize';
 import { describeImageWithVisionApi, VISION_API_TEST_IMAGE_DATA_URL, visionApiConfigFromPreset } from '../utils/visionApi';
+import { getBrowserNotificationPermission, isBackgroundKeepAliveEnabled, isBrowserNotificationsEnabled, requestBrowserNotifications, setBackgroundKeepAlive, setBrowserNotificationsEnabled } from '../utils/browserFeatures';
 
 // hot_news（news.orz.ai）可选热榜平台。key 必须与 API 的 ?platform= 完全一致。
 const HOTNEWS_PLATFORM_OPTIONS: { key: string; label: string }[] = [
@@ -440,6 +441,7 @@ const Settings: React.FC = () => {
       characters, groups, userProfile,
       cloudBackupConfig, updateCloudBackupConfig,
       cloudBackupToWebDAV, cloudRestoreFromWebDAV, listCloudBackups,
+      theme, updateTheme,
   } = useOS();
   
   const [localKey, setLocalKey] = useState(apiConfig.apiKey);
@@ -453,11 +455,17 @@ const Settings: React.FC = () => {
   const [localVisionUrl, setLocalVisionUrl] = useState(apiConfig.visionApi?.baseUrl || '');
   const [localVisionKey, setLocalVisionKey] = useState(apiConfig.visionApi?.apiKey || '');
   const [localVisionModel, setLocalVisionModel] = useState(apiConfig.visionApi?.model || '');
+  const [localImageGenUrl, setLocalImageGenUrl] = useState(apiConfig.imageGenerationApi?.baseUrl || '');
+  const [localImageGenKey, setLocalImageGenKey] = useState(apiConfig.imageGenerationApi?.apiKey || '');
+  const [localImageGenModel, setLocalImageGenModel] = useState(apiConfig.imageGenerationApi?.model || '');
+  const [localImageGenPrompt, setLocalImageGenPrompt] = useState(apiConfig.imageGenerationApi?.prompt || '');
   const [availableVisionModels, setAvailableVisionModels] = useState<string[]>(readStoredVisionModels);
   const [selectedVisionPresetId, setSelectedVisionPresetId] = useState<string | null>(null);
   const [visionStatusMsg, setVisionStatusMsg] = useState('');
   const [testingVisionApi, setTestingVisionApi] = useState(false);
   const [visionTestResult, setVisionTestResult] = useState<string | null>(null);
+  const [testingImageGenApi, setTestingImageGenApi] = useState(false);
+  const [imageGenTestResult, setImageGenTestResult] = useState<string | null>(null);
   const [localMiniMaxKey, setLocalMiniMaxKey] = useState(apiConfig.minimaxApiKey || '');
   const [localMiniMaxGroupId, setLocalMiniMaxGroupId] = useState(apiConfig.minimaxGroupId || '');
   const [localMiniMaxRegion, setLocalMiniMaxRegion] = useState<'domestic' | 'overseas'>(
@@ -509,6 +517,43 @@ const Settings: React.FC = () => {
   // 「该备份啦」提醒频率（1~30 天）。改动即落 localStorage（backupReminder 模块自管持久化）。
   const [backupReminderDays, setBackupReminderDays] = useState<number>(() => getBackupReminderState().intervalDays);
   const backupDaysAgo = daysSinceLastBackup();
+
+  const [keepAliveEnabled, setKeepAliveEnabled] = useState(() => isBackgroundKeepAliveEnabled());
+  const [browserNotificationsEnabled, setBrowserNotificationsEnabledState] = useState(() => isBrowserNotificationsEnabled());
+  const [notificationPermission, setNotificationPermission] = useState<NotificationPermission | 'unsupported'>(() => getBrowserNotificationPermission());
+
+  const handleKeepAliveChange = async (enabled: boolean) => {
+      setKeepAliveEnabled(enabled);
+      const started = await setBackgroundKeepAlive(enabled);
+      if (enabled && !started) {
+          addToast('浏览器没有允许播放后台音频，请在页面内再次点击开启', 'error');
+          setKeepAliveEnabled(false);
+          await setBackgroundKeepAlive(false);
+      } else if (enabled) {
+          addToast('后台保活已开启', 'success');
+      }
+  };
+
+  const handleBrowserNotifications = async () => {
+      if (notificationPermission === 'unsupported') {
+          addToast('当前浏览器不支持消息通知', 'error');
+          return;
+      }
+      const permission = await requestBrowserNotifications();
+      setNotificationPermission(permission);
+      if (permission === 'granted') {
+          setBrowserNotificationsEnabledState(true);
+          addToast('浏览器消息通知已开启', 'success');
+      } else {
+          setBrowserNotificationsEnabledState(false);
+          addToast(permission === 'denied' ? '通知权限被拒绝，请到浏览器设置中允许' : '你取消了通知权限请求', 'error');
+      }
+  };
+
+  const handleBrowserNotificationsOff = () => {
+      setBrowserNotificationsEnabled(false);
+      setBrowserNotificationsEnabledState(false);
+  };
 
   // Cloud backup local config state (WebDAV)
   const [cbUrl, setCbUrl] = useState(cloudBackupConfig.webdavUrl);
@@ -799,6 +844,10 @@ const Settings: React.FC = () => {
       setLocalVisionUrl(apiConfig.visionApi?.baseUrl || '');
       setLocalVisionKey(apiConfig.visionApi?.apiKey || '');
       setLocalVisionModel(apiConfig.visionApi?.model || '');
+      setLocalImageGenUrl(apiConfig.imageGenerationApi?.baseUrl || '');
+      setLocalImageGenKey(apiConfig.imageGenerationApi?.apiKey || '');
+      setLocalImageGenModel(apiConfig.imageGenerationApi?.model || '');
+      setLocalImageGenPrompt(apiConfig.imageGenerationApi?.prompt || '');
       setLocalMiniMaxKey(apiConfig.minimaxApiKey || '');
       setLocalMiniMaxGroupId(apiConfig.minimaxGroupId || '');
       setLocalMiniMaxRegion(apiConfig.minimaxRegion === 'overseas' ? 'overseas' : 'domestic');
@@ -1018,6 +1067,49 @@ const Settings: React.FC = () => {
       trackEvent('测试识图 API', { result: '失败' });
     } finally {
       setTestingVisionApi(false);
+    }
+  };
+
+  const handleSaveImageGenerationApi = () => {
+    const next = {
+      baseUrl: normalizeApiBaseUrl(localImageGenUrl),
+      apiKey: normalizeApiCredential(localImageGenKey),
+      model: normalizeApiModel(localImageGenModel),
+      prompt: localImageGenPrompt.trim(),
+    };
+    setLocalImageGenUrl(next.baseUrl);
+    setLocalImageGenKey(next.apiKey);
+    setLocalImageGenModel(next.model);
+    updateApiConfig({ imageGenerationApi: next });
+    addToast('生图 API 配置已保存', 'success');
+  };
+
+  const handleTestImageGenerationApi = async () => {
+    const baseUrl = normalizeApiBaseUrl(localImageGenUrl);
+    const apiKey = normalizeApiCredential(localImageGenKey);
+    const model = normalizeApiModel(localImageGenModel);
+    if (!baseUrl || !apiKey || !model) {
+      setImageGenTestResult('❌ 请先填写完整的连接、秘钥和模型');
+      return;
+    }
+    setTestingImageGenApi(true);
+    setImageGenTestResult(null);
+    try {
+      const response = await fetch(`${baseUrl}/models`, {
+        method: 'GET',
+        headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
+      });
+      if (!response.ok) {
+        const text = await response.text().catch(() => '');
+        throw new Error(`HTTP ${response.status}${text ? `：${text.slice(0, 80)}` : ''}`);
+      }
+      setImageGenTestResult(`✅ 连接成功，模型「${model}」可用`);
+      trackEvent('测试生图 API', { result: '成功' });
+    } catch (error: any) {
+      setImageGenTestResult(`❌ 连接失败：${error?.message || '未知错误'}`);
+      trackEvent('测试生图 API', { result: '失败' });
+    } finally {
+      setTestingImageGenApi(false);
     }
   };
 
@@ -1679,7 +1771,99 @@ const Settings: React.FC = () => {
       </div>
 
       <div className="flex-1 overflow-y-auto p-5 space-y-6 no-scrollbar pb-20">
-        
+        <SettingsSection
+            title="后台与通知"
+            icon={<div className="p-2 bg-amber-100 rounded-xl text-amber-600"><Bell size={18} weight="fill" /></div>}
+        >
+            <div className="space-y-3 py-1">
+                <label className="flex items-center gap-3 p-3 bg-amber-50/70 border border-amber-100 rounded-xl cursor-pointer">
+                    <div className="p-2 bg-white rounded-lg text-amber-500 shadow-sm"><SpeakerHigh size={18} weight="fill" /></div>
+                    <span className="flex-1 min-w-0">
+                        <span className="block text-xs font-bold text-slate-700">后台保活</span>
+                        <span className="block text-[10px] text-slate-400 leading-relaxed mt-0.5">循环播放 10 秒静音音频，尽量减少浏览器切到后台后被暂停。</span>
+                    </span>
+                    <input
+                        type="checkbox"
+                        checked={keepAliveEnabled}
+                        onChange={e => { void handleKeepAliveChange(e.target.checked); }}
+                        className="sr-only peer"
+                    />
+                    <span className="w-10 h-6 bg-slate-200 rounded-full relative transition-colors peer-checked:bg-amber-500 after:content-[''] after:absolute after:w-4 after:h-4 after:bg-white after:rounded-full after:left-1 after:top-1 after:transition-transform peer-checked:after:translate-x-4" />
+                </label>
+                <p className="px-1 text-[10px] text-slate-400 leading-relaxed">浏览器和系统仍可能因省电策略结束网页，开启后只能尽量改善后台存活。</p>
+
+                <label className="flex items-center gap-3 p-3 bg-sky-50/70 border border-sky-100 rounded-xl cursor-pointer">
+                    <div className="p-2 bg-white rounded-lg text-sky-500 shadow-sm"><Bell size={18} weight="fill" /></div>
+                    <span className="flex-1 min-w-0">
+                        <span className="block text-xs font-bold text-slate-700">浏览器消息通知</span>
+                        <span className="block text-[10px] text-slate-400 leading-relaxed mt-0.5">
+                            {notificationPermission === 'unsupported' ? '当前浏览器不支持通知。' : notificationPermission === 'denied' ? '通知权限已被浏览器拒绝。' : '角色发来新消息时显示系统通知。'}
+                        </span>
+                    </span>
+                    <input
+                        type="checkbox"
+                        checked={browserNotificationsEnabled && notificationPermission === 'granted'}
+                        onChange={e => { if (e.target.checked) void handleBrowserNotifications(); else handleBrowserNotificationsOff(); }}
+                        className="sr-only peer"
+                    />
+                    <span className="w-10 h-6 bg-slate-200 rounded-full relative transition-colors peer-checked:bg-sky-500 after:content-[''] after:absolute after:w-4 after:h-4 after:bg-white after:rounded-full after:left-1 after:top-1 after:transition-transform peer-checked:after:translate-x-4" />
+                </label>
+                <p className="px-1 text-[10px] text-slate-400 leading-relaxed">首次开启会弹出浏览器授权。正式部署需要 HTTPS；本机预览的 localhost 可以正常授权。</p>
+            </div>
+        </SettingsSection>
+
+        <SettingsSection
+            title="动画与过场"
+            icon={<div className="p-2 bg-violet-100 rounded-xl text-violet-600"><Sparkle size={18} weight="fill" /></div>}
+        >
+            <div className="space-y-3 py-1">
+                <label className="flex items-center gap-3 p-3 bg-violet-50/70 border border-violet-100 rounded-xl cursor-pointer">
+                    <div className="p-2 bg-white rounded-lg text-violet-500 shadow-sm"><Sparkle size={18} weight="fill" /></div>
+                    <span className="flex-1 min-w-0">
+                        <span className="block text-xs font-bold text-slate-700">网页开场动画</span>
+                        <span className="block text-[10px] text-slate-400 leading-relaxed mt-0.5">打开网页时显示 SullyOS 欢迎画面。</span>
+                    </span>
+                    <input
+                        type="checkbox"
+                        checked={theme.bootAnimationEnabled === true}
+                        onChange={e => { void updateTheme({ bootAnimationEnabled: e.target.checked }); }}
+                        className="sr-only peer"
+                    />
+                    <span className="w-10 h-6 bg-slate-200 rounded-full relative transition-colors peer-checked:bg-violet-500 after:content-[''] after:absolute after:w-4 after:h-4 after:bg-white after:rounded-full after:left-1 after:top-1 after:transition-transform peer-checked:after:translate-x-4" />
+                </label>
+
+                <label className="flex items-center gap-3 p-3 bg-indigo-50/70 border border-indigo-100 rounded-xl cursor-pointer">
+                    <div className="p-2 bg-white rounded-lg text-indigo-500 shadow-sm"><LockKey size={18} weight="fill" /></div>
+                    <span className="flex-1 min-w-0">
+                        <span className="block text-xs font-bold text-slate-700">锁屏过场</span>
+                        <span className="block text-[10px] text-slate-400 leading-relaxed mt-0.5">打开网页时显示时钟锁屏；关闭后会直接进入桌面。</span>
+                    </span>
+                    <input
+                        type="checkbox"
+                        checked={theme.lockScreenEnabled === true}
+                        onChange={e => { void updateTheme({ lockScreenEnabled: e.target.checked }); }}
+                        className="sr-only peer"
+                    />
+                    <span className="w-10 h-6 bg-slate-200 rounded-full relative transition-colors peer-checked:bg-indigo-500 after:content-[''] after:absolute after:w-4 after:h-4 after:bg-white after:rounded-full after:left-1 after:top-1 after:transition-transform peer-checked:after:translate-x-4" />
+                </label>
+
+                <label className="flex items-center gap-3 p-3 bg-sky-50/70 border border-sky-100 rounded-xl cursor-pointer">
+                    <div className="p-2 bg-white rounded-lg text-sky-500 shadow-sm"><ChatCircleDots size={18} weight="fill" /></div>
+                    <span className="flex-1 min-w-0">
+                        <span className="block text-xs font-bold text-slate-700">聊天头像过场</span>
+                        <span className="block text-[10px] text-slate-400 leading-relaxed mt-0.5">从信息进入或切换角色聊天时，显示头像登场画面。</span>
+                    </span>
+                    <input
+                        type="checkbox"
+                        checked={theme.chatEntryAnimationEnabled === true}
+                        onChange={e => { void updateTheme({ chatEntryAnimationEnabled: e.target.checked }); }}
+                        className="sr-only peer"
+                    />
+                    <span className="w-10 h-6 bg-slate-200 rounded-full relative transition-colors peer-checked:bg-sky-500 after:content-[''] after:absolute after:w-4 after:h-4 after:bg-white after:rounded-full after:left-1 after:top-1 after:transition-transform peer-checked:after:translate-x-4" />
+                </label>
+            </div>
+        </SettingsSection>
+
         {/* 数据备份区域 */}
         <SettingsSection
             title="备份与恢复 (ZIP)"
@@ -2274,6 +2458,38 @@ const Settings: React.FC = () => {
                         {visionTestResult}
                     </div>
                 )}
+            </div>
+        </SettingsSection>
+
+        {/* 独立生图 API：供后续角色生图功能使用。 */}
+        <SettingsSection
+            title="生图 API"
+            icon={<div className="p-2 bg-pink-100/60 rounded-xl text-pink-600"><Sparkle className="w-4 h-4" weight="bold" /></div>}
+            badge={<span className={`text-[9px] font-bold px-2 py-1 rounded-full ${apiConfig.imageGenerationApi?.baseUrl ? 'bg-pink-100 text-pink-600' : 'bg-slate-100 text-slate-400'}`}>{apiConfig.imageGenerationApi?.baseUrl ? '已配置' : '未配置'}</span>}
+        >
+            <div className="space-y-3">
+                <p className="text-[10px] text-slate-400 leading-relaxed">填写 OpenAI 兼容的生图接口。这里的配置会用于后续角色生图，并与聊天 API 分开保存。</p>
+                <div>
+                    <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1.5 block pl-1">连接</label>
+                    <input type="text" value={localImageGenUrl} onChange={e => { setLocalImageGenUrl(e.target.value); setImageGenTestResult(null); }} placeholder="https://.../v1" className="w-full bg-white/60 border border-slate-200/60 rounded-xl px-4 py-2.5 text-sm font-mono focus:bg-white transition-all" />
+                </div>
+                <div>
+                    <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1.5 block pl-1">秘钥</label>
+                    <input type="password" value={localImageGenKey} onChange={e => { setLocalImageGenKey(e.target.value); setImageGenTestResult(null); }} placeholder="sk-..." className="w-full bg-white/60 border border-slate-200/60 rounded-xl px-4 py-2.5 text-sm font-mono focus:bg-white transition-all" />
+                </div>
+                <div>
+                    <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1.5 block pl-1">模型</label>
+                    <input type="text" value={localImageGenModel} onChange={e => { setLocalImageGenModel(e.target.value); setImageGenTestResult(null); }} placeholder="例如 dall-e-3 / flux" className="w-full bg-white/60 border border-slate-200/60 rounded-xl px-4 py-2.5 text-sm font-mono focus:bg-white transition-all" />
+                </div>
+                <div>
+                    <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1.5 block pl-1">生图提示词</label>
+                    <textarea value={localImageGenPrompt} onChange={e => setLocalImageGenPrompt(e.target.value)} placeholder="例如：保持角色脸型、发色和服装特征一致，画面风格自然..." className="w-full h-24 bg-white/60 border border-slate-200/60 rounded-xl px-4 py-3 text-sm resize-none focus:bg-white transition-all" />
+                </div>
+                <div className="grid grid-cols-2 gap-2">
+                    <button type="button" onClick={handleTestImageGenerationApi} disabled={testingImageGenApi || !localImageGenUrl.trim() || !localImageGenKey.trim() || !localImageGenModel.trim()} className="py-3 rounded-2xl font-bold text-pink-600 border border-pink-200 bg-pink-50 active:scale-95 transition-all disabled:opacity-40">{testingImageGenApi ? '测试中…' : '测试连接'}</button>
+                    <button type="button" onClick={handleSaveImageGenerationApi} className="py-3 rounded-2xl font-bold text-white bg-pink-500 shadow-lg shadow-pink-500/20 active:scale-95 transition-all">保存生图 API</button>
+                </div>
+                {imageGenTestResult && <div className={`text-xs px-3 py-2 rounded-xl leading-relaxed ${imageGenTestResult.startsWith('✅') ? 'bg-emerald-50 text-emerald-700' : 'bg-red-50 text-red-600'}`}>{imageGenTestResult}</div>}
             </div>
         </SettingsSection>
 

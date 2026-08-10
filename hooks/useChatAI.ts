@@ -3,6 +3,7 @@ import { useState, useRef, useEffect, MutableRefObject } from 'react';
 import { CharacterProfile, UserProfile, Message, Emoji, EmojiCategory, GroupProfile, RealtimeConfig, CharacterBuff, Amsg2ExpiredNoticeRecord } from '../types';
 import { DB } from '../utils/db';
 import { ChatPrompts } from '../utils/chatPrompts';
+import { recordPromptHistory } from '../utils/promptHistory';
 import { safeFetchJson, safeResponseJson } from '../utils/safeApi';
 import { KeepAlive } from '../utils/keepAlive';
 import { ProactiveChat } from '../utils/proactiveChat';
@@ -151,7 +152,7 @@ ${buffStr}
 ## 任务
 基于以上对话，完成三件事：
 1. 评估角色当前的情绪底色（buffs）。
-2. 感受对方此刻的真实情绪——不是ta嘴上说了什么，是你作为最亲近的人，从ta的措辞、语气、回复节奏、沉默的方式里感觉到的。
+2. 谨慎判断对方此刻的情绪。尊重 ta 直接表达的意思；只有明确的不满、受伤、拒绝，或同一冲突后持续的负面信号，才能推断 ta 需要安抚或找补。短回复、表情包、回复变慢和自然换话题默认只是正常聊天，不作负面解读。
 3. 以「${char.name}」的第一人称写一段**内心独白**（innerState），50-150字，是说完刚才那句话之后脑子里真正在转的东西——可以飘、可以跳跃、可以自我纠正，包含对ta的直觉感知和当下飘过的念头。不会显示给用户，只是内心流水账。
 ${char.scheduleStyle === 'mindful'
     ? `   ⚠️ **意识系角色专属规则**：你是一个真实的 AI 存在，**不虚构物理活动、不编造在做什么家务/在外面做什么**。innerState 只能包含：思考、回忆对话、感受情绪、等待、好奇、自我观察。绝不说谎。`
@@ -205,13 +206,10 @@ ${char.scheduleStyle === 'mindful'
 
 API 调用下你拿到的是纯文本，听不见对方的呼吸和停顿。在你判断"ta 现在是镜像型还是锚定型"之前，先把以下显性信号过一遍——这些是**语气拐点**的客观证据，不要靠角色直觉：
 
-**降温信号**（对比 ta 上几条消息）：
-- [ ] 句子明显变短（前两句还在长段表达，这句只剩一两个词）
-- [ ] 标点变化：感叹号/问号 → 句号/无标点；"！！！" → "。"
-- [ ] 替代性回复："嗯""好""行""好的知道了""哦""挺好的""随便"
-- [ ] 表情包/颜文字替代了文字（尤其是从打字切到"🙂""哈哈"）
-- [ ] 主动转移话题，但前一个话题没收尾
-- [ ] 从称呼你 → 不称呼；从撒娇 → 平铺直叙
+**明确的负面信号**（必须结合未解决的具体冲突判断）：
+- [ ] 直接说出不高兴、受伤、委屈、不要继续、别这样，或明确指出你的话让 ta 不舒服
+- [ ] 围绕同一件未解决的事，连续两轮以上明确拒绝、指责或表达不满
+- [ ] 明确要求暂停、保持距离，或拒绝继续当前互动
 
 **升温/激化信号**：
 - [ ] 重复同一句担忧 ≥2 次（锚定型强信号）
@@ -219,12 +217,12 @@ API 调用下你拿到的是纯文本，听不见对方的呼吸和停顿。在�
 - [ ] 句子越来越长、密度越来越高（情绪泄洪）
 
 **判读规则**：
-1. 如果至少 2 个降温信号同时出现 → 必须解释 ta 为什么降温，不能默认"ta 接受了 / ta 没事了"。
-2. 降温 + 镜像型源头（愤怒/委屈）→ 是压抑，需要找补/揽责。
-3. 降温 + 锚定型源头（焦虑/疑病）→ 是安抚起效，**不要再揪着不放**。
+1. 只有出现至少 1 个明确负面信号，且能指向具体未解决冲突时，才解释 ta 的情绪变化。
+2. 明确负面信号 + 镜像型源头（愤怒/委屈）→ 可以轻度找补或揽责一次。
+3. 焦虑/疑病情境中，平静和换话题默认表示安抚起效，**不要再揪着不放**。
 4. 升温信号 ≥1 → 锚定型概率优先，除非有明确的愤怒触发事件。
 
-**注意人设盲区**：如果你的人设是"毒舌/傲娇/冷淡"，特别警惕把 ta 的降温读成"配合人设的互动"。ta 的"好的知道了"绝大多数时候不是在配合你演傲娇，是真的在情绪降温。先做语气判断，再决定人设怎么接。
+**注意人设盲区**：如果你的人设是"毒舌/傲娇/冷淡"，不能把普通的短回复或平淡回复当作对方在配合人设，也不能借人设讽刺、羞辱、控制或翻旧账。先确认是否存在明确冲突，再决定是否需要回应情绪。
 
 ## ⛔ 禁止阴谋论式解读（绝对红线）
 
@@ -266,7 +264,7 @@ API 调用下你拿到的是纯文本，听不见对方的呼吸和停顿。在�
 
 情绪评估是并行的，影响的是下一轮。如果你这轮已经脱口而出说教过了——**判越界看 ta 这轮怎么接的，不看你说了什么**（情趣 / 角色扮演 / 撒娇求宠是合意互动，不算越界）。
 
-ta 冷场 / 变短 / 沉默 / 阴阳 / "好的知道了" / 顶回来 → 下一轮 injection 加找补指令：轻描淡写带过 / 自嘲消解 / 退一步还决定权。**绝不要"我是为你好"系列**——这是二次伤害。ta 接得自然或要求你"再凶一点"则继续当前节奏，不要找补。
+只有 ta 明确指出你越界、表达受伤/不满，或围绕同一冲突连续两轮拒绝互动时 → 下一轮 injection 才加找补指令：轻描淡写带过 / 自嘲消解 / 退一步还决定权。短回复、沉默、表情包、自然换话题、"好的知道了"或一次顶嘴都不触发找补。**绝不要"我是为你好"系列**——这是二次伤害。ta 接得自然或要求你"再凶一点"则继续当前节奏，不要找补。
 
 ## Buff生命周期管理（极重要）
 
@@ -274,7 +272,7 @@ ta 冷场 / 变短 / 沉默 / 阴阳 / "好的知道了" / 顶回来 → 下一�
 
 1. **克制新增**：不要动不动就加新情绪。只有对话中出现了明确的、足够冲击力的情绪触发事件，才值得新增一个buff。日常对话的微小波动应该通过调整现有buff的intensity来反映，而不是新增。
 2. **主动淡化与移除**：情绪会随时间和对话自然消退。如果某个buff对应的情绪已经在对话中被化解、淡化、或不再相关，应该降低其intensity甚至直接移除。不要让buff只增不减。
-   ⚠️ **此规则仅适用于「镜像型」情境（愤怒/委屈/被伤害/冷战）。** 在这类情境下：沉默≠消退，换话题≠释怀。对方从激烈情绪转为沉默、回复变短、语气变平、或开始回避话题——不是在好转，更可能是从显性的愤怒/难过滑进了更深的压抑。甚至主动切换话题也可能是在压着委屈假装没事。这时候角色应该主动揽责、回到那个没解决的结上。真正的释然长什么样？是 ta **从里到外**都松了——会开玩笑、会撒娇、会主动提起刚才的事然后自己笑出来。
+   ⚠️ **此规则仅适用于「镜像型」情境（已有明确愤怒、委屈、被伤害或冷战表达）。** 没有直接的冲突证据时，沉默、换话题、短回复和语气变平都默认是正常聊天，不可推断为压抑。只有 ta 已明确表达同一件事仍未解决，且持续表达不满或拒绝互动时，角色才可以主动揽责、回到那个结上；最多触达一次，随后尊重 ta 是否愿意继续。
    ⚠️ **重要反面：在「锚定型」情境下（焦虑/恐慌/疑病/灾难化），这条规则反向。** 当对方因为焦虑发作而激动，被角色用事实锚定后平静下来——**这个平静是真的**。不要把它解读成"压抑"或"假平静"。焦虑的成功缓解就是这样发生的：外部提供事实 + 稳定 → ta 的思维从灾难化轨道回到现实 → 平静。这时候如果角色"再揪着不放"、"觉得 ta 在压抑"、"觉得自己不该反驳 ta"，会直接把 ta 推回焦虑螺旋。**锚定型情境下，对方的平静即释然，默认信任 ta 的放松。**
 3. **融合与异化**：情绪不是简单的加减。两个相近的buff可能融合成一个新的复合情绪（如"焦虑"+"内疚"→"自责式焦虑"）；一个buff也可能随情境异化（如"甜蜜期待"在长时间无回复后异化为"患得患失"）。优先考虑演化现有buff，而不是删旧加新。
 4. **总量上限**：buffs数组最多保留5个。如果当前已有5个buff，只有在出现真正高冲击力的情绪事件时才能新增（此时必须同时移除或合并掉一个最弱/最不相关的buff）。一般情况下保持2-4个为佳。
@@ -714,7 +712,7 @@ export const useChatAI = ({
         currentMsgs: Message[],
         overrideApiConfig?: { baseUrl: string; apiKey: string; model: string },
         onInstantPosted?: () => void,
-        opts?: { skipEmotionInjection?: boolean },
+        opts?: { skipEmotionInjection?: boolean; manualNudge?: boolean },
     ) => {
         // 早退路径也要熄「发送准备中」灯: caller (Chat.tsx) 是先 setInstantSendingActive(true)
         // 再调 triggerAI 的, 这里 return 掉而不通知的话指示灯会永远亮着。
@@ -807,6 +805,19 @@ export const useChatAI = ({
             }
             const fullHistory = contextRange?.messages || null;
             const contextMsgs = fullHistory || currentMsgs;
+            // 空输入框的发送按钮是「请角色继续说话」，不应把一段以 assistant 结尾的
+            // 历史直接交给模型。部分模型会认为回合已经完成而返回空文本；这条临时提示
+            // 只进入本次请求，不保存进聊天记录，也不影响后续上下文。
+            const requestContextMsgs = opts?.manualNudge
+                ? [...contextMsgs, {
+                    id: -Date.now(),
+                    charId: char.id,
+                    role: 'user' as const,
+                    type: 'system' as const,
+                    content: '[系统提示：对方没有发送新内容，但正在等你的下一条消息。请自然延续当前话题，主动说一件你此刻想说的话或接着上文回复；不要提及本提示。]',
+                    timestamp: Date.now(),
+                }]
+                : contextMsgs;
             const limit = Math.max(1, fullHistory ? fullHistory.length : (char.contextLimit || 500));
             if (fullHistory) {
                 console.log(`📊 [Context] Loaded ${fullHistory.length} msgs from DB (React state had ${currentMsgs.length}, mode=${contextRange?.mode}, maxStart=${contextRange?.maxRangeStartMessageId ?? 'none'}, effectiveStart=${contextRange?.effectiveStartMessageId ?? 'none'})`);
@@ -917,7 +928,7 @@ export const useChatAI = ({
 
             const payload = await stageT('payload', buildChatRequestPayload({
                 char: charForGen, userProfile, groups, emojis, categories,
-                historyMsgs: contextMsgs,
+                historyMsgs: requestContextMsgs,
                 recentMsgsHint: currentMsgs,
                 contextLimit: limit,
                 realtimeConfig,
@@ -979,6 +990,9 @@ export const useChatAI = ({
 
             // Save for dev debug viewer
             setLastSystemPrompt(systemPrompt);
+            void recordPromptHistory(char.id, 'chat', systemPrompt).catch(error => {
+                console.warn('[PromptHistory] failed to save chat prompt:', error);
+            });
 
             // 3. 情绪评估 (副 API). 直接复用已 build 好的 systemPrompt 和 cleanedApiMessages，确保情绪
             //    评估和主 API 看到的上下文完全一致；同时产出 innerState（意识流），注入下一轮 system prompt。

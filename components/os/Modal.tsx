@@ -7,19 +7,21 @@ interface ModalProps {
     onClose: () => void;
     children: React.ReactNode;
     footer?: React.ReactNode;
+    fullScreen?: boolean;
 }
 
-const Modal: React.FC<ModalProps> = ({ isOpen, title, onClose, children, footer }) => {
+const Modal: React.FC<ModalProps> = ({ isOpen, title, onClose, children, footer, fullScreen = false }) => {
     if (!isOpen) return null;
 
     return (
-        <div className="fixed inset-0 z-[100] flex items-center justify-center p-6 animate-fade-in">
+        <div className={`fixed inset-0 z-[100] flex items-center justify-center animate-fade-in ${fullScreen ? 'p-0' : 'p-6'}`}>
             <div className="absolute inset-0 bg-black/40" onClick={onClose} />
-            <div className="relative w-full max-w-sm bg-white rounded-[2.5rem] shadow-2xl border border-white/20 overflow-hidden animate-slide-up">
-                <div className="px-6 pt-6 pb-2">
+            <div className={`relative w-full bg-white shadow-2xl border border-white/20 overflow-hidden animate-slide-up ${fullScreen ? 'h-full max-w-none rounded-none flex flex-col' : 'max-w-sm rounded-[2.5rem]'}`}>
+                <div className="px-6 pt-6 pb-2 relative">
                     <h3 className="text-lg font-bold text-slate-800 text-center">{title}</h3>
+                    {fullScreen && <button type="button" onClick={onClose} aria-label="关闭" className="absolute right-5 top-5 h-8 w-8 rounded-full bg-slate-100 text-slate-500 text-xl leading-none">×</button>}
                 </div>
-                <div className="px-6 py-4 max-h-[60vh] overflow-y-auto no-scrollbar">
+                <div className={`px-6 py-4 overflow-y-auto no-scrollbar ${fullScreen ? 'flex-1 max-h-none' : 'max-h-[60vh]'}`}>
                     {children}
                 </div>
                 {footer ? (

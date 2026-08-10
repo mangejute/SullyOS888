@@ -124,6 +124,12 @@ export interface OSTheme {
   statusBarMode?: 'standard' | 'compact' | 'hidden';
   /** @deprecated 旧版两档开关，仅用于兼容已有存档；新设置写入 statusBarMode。 */
   hideStatusBar?: boolean;
+  /** 打开网页时的 SullyOS 开场过场。默认关闭，避免每次刷新都等待。 */
+  bootAnimationEnabled?: boolean;
+  /** 锁屏过场。关闭后数据加载完直接进入桌面。 */
+  lockScreenEnabled?: boolean;
+  /** 从信息打开或切换到角色聊天时的头像登场过场。 */
+  chatEntryAnimationEnabled?: boolean;
   // Chat UI customization (global)
   chatAvatarShape?: 'circle' | 'rounded' | 'square';
   chatAvatarSize?: 'small' | 'medium' | 'large';
@@ -243,6 +249,13 @@ export interface APIConfig {
   apiKey: string;
   // 可选识图中转：给不支持 image_url 的主模型补视觉能力。
   visionApi?: VisionApiConfig;
+  /** 独立生图服务配置；与聊天/识图 API 分开保存。 */
+  imageGenerationApi?: {
+    baseUrl: string;
+    apiKey: string;
+    model: string;
+    prompt?: string;
+  };
   minimaxApiKey?: string;
   minimaxGroupId?: string;
   // 'domestic' → https://api.minimaxi.com (国内站)
@@ -691,6 +704,11 @@ export interface ScheduleSlot {
     location?: string;    // "河边"
     innerThought?: string; // 该时段的内心独白，生成时由AI写好，运行时直接注入
     theater?: SlotTheater; // 该时段的小剧场（窥视演出），按需生成并缓存
+    /** 家园联动：该细日程归属的家园时间段。未绑定家园时为空。 */
+    worldSegment?: WorldDaySegmentKey;
+    /** 家园观测后写入的实际事件；不覆盖原有细日程，仅补足已发生的生活事实。 */
+    worldEvent?: string;
+    worldMood?: string;
 }
 
 export interface DailySchedule {
@@ -706,6 +724,24 @@ export interface DailySchedule {
      * 注入时根据当前时间找到最近的 key，直接使用整段文本，不做拼接。
      */
     flowNarrative?: Record<string, string>;
+    /** 本日程由哪一份家园计划展开而来。 */
+    worldLink?: {
+        worldId: string;
+        worldName: string;
+        dayKey: string;
+        plannedAt: number;
+    };
+}
+
+/** 实际发给 AI 的提示词留档，用于角色聊天里的提示词查看器。 */
+export type PromptHistoryKind = 'chat' | 'schedule';
+
+export interface PromptHistoryEntry {
+    id: string;
+    charId: string;
+    kind: PromptHistoryKind;
+    content: string;
+    createdAt: number;
 }
 
 export interface RoomGeneratedState {
@@ -1328,6 +1364,29 @@ export type WorldHomeMode = 'light' | 'medium' | 'heavy';
  */
 export type WorldTimeMode = 'real' | 'sim';
 
+/** 家园与角色生活联动共用的四段时间轴。 */
+export type WorldDaySegmentKey = 'morning' | 'noon' | 'evening' | 'latenight';
+
+/** 家园当天某个角色的公开生活安排。它是日程的共同骨架，不是已经发生的剧情。 */
+export interface WorldLifePlanMember {
+    charId: string;
+    activity: string;
+    location: string;
+    description?: string;
+    mood?: string;
+}
+
+/** 每个真实时间家园每天只生成一次的共享计划。 */
+export interface WorldLifePlan {
+    dayKey: string;
+    generatedAt: number;
+    segments: Array<{
+        key: WorldDaySegmentKey;
+        event: string;
+        members: WorldLifePlanMember[];
+    }>;
+}
+
 /** 模拟时间的起始日期（sim 模式专用）。 */
 export interface WorldSimDate {
     year: number;
@@ -1477,6 +1536,10 @@ export interface WorldProfile {
     clockSegs?: number;
     /** 生成内容是否注入各成员的 1v1 聊天（默认 true） */
     injectToChat?: boolean;
+    /** 真实时间家园：把家园当天计划及已发生事件联动到成员的日程与情绪。默认关闭。 */
+    lifeLinkEnabled?: boolean;
+    /** 当前家园当天的共享生活计划；按 dayKey 自动失效并重新生成。 */
+    lifePlan?: WorldLifePlan;
     /** 该世界专属 API 覆盖；不设则回落全局 apiConfig */
     api?: { baseUrl: string; apiKey: string; model: string };
     createdAt: number;
@@ -2403,6 +2466,8 @@ export interface CharacterProfile {
   id: string;
   name: string;
   avatar: string;
+  /** 角色生图一致性参考图（最多 4 张 data URL）。 */
+  imageGenerationReferences?: string[];
   description: string;
   systemPrompt: string;
   worldview?: string;
@@ -2426,6 +2491,9 @@ export interface CharacterProfile {
    *  属美化类本地偏好：随完整备份走，但角色卡分享时剥离（见 utils/characterCard.ts）。 */
   chatFineTune?: ChatFineTuneOverride;
   chatBackground?: string;
+  /** 单次聊天回复的气泡数量范围（每个角色单独设置）。 */
+  replyMessageMinCount?: number;
+  replyMessageMaxCount?: number;
   contextLimit?: number;
   /**
    * AI 原文读取范围策略：
@@ -3541,6 +3609,8 @@ export interface FullBackupData {
 
     // Character daily schedule (角色日程表 — daily_schedule store)
     dailySchedules?: DailySchedule[];
+    // 实际发给 AI 的聊天 / 日程提示词历史
+    promptHistory?: PromptHistoryEntry[];
 
     // 手账（跨角色聚合留痕本 — handbook store）
     handbooks?: HandbookEntry[];

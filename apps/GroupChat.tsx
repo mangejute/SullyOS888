@@ -25,7 +25,7 @@ import { completeGroupChatWithMcp } from '../utils/groupChat/mcp';
 import { CharacterGroupFilterBar, filterCharactersByGroup, GROUP_FILTER_ALL } from '../components/character/CharacterGroupFilter';
 // 群聊输入区/表情面板已改用共享 ChatInputArea（其表情网格自带 useIncrementalReveal 增量渲染），
 // master 上给旧内联表情抽屉加的增量渲染随旧抽屉一并退役。
-import { UsersThree, Money, GearSix, Image as ImageIcon, ArrowsClockwise, PaintBrush, BellSimpleRinging, Code, Question } from '@phosphor-icons/react';
+import { UsersThree, Camera, Phone, Money, GearSix, Image as ImageIcon, ArrowsClockwise, PaintBrush, BellSimpleRinging, Code, Question } from '@phosphor-icons/react';
 import ChatHeaderShell from '../components/chat/ChatHeaderShell';
 import ChatInputArea from '../components/chat/ChatInputArea';
 import ChromeCssEditor from '../components/chat/ChromeCssEditor';
@@ -458,6 +458,7 @@ const GroupChat: React.FC = () => {
     // Refs
     const scrollRef = useRef<HTMLDivElement>(null);
     const fileInputRef = useRef<HTMLInputElement>(null);
+    const cameraFileInputRef = useRef<HTMLInputElement>(null);
     const groupAvatarInputRef = useRef<HTMLInputElement>(null);
     // 生成中的取消句柄：非空 = 正在生成，再点触发按钮 = 停止
     const abortRef = useRef<AbortController | null>(null);
@@ -824,17 +825,18 @@ const GroupChat: React.FC = () => {
     const handleImageFile = async (file: File) => {
         try {
             const base64 = await processImage(file, { maxWidth: 600, quality: 0.7, forceJpeg: true });
-            handleSendMessage(base64, 'image');
+            await handleSendMessage(base64, 'image');
         } catch (err) {
             addToast('图片发送失败', 'error');
         }
     };
 
     const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-        const file = e.target.files?.[0];
-        if (!file) return;
-        await handleImageFile(file);
-        if (e.target) e.target.value = '';
+        const files = Array.from(e.target.files || []);
+        e.target.value = '';
+        for (const file of files) {
+            await handleImageFile(file);
+        }
     };
 
     // --- Logic: 红包 2.0 ---
@@ -1603,6 +1605,10 @@ ${memberTimeline || '(暂无互动记录)'}
                     icon: <Question className="w-5 h-5" weight="bold" />,
                     onClick: () => setModalType('help'),
                 }}
+                topActions={[
+                    { label: '电话（即将上线）', icon: <Phone className="w-5 h-5" weight="regular" />, onClick: () => addToast('电话功能即将上线', 'info') },
+                    { label: '群聊设置', icon: <GearSix className="w-5 h-5" weight="regular" />, onClick: openGroupSettings },
+                ]}
                 showTrigger={false}
                 onClose={() => setView('list')}
                 onTriggerAI={() => triggerGroupAI(messages)}
@@ -1707,27 +1713,28 @@ ${memberTimeline || '(暂无互动记录)'}
                 chromeStyle={osTheme.chatChromeStyle}
                 acnh={acnh}
                 actionsContent={
-                    <div className="p-6 grid grid-cols-4 gap-8">
+                    <div className="sully-action-list px-3 py-1">
+                        <button onClick={() => cameraFileInputRef.current?.click()} className="flex flex-col items-center gap-2 active:scale-95 transition-transform text-slate-600">
+                            <div className="w-14 h-14 rounded-2xl flex items-center justify-center shadow-sm border bg-slate-50 text-slate-500 border-slate-100">
+                                <Camera className="w-6 h-6" weight="bold" />
+                            </div>
+                            <span className="text-xs font-bold">拍照</span>
+                        </button>
+                        <input type="file" ref={cameraFileInputRef} className="hidden" accept="image/*" capture="environment" onChange={handleImageUpload} />
+
                         <button onClick={() => fileInputRef.current?.click()} className="flex flex-col items-center gap-2 active:scale-95 transition-transform text-slate-600">
                             <div className="w-14 h-14 rounded-2xl flex items-center justify-center shadow-sm border bg-pink-50 text-pink-400 border-pink-100">
                                 <ImageIcon className="w-6 h-6" weight="bold" />
                             </div>
                             <span className="text-xs font-bold">相册</span>
                         </button>
-                        <input type="file" ref={fileInputRef} className="hidden" accept="image/*" onChange={handleImageUpload} />
+                        <input type="file" ref={fileInputRef} className="hidden" accept="image/*" multiple onChange={handleImageUpload} />
 
                         <button onClick={() => { setModalType('transfer'); setShowPanel('none'); trackEvent('打开发红包面板'); }} className="flex flex-col items-center gap-2 active:scale-95 transition-transform text-slate-600">
                             <div className="w-14 h-14 rounded-2xl flex items-center justify-center shadow-sm border bg-orange-50 text-orange-400 border-orange-100">
                                 <Money className="w-6 h-6" weight="bold" />
                             </div>
                             <span className="text-xs font-bold">红包</span>
-                        </button>
-
-                        <button onClick={openGroupSettings} className="flex flex-col items-center gap-2 active:scale-95 transition-transform text-slate-600">
-                            <div className="w-14 h-14 rounded-2xl flex items-center justify-center shadow-sm border bg-violet-50 text-violet-500 border-violet-100">
-                                <GearSix className="w-6 h-6" weight="bold" />
-                            </div>
-                            <span className="text-xs font-bold">群设置</span>
                         </button>
 
                         <button

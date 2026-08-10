@@ -237,6 +237,7 @@ describe('真实时间（跟现实早/中/晚/凌晨同步，错过当天可补�
         expect(realNowSeg(at('2026-06-15T13:00:00')).dayKey).toBe('2026-06-15');
         // 6月15日凌晨2点 = 6月14日这个剧情日的下半夜（seg=3），保证段序单调
         expect(realNowSeg(at('2026-06-15T02:00:00'))).toEqual({ dayKey: '2026-06-14', seg: 3 });
+        expect(realNowSeg(at('2026-06-15T05:59:00'))).toEqual({ dayKey: '2026-06-14', seg: 3 });
         expect(realNowSeg(at('2026-06-01T01:00:00'))).toEqual({ dayKey: '2026-05-31', seg: 3 }); // 跨月
     });
 
@@ -250,9 +251,9 @@ describe('真实时间（跟现实早/中/晚/凌晨同步，错过当天可补�
         expect(realObserveTarget(mkWorld({ timeMode: 'real' }), at('2026-06-15T02:00:00'))).toEqual({ dayKey: '2026-06-14', seg: 3 });
     });
 
-    it('同一天落后 → 补下一段；已追上 → null', () => {
+    it('同一天落后 → 直接跳到当前段；已追上 → null', () => {
         const w = mkWorld({ timeMode: 'real', realClock: { dayKey: '2026-06-15', seg: 0 } });
-        expect(realObserveTarget(w, at('2026-06-15T20:00:00'))).toEqual({ dayKey: '2026-06-15', seg: 1 }); // 只补一段
+        expect(realObserveTarget(w, at('2026-06-15T20:00:00'))).toEqual({ dayKey: '2026-06-15', seg: 2 }); // 直接进入晚上，不倒灌早/中
         expect(realObserveTarget(mkWorld({ timeMode: 'real', realClock: { dayKey: '2026-06-15', seg: 2 } }), at('2026-06-15T20:00:00'))).toBeNull();
     });
 
@@ -264,9 +265,9 @@ describe('真实时间（跟现实早/中/晚/凌晨同步，错过当天可补�
         expect(realObserveTarget(w2, at('2026-06-16T08:00:00'))).toEqual({ dayKey: '2026-06-16', seg: 0 }); // 天亮进新一天
     });
 
-    it('隔天没补的丢掉 → 直接跳到今天最早一段', () => {
+    it('隔天没补的丢掉 → 直接跳到当前现实段', () => {
         const w = mkWorld({ timeMode: 'real', realClock: { dayKey: '2026-06-13', seg: 1 } });
-        expect(realObserveTarget(w, at('2026-06-15T20:00:00'))).toEqual({ dayKey: '2026-06-15', seg: 0 });
+        expect(realObserveTarget(w, at('2026-06-15T20:00:00'))).toEqual({ dayKey: '2026-06-15', seg: 2 });
     });
 
     it('worldTimeLabel：real 模式显示已演到的现实段', () => {
@@ -296,9 +297,9 @@ describe('真实时间（跟现实早/中/晚/凌晨同步，错过当天可补�
             timezone: 'America/Los_Angeles',
             realClock: { dayKey: '2026-06-11', seg: 2 },
         });
-        const losAngelesNow = worldNow(w, new Date('2026-06-11T12:00:00.000Z')); // 当地 05:00
+        const losAngelesNow = worldNow(w, new Date('2026-06-11T12:00:00.000Z')); // 当地 05:00，仍属前一晚凌晨
         expect(clampRealClockToNow(w, losAngelesNow)).toBe(true);
-        expect(w.realClock).toEqual({ dayKey: '2026-06-11', seg: 0 });
+        expect(w.realClock).toEqual({ dayKey: '2026-06-10', seg: 3 });
         expect(clampRealClockToNow(w, losAngelesNow)).toBe(false);
     });
 

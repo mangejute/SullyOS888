@@ -74,6 +74,7 @@ import { exportMcdLocal } from '../utils/mcdMcpClient';
 import { exportMcpLocal } from '../utils/mcpClient';
 import { exportDesktopSkinLocal } from '../utils/desktopSkinBackup';
 import { assertSupportedSullyBackup } from '../utils/backupImportPolicy';
+import { isBrowserNotificationsEnabled, showCharacterNotification } from '../utils/browserFeatures';
 
 interface ProactiveQueueEntry {
   charId: string;
@@ -553,6 +554,9 @@ const defaultTheme: OSTheme = {
   darkMode: false,
   preserveCustomIconOutlines: false,
   nowPlayingWidgetLight: true,
+  bootAnimationEnabled: false,
+  lockScreenEnabled: false,
+  chatEntryAnimationEnabled: false,
 };
 
 /** 锁屏壁纸使用独立资产槽；undefined 表示继续跟随桌面壁纸。 */
@@ -1746,19 +1750,13 @@ export const OSProvider: React.FC<{ children: React.ReactNode }> = ({ children }
                           unreadUpdates[char.id] = dueMessages.length;
 
                           // Web Notification
-                          if (!Capacitor.isNativePlatform() && window.Notification && Notification.permission === 'granted') {
-                              try {
-                                  const notif = new Notification(char.name, {
-                                      body: dueMessages[0].content,
-                                      icon: char.avatar,
-                                      silent: false
-                                  });
-                                  notif.onclick = () => {
-                                      window.focus();
-                                      setActiveApp(AppID.Chat);
-                                      setActiveCharacterId(char.id);
-                                  };
-                              } catch (e) { /* notification failed */ }
+                          if (!Capacitor.isNativePlatform()) {
+                              void showCharacterNotification({
+                                  charId: char.id,
+                                  charName: char.name,
+                                  body: dueMessages[0].content,
+                                  avatar: char.avatar,
+                              });
                           }
                       }
                   }
@@ -1815,17 +1813,9 @@ export const OSProvider: React.FC<{ children: React.ReactNode }> = ({ children }
               // Web Notification —— 走 Service Worker 的 showNotification（和"测试推送"
               // 同一条链路）。页面级 `new Notification(...)` 在标签后台 / PWA / 移动端会
               // 静默失败，必须走 SW registration 才稳定。
-              if (!Capacitor.isNativePlatform() && 'serviceWorker' in navigator && window.Notification && Notification.permission === 'granted') {
+              if (!Capacitor.isNativePlatform()) {
                   const char = characters.find(c => c.id === charId);
-                  navigator.serviceWorker.ready.then(reg => {
-                      reg.showNotification(charName, {
-                          body: preview,
-                          icon: char?.avatar || './icons/icon-192.png',
-                          badge: './icons/icon-192.png',
-                          tag: `proactive-${charId}`,
-                          data: { charId, kind: 'proactive-1.0' },
-                      }).catch(() => { /* notification failed */ });
-                  }).catch(() => { /* SW not ready */ });
+                  void showCharacterNotification({ charId, charName, body: preview, avatar: char?.avatar });
               }
           }
       };
@@ -1960,6 +1950,15 @@ export const OSProvider: React.FC<{ children: React.ReactNode }> = ({ children }
               if (document.visibilityState === 'visible') {
                   addToast(`${charName || '角色'} 回复了消息`, 'success');
               }
+              void (async () => {
+                  if (!isBrowserNotificationsEnabled() || document.visibilityState === 'visible') return;
+                  const latest = await DB.getRecentMessagesByCharId(charId, 20, true);
+                  const reply = [...latest].reverse().find(message => message.role === 'assistant');
+                  if (!reply) return;
+                  const body = reply.content.replace(/\s+/g, ' ').trim().slice(0, 240) || '发来了一条新消息';
+                  const character = characters.find(item => item.id === charId);
+                  await showCharacterNotification({ charId, charName: charName || character?.name || '角色', body, avatar: character?.avatar });
+              })().catch(() => { /* notification lookup failed */ });
           }
       };
       const chatReplyEndHandler = () => {
@@ -2020,7 +2019,7 @@ export const OSProvider: React.FC<{ children: React.ReactNode }> = ({ children }
           window.removeEventListener(CHAT_GEN_EVENTS.emotionFailed, emotionFailHandler);
           document.removeEventListener('visibilitychange', onVisible);
       };
-  }, [sendProactiveNativeNotification]);
+  }, [characters, sendProactiveNativeNotification]);
 
   const proactiveRunningRef = useRef(false);
   const proactiveQueueRef = useRef<ProactiveQueueEntry[]>([]);

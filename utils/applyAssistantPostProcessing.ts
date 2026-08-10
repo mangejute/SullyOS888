@@ -692,9 +692,10 @@ export async function applyAssistantPostProcessing(
                         allChunks.push(...ChatParser.chunkText(block.trim()));
                     }
                     if (allChunks.length === 0 && part.content.trim()) allChunks.push(part.content.trim());
+                    const renderedChunks = allChunks;
 
-                    for (let i = 0; i < allChunks.length; i++) {
-                        let chunk = allChunks[i];
+                    for (let i = 0; i < renderedChunks.length; i++) {
+                        let chunk = renderedChunks[i];
                         const delay = Math.min(Math.max(chunk.length * 50, 500), 2000);
                         await typingPause(delay);
 

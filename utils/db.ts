@@ -9,7 +9,7 @@ import {
     LifeSimState, HandbookEntry, Tracker, TrackerEntry, HotNewsSnapshot,
     LifeRecord, MedPlan, LifeRecordSettings, CharacterGroup,
     VRWorldNovel, VRNovelAnnotation, CustomCreatorPart, VRMusicRoomState, VRGuestbookState, VRScript, VRStagedPlay, VRLetter,
-    WorldProfile, WorldEpisode, StoryTheaterEntry, StoryTheaterPreset, StoryTheaterMask
+    WorldProfile, WorldEpisode, StoryTheaterEntry, StoryTheaterPreset, StoryTheaterMask, PromptHistoryEntry, PromptHistoryKind
 } from '../types';
 import { exportPostOfficeLocal, importPostOfficeLocal } from './vrWorld/postOffice';
 import { exportSignalLocal, importSignalLocal } from './vrWorld/signal';
@@ -26,7 +26,8 @@ const DB_NAME = 'AetherOS_Data';
 // v68：character_groups 角色分组（神经链接"文件夹"，见 types.ts CharacterGroup）。
 // v69：见面·剧情条目与糯米机原生预设。正文继续复用 messages 表，避免再造会话存储。
 // v70：剧场面具箱（原创人物面具）；角色面具仍只存 characterId，不复制神经链接资料。
-const DB_VERSION = 70;
+// v71：提示词历史，保留每轮实际发送给 AI 的聊天与日程提示词。
+const DB_VERSION = 71;
 
 const STORE_CHARACTERS = 'characters';
 const STORE_CHAR_GROUPS = 'character_groups'; // 角色分组定义（角色通过 groupId 指向；与群聊 groups 无关）
@@ -83,6 +84,7 @@ const STORE_LIFE_SETTINGS = 'life_record_settings'; // 生活记录设置单例�
 const STORE_STORY_THEATERS = 'story_theaters';       // 见面·剧情条目（消息用 story-theater:${id}）
 const STORE_STORY_THEATER_PRESETS = 'story_theater_presets'; // 糯米机原生剧情预设
 const STORE_STORY_THEATER_MASKS = 'story_theater_masks'; // 剧场原创人物面具
+const STORE_PROMPT_HISTORY = 'prompt_history'; // 角色提示词历史（charId + kind）
 
 // API 调用记录：保留近 5 天，超期丢弃；再加一个硬上限防止异常情况撑爆
 const API_CALL_LOG_MAX_AGE_MS = 5 * 24 * 60 * 60 * 1000;
@@ -346,6 +348,11 @@ export const openDB = (): Promise<IDBDatabase> => {
       createStore(STORE_STORY_THEATERS, { keyPath: 'id' });
       createStore(STORE_STORY_THEATER_PRESETS, { keyPath: 'id' });
       createStore(STORE_STORY_THEATER_MASKS, { keyPath: 'id' });
+
+      if (!db.objectStoreNames.contains(STORE_PROMPT_HISTORY)) {
+          const promptHistoryStore = db.createObjectStore(STORE_PROMPT_HISTORY, { keyPath: 'id' });
+          promptHistoryStore.createIndex('charId_kind', ['charId', 'kind'], { unique: false });
+      }
 
       createStore(STORE_HOTNEWS, { keyPath: 'id' });
 
@@ -1626,6 +1633,37 @@ export const DB = {
       transaction.objectStore(STORE_DAILY_SCHEDULE).delete(`${charId}_${date}`);
   },
 
+  // ─── Prompt History (实际发给 AI 的提示词) ───
+  savePromptHistory: async (entry: PromptHistoryEntry): Promise<void> => {
+      const db = await openDB();
+      const transaction = db.transaction(STORE_PROMPT_HISTORY, 'readwrite');
+      return new Promise((resolve, reject) => {
+          transaction.objectStore(STORE_PROMPT_HISTORY).put(entry);
+          transaction.oncomplete = () => resolve();
+          transaction.onerror = () => reject(transaction.error);
+          transaction.onabort = () => reject(transaction.error);
+      });
+  },
+
+  getPromptHistory: async (charId: string, kind: PromptHistoryKind): Promise<PromptHistoryEntry[]> => {
+      const db = await openDB();
+      return new Promise((resolve, reject) => {
+          if (!db.objectStoreNames.contains(STORE_PROMPT_HISTORY)) { resolve([]); return; }
+          const transaction = db.transaction(STORE_PROMPT_HISTORY, 'readonly');
+          const store = transaction.objectStore(STORE_PROMPT_HISTORY);
+          const request = store.index('charId_kind').getAll(IDBKeyRange.only([charId, kind]));
+          request.onsuccess = () => resolve((request.result || []).sort((a: PromptHistoryEntry, b: PromptHistoryEntry) => b.createdAt - a.createdAt));
+          request.onerror = () => reject(request.error);
+      });
+  },
+
+  deletePromptHistory: async (id: string): Promise<void> => {
+      const db = await openDB();
+      if (!db.objectStoreNames.contains(STORE_PROMPT_HISTORY)) return;
+      const transaction = db.transaction(STORE_PROMPT_HISTORY, 'readwrite');
+      transaction.objectStore(STORE_PROMPT_HISTORY).delete(id);
+  },
+
   // ─── 热点快照 (分时段，全角色共享) ───
   getHotNewsSnapshot: async (id: string): Promise<HotNewsSnapshot | null> => {
       const db = await openDB();
@@ -2837,7 +2875,7 @@ export const DB = {
           });
       };
 
-      const [characters, characterGroups, messages, themes, emojis, emojiCategories, assets, galleryImages, userProfiles, diaries, tasks, anniversaries, roomTodos, roomNotes, groups, journalStickers, socialPosts, courses, games, worldbooks, storyTheaters, storyTheaterPresets, storyTheaterMasks, novels, bankTx, bankData, xhsActivities, xhsStockImages, songs, quizzes, guidebookSessions, scheduledMessages, lifeSimStates, handbooks, trackers, trackerEntries, hotNewsSnapshots, vrNovels, vrAnnotations, customCreatorParts, vrMusic, vrGuestbook, vrScripts, vrStagedPlays, vrPresets, vrLetters, vrSettings, worlds, worldEpisodes, lifeRecords, medPlans, lifeRecordSettings] = await Promise.all([
+      const [characters, characterGroups, messages, themes, emojis, emojiCategories, assets, galleryImages, userProfiles, diaries, tasks, anniversaries, roomTodos, roomNotes, groups, journalStickers, socialPosts, courses, games, worldbooks, storyTheaters, storyTheaterPresets, storyTheaterMasks, novels, bankTx, bankData, xhsActivities, xhsStockImages, songs, quizzes, guidebookSessions, scheduledMessages, lifeSimStates, handbooks, trackers, trackerEntries, hotNewsSnapshots, vrNovels, vrAnnotations, customCreatorParts, vrMusic, vrGuestbook, vrScripts, vrStagedPlays, vrPresets, vrLetters, vrSettings, worlds, worldEpisodes, lifeRecords, medPlans, lifeRecordSettings, promptHistory] = await Promise.all([
           getAllFromStore(STORE_CHARACTERS),
           getAllFromStore(STORE_CHAR_GROUPS),
           getAllFromStore(STORE_MESSAGES),
@@ -2890,6 +2928,7 @@ export const DB = {
           getAllFromStore(STORE_LIFE_RECORDS),
           getAllFromStore(STORE_MED_PLANS),
           getAllFromStore(STORE_LIFE_SETTINGS),
+          getAllFromStore(STORE_PROMPT_HISTORY),
       ]);
 
       const userProfile = userProfiles.length > 0 ? {
@@ -2919,6 +2958,7 @@ export const DB = {
           lifeRecords,
           medPlans,
           lifeRecordSettings,
+          promptHistory,
           hotNewsSnapshots,
           vrNovels,
           vrAnnotations,
@@ -2971,6 +3011,7 @@ export const DB = {
           STORE_SCHEDULED,
           STORE_LIFE_SIM,
           STORE_DAILY_SCHEDULE,
+          STORE_PROMPT_HISTORY,
           STORE_HANDBOOK,
           STORE_TRACKERS,
           STORE_TRACKER_ENTRIES,
@@ -3059,6 +3100,7 @@ export const DB = {
           data.digestReports !== undefined,
           data.memoryBatches !== undefined,
           data.dailySchedules !== undefined,
+          data.promptHistory !== undefined,
           data.handbooks !== undefined,
           data.trackers !== undefined,
           data.trackerEntries !== undefined,
@@ -3518,6 +3560,11 @@ export const DB = {
           await clearAndAdd(STORE_DAILY_SCHEDULE, data.dailySchedules, '每日程', false);
           data.dailySchedules = undefined as any;
       }, data.dailySchedules?.length || 0);
+
+      await runSection('提示词历史', data.promptHistory !== undefined, async () => {
+          await clearAndAdd(STORE_PROMPT_HISTORY, data.promptHistory, '提示词历史', false);
+          data.promptHistory = undefined as any;
+      }, data.promptHistory?.length || 0);
 
       // 手账（跨角色聚合留痕本）
       await runSection('手账', data.handbooks !== undefined, async () => {

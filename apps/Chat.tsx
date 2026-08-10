@@ -2,14 +2,16 @@ import React, { useState, useEffect, useRef, useLayoutEffect, useMemo, useCallba
 import { createPortal } from 'react-dom';
 import { useOS } from '../context/OSContext';
 import { DB } from '../utils/db';
-import { Message, MessageType, MemoryFragment, Emoji, EmojiCategory, DailySchedule, ScheduleSlot } from '../types';
+import { AppID, Message, MessageType, MemoryFragment, Emoji, EmojiCategory, DailySchedule, ScheduleSlot } from '../types';
 import { processImage } from '../utils/file';
 import { safeResponseJson, extractContent } from '../utils/safeApi';
 import { buildChatFineTuneCss, mergeChatFineTune } from '../utils/chatFineTuneCss';
 import ChatFineTunePanel from '../components/chat/ChatFineTunePanel';
-import { FadersHorizontal } from '@phosphor-icons/react';
+import { FadersHorizontal, Phone, GearSix } from '@phosphor-icons/react';
 import { generateDailyScheduleForChar, isScheduleFeatureOn } from '../utils/scheduleGenerator';
 import { getDailyScheduleForChar } from '../utils/dailySchedule';
+import { runWorldEpisode } from '../utils/worldHome/engine';
+import { getLinkedWorldForCharacter, syncWorldBeatToSchedule } from '../utils/worldHome/lifeLink';
 import { useLocalDateKey } from '../hooks/useLocalDateKey';
 import { resolveCharTimeZone } from '../utils/timezone';
 import { generateSlotTheater } from '../utils/theaterGenerator';
@@ -38,6 +40,7 @@ import ChromeCssEditor from '../components/chat/ChromeCssEditor';
 import ChatInputArea from '../components/chat/ChatInputArea';
 import MemoryRepairPortal from '../components/chat/MemoryRepairPortal';
 import ChatModals from '../components/chat/ChatModals';
+import PromptViewer from '../components/chat/PromptViewer';
 import Modal from '../components/os/Modal';
 import ProactiveSettingsModal from '../components/chat/ProactiveSettingsModal';
 import ActiveMsg2SettingsModal from '../components/chat/ActiveMsg2SettingsModal';
@@ -82,7 +85,7 @@ type InstantToolUiStatus = {
 };
 
 const Chat: React.FC = () => {
-    const { characters, activeCharacterId, setActiveCharacterId, updateCharacter, apiConfig, apiPresets, addApiPreset, closeApp, customThemes, removeCustomTheme, addToast, showError, userProfile, lastMsgTimestamp, groups, characterGroups, clearUnread, unreadMessages, realtimeConfig, memoryPalaceConfig, remoteVectorConfig, syncEmotionApiToAllCharacters, theme: osTheme, proactiveComposingChars, openDateWithChar } = useOS();
+    const { characters, activeCharacterId, setActiveCharacterId, updateCharacter, apiConfig, apiPresets, addApiPreset, closeApp, openApp, customThemes, removeCustomTheme, addToast, showError, userProfile, lastMsgTimestamp, groups, characterGroups, clearUnread, unreadMessages, realtimeConfig, memoryPalaceConfig, remoteVectorConfig, syncEmotionApiToAllCharacters, theme: osTheme, proactiveComposingChars, openDateWithChar } = useOS();
     const isProactiveComposing = !!(activeCharacterId && proactiveComposingChars[activeCharacterId]);
     const localDateKey = useLocalDateKey();
 
@@ -113,6 +116,7 @@ const Chat: React.FC = () => {
     const [input, setInput] = useState('');
     const [showPanel, setShowPanel] = useState<'none' | 'actions' | 'emojis' | 'chars'>('none');
     const [memoryRepairOpen, setMemoryRepairOpen] = useState(false);
+    const [promptViewerOpen, setPromptViewerOpen] = useState(false);
     
     // Emoji State
     const [emojis, setEmojis] = useState<Emoji[]>([]);
@@ -161,6 +165,8 @@ const Chat: React.FC = () => {
     const [settingsContextLimit, setSettingsContextLimit] = useState(500);
     const [settingsContextRangeMode, setSettingsContextRangeMode] = useState<ContextRangeMode>('manual');
     const [settingsHideSysLogs, setSettingsHideSysLogs] = useState(false);
+    const [settingsReplyMinCount, setSettingsReplyMinCount] = useState(1);
+    const [settingsReplyMaxCount, setSettingsReplyMaxCount] = useState(6);
     const [settingsHtmlModeCustomPrompt, setSettingsHtmlModeCustomPrompt] = useState('');
     const [preserveContext, setPreserveContext] = useState(true);
     const [isVectorizing, setIsVectorizing] = useState(false);
@@ -331,7 +337,7 @@ const Chat: React.FC = () => {
     }, [activeCharacterId]);
 
     // --- Initialize Hook ---
-    const { isTyping, streamingBubbles, streamingThinking, recallStatus, searchStatus, diaryStatus, emotionStatus, memoryPalaceStatus, memoryPalaceResult, setMemoryPalaceResult, lastDigestResult, setLastDigestResult, lastTokenUsage, tokenBreakdown, setLastTokenUsage, triggerAI, startProactiveChat, stopProactiveChat, isProactiveActive } = useChatAI({
+    const { isTyping, streamingBubbles, streamingThinking, recallStatus, searchStatus, diaryStatus, emotionStatus, memoryPalaceStatus, memoryPalaceResult, setMemoryPalaceResult, lastDigestResult, setLastDigestResult, lastTokenUsage, tokenBreakdown, setLastTokenUsage, triggerAI, startProactiveChat, stopProactiveChat, isProactiveActive, lastSystemPrompt } = useChatAI({
         char,
         userProfile,
         apiConfig,
@@ -868,11 +874,11 @@ const Chat: React.FC = () => {
         }
     }, [activeCharacterId, reloadMessages]);
 
-    // 进入/切换角色时触发「登场」过场。useLayoutEffect 在浏览器绘制前置真，
-    // 让过场层先盖住，避免一帧闪到新角色的空聊天界面。
+    // 进入/切换角色时按系统设置决定是否触发头像登场过场。
+    // useLayoutEffect 在浏览器绘制前置真，打开时能避免一帧闪到新角色的空聊天界面。
     useLayoutEffect(() => {
-        if (activeCharacterId) setShowEntry(true);
-    }, [activeCharacterId]);
+        setShowEntry(!!activeCharacterId && osTheme.chatEntryAnimationEnabled === true);
+    }, [activeCharacterId, osTheme.chatEntryAnimationEnabled]);
 
     useEffect(() => {
         let clearTimer: ReturnType<typeof setTimeout> | null = null;
@@ -937,6 +943,8 @@ const Chat: React.FC = () => {
         setSettingsContextLimit(char.contextLimit || 500);
         setSettingsContextRangeMode(resolveContextRangeMode(char));
         setSettingsHideSysLogs(char.hideSystemLogs || false);
+        setSettingsReplyMinCount(Math.max(1, Math.min(20, Math.floor(char.replyMessageMinCount ?? 1))));
+        setSettingsReplyMaxCount(Math.max(1, Math.min(20, Math.floor(char.replyMessageMaxCount ?? 6))));
         setSettingsHtmlModeCustomPrompt((char as any).htmlModeCustomPrompt || '');
     }, [modalType, char?.id]);
 
@@ -994,6 +1002,12 @@ const Chat: React.FC = () => {
         visibleCountRef.current = visibleCount;
     }, [visibleCount]);
 
+    const bottomFollowUntilRef = useRef(0);
+    const scrollToBottomNow = useCallback(() => {
+        if (!scrollRef.current || selectionMode || windowedFocusMsgId !== null) return;
+        scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+    }, [selectionMode, windowedFocusMsgId]);
+
     // （旧的"首次自动归档 banner"已移除，自动归档改为用户在神经链接里显式 opt-in）
 
     // buff 同步已上移到 OSContext 的 App 级 'emotion-updated' 监听 (无条件按事件 charId 更新内存,
@@ -1015,21 +1029,47 @@ const Chat: React.FC = () => {
         // windowed 模式下用户在翻旧消息，不要被新消息打断滚走。
         if (currentLastId !== lastMsgIdRef.current) {
             if (windowedFocusMsgId === null) {
-                scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+                bottomFollowUntilRef.current = Date.now() + 4000;
+                scrollToBottomNow();
             }
             lastMsgIdRef.current = currentLastId;
         }
-    }, [messages, activeCharacterId, selectionMode, windowedFocusMsgId]);
+    }, [messages, activeCharacterId, selectionMode, windowedFocusMsgId, scrollToBottomNow]);
 
     useEffect(() => {
         if (isTyping && scrollRef.current && !selectionMode && windowedFocusMsgId === null) {
             const now = Date.now();
             if (now - scrollThrottleRef.current > 150) {
                 scrollThrottleRef.current = now;
-                scrollRef.current.scrollTo({ top: scrollRef.current.scrollHeight, behavior: 'smooth' });
+                // 回复气泡会连续落库；叠加 smooth 动画会把不同高度的旧目标排队，
+                // 生成结束后反而可能把视图带回上方。生成中直接定位到底部即可。
+                scrollToBottomNow();
             }
         }
-    }, [messages, isTyping, streamingBubbles, streamingThinking, recallStatus, searchStatus, diaryStatus, selectionMode, windowedFocusMsgId]);
+    }, [messages, isTyping, streamingBubbles, streamingThinking, recallStatus, searchStatus, diaryStatus, selectionMode, windowedFocusMsgId, scrollToBottomNow]);
+
+    // 初次打开聊天时，图片/表情资源可能在首屏渲染后才撑开高度；生成结束时也一样。
+    // 在短窗口内重复校准到底部，保证最新一条（包括完整表情图）不被输入栏遮住。
+    useEffect(() => {
+        if (windowedFocusMsgId !== null || selectionMode) return;
+        bottomFollowUntilRef.current = Date.now() + 4000;
+        const timers = [0, 80, 240, 600, 1200].map(delay => window.setTimeout(() => {
+            if (Date.now() <= bottomFollowUntilRef.current) scrollToBottomNow();
+        }, delay));
+        return () => timers.forEach(timer => window.clearTimeout(timer));
+    }, [activeCharacterId, isTyping, messages.length, selectionMode, windowedFocusMsgId, scrollToBottomNow]);
+
+    // 监听后代图片的 load 事件：表情包/头像晚于文本完成加载时，再校准一次底部。
+    useEffect(() => {
+        const host = scrollRef.current;
+        if (!host) return;
+        const onImageLoad = (event: Event) => {
+            if (!(event.target instanceof HTMLImageElement)) return;
+            if (Date.now() <= bottomFollowUntilRef.current) scrollToBottomNow();
+        };
+        host.addEventListener('load', onImageLoad, true);
+        return () => host.removeEventListener('load', onImageLoad, true);
+    }, [scrollToBottomNow]);
 
     // 白框提示音：当 char 新发的消息成为会话最后一条时播放一次（用户自己/历史/翻旧消息都不响）。
     // 声音配置编码在白框 CSS 注释里（角色 chromeCustomCss 覆盖全局 chatChromeCustomCss），随白框分享一起走。
@@ -1334,11 +1374,11 @@ const Chat: React.FC = () => {
     const handleManualTrigger = () => {
         // 同上：上一轮还在跑时 triggerAI 会静默 reject，提前挡掉避免指示灯卡死。
         if (isTyping) return;
-        if (!isInstantConfigReady()) { triggerAI(messages); return; }
+        if (!isInstantConfigReady()) { triggerAI(messages, undefined, undefined, { manualNudge: true }); return; }
         // instantSendingActive 驱动 header "发送中…" 徽章 (拼接+发送窗口). 消息上的三个小圆点
         // 另走纯前端判定 (isTyping && 最后一条消息), 见渲染处.
         setInstantSendingActive(true);
-        triggerAI(messages, undefined, () => setInstantSendingActive(false));
+        triggerAI(messages, undefined, () => setInstantSendingActive(false), { manualNudge: true });
     };
 
     const handleReroll = async () => {
@@ -1385,7 +1425,7 @@ const Chat: React.FC = () => {
         // 选表情、选分类之类的动作不上报。
         if ([
             'transfer', 'archive', 'settings', 'chrome-css', 'chrome-sound', 'fine-tune',
-            'meetup', 'proactive', 'active-msg-2', 'schedule', 'mcd-request', 'luckin-request',
+            'meetup', 'proactive', 'active-msg-2', 'schedule', 'world-home', 'mcd-request', 'luckin-request',
             'html-mode-toggle', 'html-mode-settings', 'thinking-settings',
             // 独立小功能：点一下就是用了一次，跟「打开某个面板」同一性质。
             // send-emoji / select-category 这些是「挑哪一个」，不进名单。
@@ -1394,7 +1434,15 @@ const Chat: React.FC = () => {
             trackEvent('打开聊天功能面板项', { action: type });
         }
         switch (type) {
+            case 'view-prompts':
+                setShowPanel('none');
+                setPromptViewerOpen(true);
+                break;
             case 'memory-link': setShowPanel('none'); setMemoryRepairOpen(true); break;
+            case 'dev-debug':
+                setShowPanel('none');
+                window.dispatchEvent(new CustomEvent('open-dev-debug'));
+                break;
             case 'transfer': setModalType('transfer'); break;
             case 'poke': handleSendText('[戳一戳]', 'interaction'); break;
             case 'archive': setModalType('archive-settings'); break;
@@ -1415,6 +1463,10 @@ const Chat: React.FC = () => {
             case 'active-msg-2': setShowActiveMsg2Modal(true); break;
             case 'emotion': setModalType('schedule'); break; // 情绪已并入日程，打开同一 modal
             case 'schedule': setModalType('schedule'); break;
+            case 'world-home':
+                setShowPanel('none');
+                openApp(AppID.WorldHome);
+                break;
             case 'mcd-not-configured':
                 addToast('请先到设置 → 麦当劳 启用并填入 MCP Token', 'info');
                 break;
@@ -1790,9 +1842,41 @@ const Chat: React.FC = () => {
         if (!targetChar || isScheduleGenerating) return;
         setIsScheduleGenerating(true);
         try {
+            // 用户主动点「重新生成」时，联动家园先观测一段真实事件，再以最新生活状态重建日程。
+            // 已经演到当前现实段则保留原剧情，只重新生成日程，避免同一段被重复推进。
+            let linkedWorldId: string | undefined;
+            let observedBeats: import('../types').WorldCharBeat[] | undefined;
+            if (forceRegenerate) {
+                const linkedWorld = await getLinkedWorldForCharacter(targetChar.id);
+                if (linkedWorld) {
+                    linkedWorldId = linkedWorld.id;
+                    const observed = await runWorldEpisode({
+                        world: linkedWorld,
+                        characters,
+                        apiConfig,
+                        userProfile,
+                        groups,
+                        realtimeConfig,
+                        memoryPalaceConfig,
+                        trigger: 'observe',
+                    });
+                    if (observed.ok && observed.episode) {
+                        observedBeats = observed.episode.beats;
+                        await reloadMessages(visibleCountRef.current);
+                    }
+                }
+            }
             const result = await generateDailyScheduleForChar(targetChar, userProfile, apiConfig, forceRegenerate);
             if (result) {
                 setScheduleData(result);
+                // 观测发生在日程重建之前，需把本轮已发生事件补回新日程，不能让重建覆盖掉实况。
+                if (linkedWorldId && observedBeats?.length) {
+                    const refreshedWorld = await DB.getWorld(linkedWorldId);
+                    if (refreshedWorld) {
+                        await Promise.all(observedBeats.map(beat => syncWorldBeatToSchedule(refreshedWorld, beat)));
+                    }
+                    addToast('家园已观测更新，日程已按最新事件重生成', 'success');
+                }
                 // 跨天后台重新生成也要刷云端：不刷的话角色到点照着昨天的作息表说话
                 markAmsgStateDirty({ char: targetChar, userProfile, groups, realtimeConfig });
             }
@@ -2016,6 +2100,8 @@ const Chat: React.FC = () => {
             contextFollowsMemoryPalaceHwm: nextFollowsOneShotWaterline,
             contextUserStartMessageId: nextUserStart,
             hideSystemLogs: settingsHideSysLogs,
+            replyMessageMinCount: Math.max(1, Math.min(settingsReplyMaxCount, settingsReplyMinCount)),
+            replyMessageMaxCount: Math.max(settingsReplyMinCount, Math.min(20, settingsReplyMaxCount)),
             htmlModeCustomPrompt: settingsHtmlModeCustomPrompt,
         } as any);
         setModalType('none');
@@ -3101,6 +3187,8 @@ const Chat: React.FC = () => {
                 settingsContextLimit={settingsContextLimit} setSettingsContextLimit={setSettingsContextLimit}
                 settingsContextRangeMode={settingsContextRangeMode} setSettingsContextRangeMode={setSettingsContextRangeMode}
                 settingsHideSysLogs={settingsHideSysLogs} setSettingsHideSysLogs={setSettingsHideSysLogs}
+                settingsReplyMinCount={settingsReplyMinCount} setSettingsReplyMinCount={setSettingsReplyMinCount}
+                settingsReplyMaxCount={settingsReplyMaxCount} setSettingsReplyMaxCount={setSettingsReplyMaxCount}
                 preserveContext={preserveContext} setPreserveContext={setPreserveContext}
                 editContent={editContent} setEditContent={setEditContent}
                 archivePrompts={archivePrompts} selectedPromptId={selectedPromptId} setSelectedPromptId={(id: string) => {
@@ -3120,6 +3208,7 @@ const Chat: React.FC = () => {
                 onTransfer={() => { if(transferAmt) handleSendText(`[转账]`, 'transfer', { amount: transferAmt, note: transferNote.trim() || undefined, status: 'pending' }); setTransferNote(''); setModalType('none'); }}
                 onImportEmoji={handleImportEmoji}
                 onSaveSettings={saveSettings} onBgUpload={handleBgUpload} onRemoveBg={() => updateCharacter(char.id, { chatBackground: undefined })}
+                onSaveImageReferences={(references) => { void updateCharacter(char.id, { imageGenerationReferences: references }); }}
                 onClearHistory={handleClearHistory} onArchive={handleFullArchive}
                 onCreatePrompt={createNewPrompt} onEditPrompt={editSelectedPrompt} onSavePrompt={handleSavePrompt} onDeletePrompt={handleDeletePrompt}
                 onSetHistoryStart={handleSetHistoryStart} onRestoreAdaptiveContext={restoreAdaptiveContext} onJumpToMessageInChat={handleJumpToMessageInChat} onEnterSelectionMode={handleEnterSelectionMode}
@@ -3215,6 +3304,10 @@ const Chat: React.FC = () => {
                  onTriggerAI={handleManualTrigger}
                  showTrigger={false}
                 onShowCharsPanel={() => setShowPanel('chars')}
+                topActions={[
+                    { label: '电话（即将上线）', icon: <Phone className="w-5 h-5" weight="regular" />, onClick: () => addToast('电话功能即将上线', 'info') },
+                    { label: '聊天设置', icon: <GearSix className="w-5 h-5" weight="regular" />, onClick: () => setModalType('chat-settings') },
+                ]}
                 onDeleteBuff={(buffId) => {
                     const currentBuffs = char.activeBuffs || [];
                     const newBuffs = currentBuffs.filter(b => b.id !== buffId);
@@ -3231,6 +3324,15 @@ const Chat: React.FC = () => {
                 hideBuffs={osTheme.chatHideHeaderBuffs}
                 acnh={acnh}
              />
+
+            {promptViewerOpen && char && (
+                <PromptViewer
+                    character={char}
+                    lastSystemPrompt={lastSystemPrompt}
+                    imagePrompt={apiConfig.imageGenerationApi?.prompt}
+                    onClose={() => setPromptViewerOpen(false)}
+                />
+            )}
 
             {/* 认知消化结果弹窗 — 全屏玻璃拟态 */}
             {lastDigestResult && (() => {
@@ -3352,7 +3454,7 @@ const Chat: React.FC = () => {
                 );
             })()}
 
-            <div ref={scrollRef} className="flex-1 overflow-y-auto overflow-x-hidden pt-6 pb-6 no-scrollbar" style={{ backgroundImage: activeTheme.type === 'custom' && activeTheme.user.backgroundImage ? 'none' : undefined }}>
+            <div ref={scrollRef} className="flex-1 overflow-y-auto overflow-x-hidden pt-6 pb-6 no-scrollbar" style={{ backgroundImage: activeTheme.type === 'custom' && activeTheme.user.backgroundImage ? 'none' : undefined, overflowAnchor: 'none' }}>
                 {windowedFocusMsgId !== null && (
                     <div className="sticky top-0 z-20 flex justify-center pb-2 pointer-events-none">
                         <button onClick={handleBackToCurrent} className="pointer-events-auto px-4 py-2 bg-primary text-white rounded-full text-xs font-bold shadow-lg active:scale-95 transition-transform flex items-center gap-1.5">
@@ -3445,6 +3547,7 @@ const Chat: React.FC = () => {
                             onMcdCandidate={handleMcdCandidate}
                             onResolveTransfer={handleResolveTransfer}
                             onResolveLifeRecord={handleResolveLifeRecord}
+                            onOpenWorldHome={() => openApp(AppID.WorldHome)}
                             thinkingChainOptions={thinkingChainOptions}
                         />
                         {showToolTrace && (
@@ -3667,6 +3770,7 @@ const Chat: React.FC = () => {
                     sendButtonStyle={osTheme.chatSendButtonStyle}
                     chromeStyle={osTheme.chatChromeStyle}
                     acnh={acnh}
+                    devDebugAvailable={isDevDebugAvailable()}
                 />
             </div>
 

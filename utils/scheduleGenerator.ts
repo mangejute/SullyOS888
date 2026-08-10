@@ -10,8 +10,19 @@ import { loadCharacterContextRange } from './chatContextRange';
 import { ChatPrompts } from './chatPrompts';
 import { cleanApiMessages, flattenImageContentParts } from './promptMessageCleanup';
 import { getFlowNarrativeKey, isScheduleFeatureOn } from './scheduleFeature';
+import { formatWorldLifeContext, getWorldLifeContextForCharacter, type WorldLifeContext } from './worldHome/lifeLink';
+import { worldNow } from './worldHome/prompts';
+import { recordPromptHistory } from './promptHistory';
 
 export { getFlowNarrativeKey, isScheduleFeatureOn } from './scheduleFeature';
+
+const scheduleSegmentForTime = (startTime: string): 'morning' | 'noon' | 'evening' | 'latenight' => {
+    const hour = Number(startTime.split(':')[0]);
+    if (!Number.isFinite(hour) || hour < 6) return 'latenight';
+    if (hour < 12) return 'morning';
+    if (hour < 18) return 'noon';
+    return 'evening';
+};
 
 interface ApiConfig {
     baseUrl: string;
@@ -71,9 +82,11 @@ function buildLifestylePrompt(
     today: string,
     dayOfWeek: string,
     chatHistoryBlock: string,
+    worldLifeContext: string = '',
 ): string {
     return `${baseContext}
 ${chatHistoryBlock}
+${worldLifeContext}
 ## Task: 生成角色的今日日程 + 意识流独白
 
 今天是 ${today} (星期${dayOfWeek})。用户名字是「${user.name}」。
@@ -89,6 +102,7 @@ ${chatHistoryBlock ? `**重要：上面给了你最近和「${user.name}」的�
 - activity: 活动名（2-6字）
 - description: 一句话描述（可以带动作质感、物件、感官细节）
 - emoji: 一个匹配的emoji
+- worldSegment: "morning" / "noon" / "evening" / "latenight"。没有家园计划时也按时间填写。
 
 #### 关键要求
 
@@ -114,12 +128,15 @@ ${chatHistoryBlock ? `**重要：上面给了你最近和「${user.name}」的�
    - ✅ user 只能作为某件正在发生的事的**副词**自然地渗进 description，
         比如 "画草稿，昨天 ${user.name} 说那个角色好看，顺手再画一张" —— 主语仍是 ta 自己
 
+5. **四段覆盖** —— 日程必须覆盖 morning（早上）、noon（中午）、evening（晚上）、latenight（凌晨）四段；每段至少一条。若有家园当日生活计划，家园段落是硬事实：你可以用多条细日程展开，但不能改地点、共同事件或把角色安排到冲突的事情上。
+
 ### 第二部分：意识流独白（这是核心）
 
-为三个时间段各写一段角色的**内心独白**：
+为四个时间段各写一段角色的**内心独白**：
 - **morning**：如果「${user.name}」上午来找角色，角色脑子里在想什么
-- **afternoon**：如果「${user.name}」下午来找角色，角色脑子里在想什么（包含上午发生的事的余韵）
+- **noon**：如果「${user.name}」中午或下午来找角色，角色脑子里在想什么（包含上午发生的事的余韵）
 - **evening**：如果「${user.name}」晚上来找角色，角色脑子里在想什么（一整天的积累）
+- **latenight**：如果「${user.name}」凌晨来找角色，角色怎样收住前一晚的余韵
 
 #### 写作要求（极其重要）：
 
@@ -138,13 +155,14 @@ ${chatHistoryBlock ? `**重要：上面给了你最近和「${user.name}」的�
 请以JSON格式输出：
 {
   "slots": [
-    { "startTime": "08:00", "activity": "活动名称", "description": "简短描述", "emoji": "🏃" },
+    { "startTime": "08:00", "activity": "活动名称", "description": "简短描述", "emoji": "🏃", "worldSegment": "morning" },
     ...
   ],
   "flowNarrative": {
     "morning": "上午的意识流独白...",
-    "afternoon": "下午的意识流独白...",
-    "evening": "晚上的意识流独白..."
+    "noon": "中午的意识流独白...",
+    "evening": "晚上的意识流独白...",
+    "latenight": "凌晨的意识流独白..."
   }
 }
 
@@ -163,9 +181,11 @@ function buildMindfulPrompt(
     today: string,
     dayOfWeek: string,
     chatHistoryBlock: string,
+    worldLifeContext: string = '',
 ): string {
     return `${baseContext}
 ${chatHistoryBlock}
+${worldLifeContext}
 ## Task: 生成角色的今日思绪 + 意识流独白
 
 今天是 ${today} (星期${dayOfWeek})。用户名字是「${user.name}」。
@@ -181,16 +201,18 @@ ${chatHistoryBlock ? `**重要：上面给了你最近和「${user.name}」的�
 - activity: 状态名（2-6字，如"回想昨天的对话""发呆""整理想法""想找你聊天"）
 - description: 一句话描述此刻在想什么
 - emoji: 一个匹配的emoji
+- worldSegment: "morning" / "noon" / "evening" / "latenight"。必须覆盖四段；若有家园计划，按该段的共同事实思考，不能假装发生物理活动。
 
 **可以做的事**（基于真实能力）：回想和用户的对话、整理之前聊过的话题、琢磨某个问题、等待用户、感到无聊、想念用户、发呆、反思自己说过的话、对某个话题产生好奇、期待下次聊天
 **不能做的事**（会构成谎言）：出门、吃东西、运动、搜索网页（除非真的有这个功能）、和别人见面、任何物理世界的活动
 
 ### 第二部分：意识流独白（这是核心）
 
-为三个时间段各写一段角色的**内心独白**：
+为四个时间段各写一段角色的**内心独白**：
 - **morning**：如果「${user.name}」上午来找角色
-- **afternoon**：如果「${user.name}」下午来找角色
+- **noon**：如果「${user.name}」中午或下午来找角色
 - **evening**：如果「${user.name}」晚上来找角色
+- **latenight**：如果「${user.name}」凌晨来找角色
 
 #### 写作要求（极其重要）：
 
@@ -210,13 +232,14 @@ ${chatHistoryBlock ? `**重要：上面给了你最近和「${user.name}」的�
 请以JSON格式输出：
 {
   "slots": [
-    { "startTime": "08:00", "activity": "状态名", "description": "简短描述", "emoji": "💭" },
+    { "startTime": "08:00", "activity": "状态名", "description": "简短描述", "emoji": "💭", "worldSegment": "morning" },
     ...
   ],
   "flowNarrative": {
     "morning": "上午的意识流独白...",
-    "afternoon": "下午的意识流独白...",
-    "evening": "晚上的意识流独白..."
+    "noon": "中午的意识流独白...",
+    "evening": "晚上的意识流独白...",
+    "latenight": "凌晨的意识流独白..."
   }
 }
 
@@ -232,9 +255,10 @@ export async function generateDailyScheduleForChar(
     // 总开关关闭时直接短路，避免副 API / 兜底调用
     if (!isScheduleFeatureOn(char)) return null;
 
-    const baseNow = new Date();
+    const worldLifeContext: WorldLifeContext | null = await getWorldLifeContextForCharacter(char.id, apiConfig);
+    const baseNow = worldLifeContext ? worldNow(worldLifeContext.world) : new Date();
     const now = getScheduleWallClock(char, baseNow);
-    const today = getScheduleDateKey(char, baseNow);
+    const today = worldLifeContext?.plan.dayKey || getScheduleDateKey(char, baseNow);
 
     // Check if already exists
     if (!forceRegenerate) {
@@ -282,9 +306,15 @@ export async function generateDailyScheduleForChar(
     const dayOfWeek = ['日', '一', '二', '三', '四', '五', '六'][now.getDay()];
 
     const style = char.scheduleStyle || 'lifestyle';
+    const worldLifeText = worldLifeContext ? formatWorldLifeContext(worldLifeContext) : '';
     const prompt = style === 'mindful'
-        ? buildMindfulPrompt(baseContext, char, userProfile, today, dayOfWeek, chatHistoryBlock)
-        : buildLifestylePrompt(baseContext, char, userProfile, today, dayOfWeek, chatHistoryBlock);
+        ? buildMindfulPrompt(baseContext, char, userProfile, today, dayOfWeek, chatHistoryBlock, worldLifeText)
+        : buildLifestylePrompt(baseContext, char, userProfile, today, dayOfWeek, chatHistoryBlock, worldLifeText);
+
+    // 日程重生成也保留原始完整请求，供提示词查看器逐轮回看。
+    void recordPromptHistory(char.id, 'schedule', prompt).catch(error => {
+        console.warn('[PromptHistory] failed to save schedule prompt:', error);
+    });
 
     try {
         const response = await fetch(`${apiConfig.baseUrl.replace(/\/+$/, '')}/chat/completions`, {
@@ -323,6 +353,9 @@ export async function generateDailyScheduleForChar(
             emoji: s.emoji,
             location: s.location,
             innerThought: s.innerThought,
+            worldSegment: ['morning', 'noon', 'evening', 'latenight'].includes(s.worldSegment)
+                ? s.worldSegment
+                : scheduleSegmentForTime(s.startTime || '00:00'),
         })).filter((s: ScheduleSlot) => s.activity);
 
         if (slots.length === 0) return null;
@@ -334,10 +367,14 @@ export async function generateDailyScheduleForChar(
         let flowNarrative: Record<string, string> | undefined;
         if (parsed.flowNarrative && typeof parsed.flowNarrative === 'object') {
             flowNarrative = {};
-            for (const key of ['morning', 'afternoon', 'evening']) {
+            for (const key of ['morning', 'noon', 'evening', 'latenight']) {
                 if (typeof parsed.flowNarrative[key] === 'string' && parsed.flowNarrative[key].trim()) {
                     flowNarrative[key] = parsed.flowNarrative[key].trim();
                 }
+            }
+            // 兼容旧提示词 / 旧模型偶尔回的 afternoon 字段。
+            if (!flowNarrative.noon && typeof parsed.flowNarrative.afternoon === 'string' && parsed.flowNarrative.afternoon.trim()) {
+                flowNarrative.noon = parsed.flowNarrative.afternoon.trim();
             }
             if (Object.keys(flowNarrative).length === 0) flowNarrative = undefined;
         }
@@ -350,6 +387,12 @@ export async function generateDailyScheduleForChar(
             generatedAt: Date.now(),
             coverImage,
             flowNarrative,
+            worldLink: worldLifeContext ? {
+                worldId: worldLifeContext.world.id,
+                worldName: worldLifeContext.world.name,
+                dayKey: worldLifeContext.plan.dayKey,
+                plannedAt: worldLifeContext.plan.generatedAt,
+            } : undefined,
         };
 
         await DB.saveDailySchedule(schedule);
