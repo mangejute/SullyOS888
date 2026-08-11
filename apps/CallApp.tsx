@@ -3763,9 +3763,9 @@ ${sentencePlan}`;
         <div className="absolute inset-0 z-[70] bg-black/70 backdrop-blur-sm flex items-center justify-center px-6">
           <div className={`w-full max-w-sm rounded-3xl border border-white/15 bg-gradient-to-b p-5 shadow-2xl ${lightTheme ? 'from-white to-[#f0edf9]' : 'from-[#1a1130] to-[#0a0613]'}`}>
             <div className="text-lg font-semibold text-white">要挂了吗？</div>
-            <p className="mt-2 text-sm text-white/65 leading-relaxed">和{selectedChar?.name || '对方'}聊了 {formatDuration(elapsedSeconds)}。{returnToChatOnHangup ? '确认挂断后会直接返回当前聊天。' : '这通电话会好好保存下来。'}</p>
+            <p className="mt-2 text-sm text-white/65 leading-relaxed">和{selectedChar?.name || '对方'}聊了 {formatDuration(elapsedSeconds)}。{returnToChatOnHangup ? '先忙别的会回到聊天并保留通话；点“挂了吧”才会真正结束。' : '这通电话会好好保存下来。'}</p>
             <div className="mt-5 space-y-2">
-              {!returnToChatOnHangup && <button onClick={() => {
+              <button onClick={() => {
                 setShowHangupConfirm(false);
                 if (selectedChar) {
                   suspendCall({
@@ -3779,12 +3779,16 @@ ${sentencePlan}`;
                     voiceLang,
                     pendingAvatarTouches: pendingAvatarTouchesRef.current,
                   });
+                  if (returnToChatOnHangup) {
+                    setActiveCharacterId(selectedChar.id);
+                    openApp(AppID.Chat);
+                  }
                   addToast('通话已挂起，点击顶部绿色条可随时回来', 'success');
                   trackEvent('挂起通话到后台');
                 }
               }} className="keep-white w-full py-2.5 rounded-2xl bg-emerald-500/80 text-white font-semibold transition active:scale-[0.97] flex items-center justify-center gap-2">
                 <span>先忙别的</span><span className="text-xs opacity-70">（挂起通话）</span>
-              </button>}
+              </button>
               <div className="grid grid-cols-2 gap-2">
                 <button onClick={() => setShowHangupConfirm(false)} className="py-2.5 rounded-2xl border border-white/20 text-white/80 transition active:scale-[0.97]">再聊会儿</button>
                 <button onClick={finishCall} className="py-2.5 rounded-2xl bg-rose-500/20 border border-rose-300/40 text-rose-200 font-semibold transition active:scale-[0.97]">挂了吧</button>
