@@ -519,11 +519,12 @@ ${getVoicePromptOverride(getTtsProvider()) ?? (getTtsProvider() === 'fishaudio' 
   return [coreContext, timeContext, callPrompt, voiceLangPrompt].filter(Boolean).join('\n\n');
 };
 const CallApp: React.FC = () => {
-  const { closeApp, openApp, characters, activeCharacterId, addToast, apiConfig, userProfile, customThemes, suspendCall, suspendedCall, clearSuspendedCall, updateCharacter, characterGroups, groups, realtimeConfig, memoryPalaceConfig } = useOS();
+  const { closeApp, openApp, characters, activeCharacterId, setActiveCharacterId, addToast, apiConfig, userProfile, customThemes, suspendCall, suspendedCall, clearSuspendedCall, updateCharacter, characterGroups, groups, realtimeConfig, memoryPalaceConfig } = useOS();
 
   const [viewMode, setViewMode] = useState<ViewMode>('role-select');
   const [selectedCharId, setSelectedCharId] = useState<string>(activeCharacterId || characters[0]?.id || '');
   const [directVideoPendingId, setDirectVideoPendingId] = useState<string | null>(null);
+  const [returnToChatOnHangup, setReturnToChatOnHangup] = useState(false);
   const ROLES_PER_PAGE = 6;
   const [roleGroupId, setRoleGroupId] = useState<string>(GROUP_FILTER_ALL); // 选人页的分组筛选
   const [rolePage, setRolePage] = useState<number>(() => {
@@ -557,9 +558,11 @@ const CallApp: React.FC = () => {
   const [showVoiceInputSettings, setShowVoiceInputSettings] = useState(false);
   const [showSleepMode, setShowSleepMode] = useState(false);
   const [sleeping, setSleeping] = useState(false);
-  const [sleepDurationMinutes, setSleepDurationMinutes] = useState(0);
+  const [callHangupDurationMinutes, setCallHangupDurationMinutes] = useState(0);
+  const [sleepNoiseDurationMinutes, setSleepNoiseDurationMinutes] = useState(0);
   const sleepAudioRef = useRef<HTMLAudioElement | null>(null);
-  const sleepTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const callHangupTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const sleepNoiseTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const sttSessionRef = useRef<SttSession | null>(null);
   const sttSilenceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const sttButtonLongPressTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -567,6 +570,7 @@ const CallApp: React.FC = () => {
   const sttSubmittingRef = useRef(false);
   const autoVoiceModeRef = useRef(false);
   const handleTurnRef = useRef<(spoken?: string) => void>(() => undefined);
+  const finishCallRef = useRef<() => void>(() => undefined);
   const sttProvider = apiConfig.speechRecognition?.provider === 'siliconflow' ? 'siliconflow' : 'browser';
   const sttSupported = useMemo(() => isSttSupported(), []);
   const [audioUrl, setAudioUrl] = useState<string>('');
@@ -838,8 +842,10 @@ const CallApp: React.FC = () => {
   const selectedSleepNoise = selectedChar?.callSettings?.customSleepNoises?.find(item => item.id === selectedChar.callSettings?.sleepNoiseId);
   const selectedSleepNoiseUrl = useBlobRefUrl(selectedSleepNoise?.audioRef);
   const stopSleepMode = () => {
-    if (sleepTimerRef.current) clearTimeout(sleepTimerRef.current);
-    sleepTimerRef.current = null;
+    if (callHangupTimerRef.current) clearTimeout(callHangupTimerRef.current);
+    if (sleepNoiseTimerRef.current) clearTimeout(sleepNoiseTimerRef.current);
+    callHangupTimerRef.current = null;
+    sleepNoiseTimerRef.current = null;
     sleepAudioRef.current?.pause();
     if (sleepAudioRef.current) sleepAudioRef.current.currentTime = 0;
     sleepAudioRef.current = null;
@@ -849,7 +855,10 @@ const CallApp: React.FC = () => {
     if (!selectedChar) return;
     autoVoiceModeRef.current = false;
     setAutoVoiceMode(false);
-    if (sleepTimerRef.current) clearTimeout(sleepTimerRef.current);
+    if (callHangupTimerRef.current) clearTimeout(callHangupTimerRef.current);
+    if (sleepNoiseTimerRef.current) clearTimeout(sleepNoiseTimerRef.current);
+    callHangupTimerRef.current = null;
+    sleepNoiseTimerRef.current = null;
     sleepAudioRef.current?.pause();
     if (selectedSleepNoiseUrl) {
       const audio = new Audio(selectedSleepNoiseUrl);
@@ -863,8 +872,22 @@ const CallApp: React.FC = () => {
     setSleeping(true);
     setShowSleepMode(false);
     handleTurnRef.current('我想睡了，陪我安静待一会儿。');
-    if (sleepDurationMinutes > 0) {
-      sleepTimerRef.current = setTimeout(() => { stopSleepMode(); addToast('陪睡时间到了，白噪音已停止', 'info'); }, sleepDurationMinutes * 60_000);
+    if (sleepNoiseDurationMinutes > 0 && selectedSleepNoiseUrl) {
+      sleepNoiseTimerRef.current = setTimeout(() => {
+        sleepNoiseTimerRef.current = null;
+        sleepAudioRef.current?.pause();
+        if (sleepAudioRef.current) sleepAudioRef.current.currentTime = 0;
+        sleepAudioRef.current = null;
+        addToast('白噪音时间到了，通话仍在继续', 'info');
+      }, sleepNoiseDurationMinutes * 60_000);
+    }
+    if (callHangupDurationMinutes > 0) {
+      callHangupTimerRef.current = setTimeout(() => {
+        callHangupTimerRef.current = null;
+        stopSleepMode();
+        addToast('通话时间到了，正在挂断', 'info');
+        finishCallRef.current();
+      }, callHangupDurationMinutes * 60_000);
     }
   };
   useEffect(() => () => stopSleepMode(), []);
@@ -873,7 +896,7 @@ const CallApp: React.FC = () => {
       const raw = localStorage.getItem(DIRECT_VIDEO_CALL_INTENT_KEY);
       if (!raw) return;
       localStorage.removeItem(DIRECT_VIDEO_CALL_INTENT_KEY);
-      const intent = JSON.parse(raw) as { charId?: string; at?: number };
+      const intent = JSON.parse(raw) as { charId?: string; at?: number; returnTo?: string };
       if (!intent.charId || !characters.some(character => character.id === intent.charId)) return;
       if (intent.at && Date.now() - intent.at > 30_000) return;
       const target = characters.find(character => character.id === intent.charId);
@@ -881,6 +904,7 @@ const CallApp: React.FC = () => {
         updateCharacter(target.id, { companionAvatar: { ...target.companionAvatar, version: 1, source: 'upload', imageRef: target.companionAvatar?.imageRef || target.avatar } });
       }
       setSelectedCharId(intent.charId);
+      setReturnToChatOnHangup(intent.returnTo === 'chat');
       setCallMode('video');
       setDirectVideoPendingId(intent.charId);
     } catch { /* private WebView or malformed intent */ }
@@ -1799,6 +1823,8 @@ const CallApp: React.FC = () => {
     beginSelectedCall(loadDefaultCallCameraMode());
   }, [directVideoPendingId, selectedCharId, callMode]);
   const finishCall = async () => {
+    // 无论是手动挂断还是定时挂断，白噪音和陪睡计时都必须随通话结束。
+    stopSleepMode();
     if (selectedChar?.id) {
       const userTurns = bubbles.filter(b => b.role === 'user').length;
       const keepsakeLine = summarizeKeepsakeLine(bubbles, selectedChar.name);
@@ -1828,10 +1854,18 @@ const CallApp: React.FC = () => {
     }
     clearSuspendedCall();
     resetCurrentCall();
-    setViewMode('history');
     setShowHangupConfirm(false);
+    if (returnToChatOnHangup && selectedChar?.id) {
+      setActiveCharacterId(selectedChar.id);
+      setReturnToChatOnHangup(false);
+      openApp(AppID.Chat);
+      addToast('通话已结束，已返回聊天', 'success');
+      return;
+    }
+    setViewMode('history');
     addToast('通话记录已保存', 'success');
   };
+  finishCallRef.current = () => { void finishCall(); };
   const handleHangup = () => {
     setShowHangupConfirm(true);
   };
@@ -3659,9 +3693,10 @@ ${sentencePlan}`;
         <div className="absolute inset-0 z-[220] flex items-end bg-black/65 backdrop-blur-sm" onClick={() => setShowSleepMode(false)}>
           <div className="w-full max-h-[82%] overflow-y-auto rounded-t-[1.75rem] border-t border-white/15 bg-[#111522] px-5 pb-[max(1.25rem,var(--safe-bottom))] pt-5 text-white" onClick={event => event.stopPropagation()}>
             <div className="flex items-start justify-between gap-3"><div><div className="text-[9px] tracking-[.24em] text-white/40">SLEEP COMPANION</div><h2 className="mt-1 text-xl font-semibold">🌙 陪睡 · 哄睡</h2></div><button type="button" onClick={() => setShowSleepMode(false)} className="rounded-full border border-white/15 px-3 py-1.5 text-xs text-white/65">完成</button></div>
-            <p className="mt-3 text-[11px] leading-5 text-white/50">开启后会先让角色轻声陪你说几句，之后保持安静；白噪音会在本机循环播放。你可以随时停止。</p>
-            <div className="mt-5 flex items-center justify-between"><span className="text-sm font-semibold">定时结束</span><div className="flex flex-wrap justify-end gap-1.5">{[0, 30, 60, 120, 480].map(minutes => <button key={minutes} type="button" onClick={() => setSleepDurationMinutes(minutes)} className={`rounded-full border px-2.5 py-1.5 text-[10px] ${sleepDurationMinutes === minutes ? 'border-fuchsia-400 bg-fuchsia-400/20 text-white' : 'border-white/10 text-white/55'}`}>{minutes === 0 ? '不自动挂断' : minutes < 60 ? `${minutes} 分钟` : `${minutes / 60} 小时`}</button>)}</div></div>
-            <div className="mt-5 border-t border-white/10 pt-4"><div className="flex items-center justify-between"><span className="text-sm font-semibold">🎵 白噪音陪伴</span><span className="text-[10px] text-white/35">自定义音效在聊天设置管理</span></div>
+            <p className="mt-3 text-[11px] leading-5 text-white/50">开启后会先让角色轻声陪你说几句，之后保持安静。上面的定时结束控制整通电话；白噪音时长只控制声音，声音结束后电话仍会继续。</p>
+            <div className="mt-5 flex items-center justify-between gap-3"><span className="shrink-0 text-sm font-semibold">定时结束</span><div className="flex flex-wrap justify-end gap-1.5">{[0, 30, 60, 120, 480].map(minutes => <button key={minutes} type="button" onClick={() => setCallHangupDurationMinutes(minutes)} className={`rounded-full border px-2.5 py-1.5 text-[10px] ${callHangupDurationMinutes === minutes ? 'border-fuchsia-400 bg-fuchsia-400/20 text-white' : 'border-white/10 text-white/55'}`}>{minutes === 0 ? '不自动挂断' : minutes < 60 ? `${minutes} 分钟` : `${minutes / 60} 小时`}</button>)}</div></div>
+            <div className="mt-5 border-t border-white/10 pt-4"><div className="flex items-center justify-between gap-3"><span className="shrink-0 text-sm font-semibold">🎵 白噪音陪伴</span><span className="text-[10px] text-white/35">自定义音效在聊天设置管理</span></div>
+              <div className="mt-3 flex items-center justify-between gap-3"><span className="shrink-0 text-xs text-white/55">白噪音时长</span><div className="flex flex-wrap justify-end gap-1.5">{[0, 30, 60, 120, 480].map(minutes => <button key={minutes} type="button" onClick={() => setSleepNoiseDurationMinutes(minutes)} className={`rounded-full border px-2.5 py-1.5 text-[10px] ${sleepNoiseDurationMinutes === minutes ? 'border-fuchsia-400 bg-fuchsia-400/20 text-white' : 'border-white/10 text-white/55'}`}>{minutes === 0 ? '一直循环' : minutes < 60 ? `${minutes} 分钟` : `${minutes / 60} 小时`}</button>)}</div></div>
               <div className="mt-3 flex flex-wrap gap-2">{['none', 'ocean', 'book', 'night', 'market', 'birds'].map(id => { const label = id === 'none' ? '无' : id === 'ocean' ? '海浪' : id === 'book' ? '翻书' : id === 'night' ? '夜晚' : id === 'market' ? '市场' : '鸟叫'; const custom = selectedChar?.callSettings?.customSleepNoises?.find(item => item.id === id); const active = selectedChar?.callSettings?.sleepNoiseId === id || (!selectedChar?.callSettings?.sleepNoiseId && id === 'none'); return <button key={id} type="button" disabled={id !== 'none' && !custom} onClick={() => selectedChar && updateCharacter(selectedChar.id, { callSettings: { ...selectedChar.callSettings, sleepNoiseId: id } })} className={`rounded-full border px-3 py-2 text-xs ${active ? 'border-fuchsia-400 bg-fuchsia-400/20 text-white' : 'border-white/10 text-white/50'} disabled:opacity-35`}>{custom?.name || label}{id !== 'none' && !custom ? '（待添加）' : ''}</button>; })}</div>
               {!!selectedChar?.callSettings?.customSleepNoises?.length && <div className="mt-2 flex flex-wrap gap-2">{selectedChar.callSettings.customSleepNoises.map(item => <button key={item.id} type="button" onClick={() => updateCharacter(selectedChar.id, { callSettings: { ...selectedChar.callSettings, sleepNoiseId: item.id } })} className={`rounded-full border px-3 py-2 text-xs ${selectedChar.callSettings?.sleepNoiseId === item.id ? 'border-fuchsia-400 bg-fuchsia-400/20 text-white' : 'border-white/10 text-white/55'}`}>{item.name}</button>)}</div>}
             </div>
@@ -3728,9 +3763,9 @@ ${sentencePlan}`;
         <div className="absolute inset-0 z-[70] bg-black/70 backdrop-blur-sm flex items-center justify-center px-6">
           <div className={`w-full max-w-sm rounded-3xl border border-white/15 bg-gradient-to-b p-5 shadow-2xl ${lightTheme ? 'from-white to-[#f0edf9]' : 'from-[#1a1130] to-[#0a0613]'}`}>
             <div className="text-lg font-semibold text-white">要挂了吗？</div>
-            <p className="mt-2 text-sm text-white/65 leading-relaxed">和{selectedChar?.name || '对方'}聊了 {formatDuration(elapsedSeconds)}，这通电话会好好保存下来。</p>
+            <p className="mt-2 text-sm text-white/65 leading-relaxed">和{selectedChar?.name || '对方'}聊了 {formatDuration(elapsedSeconds)}。{returnToChatOnHangup ? '确认挂断后会直接返回当前聊天。' : '这通电话会好好保存下来。'}</p>
             <div className="mt-5 space-y-2">
-              <button onClick={() => {
+              {!returnToChatOnHangup && <button onClick={() => {
                 setShowHangupConfirm(false);
                 if (selectedChar) {
                   suspendCall({
@@ -3749,7 +3784,7 @@ ${sentencePlan}`;
                 }
               }} className="keep-white w-full py-2.5 rounded-2xl bg-emerald-500/80 text-white font-semibold transition active:scale-[0.97] flex items-center justify-center gap-2">
                 <span>先忙别的</span><span className="text-xs opacity-70">（挂起通话）</span>
-              </button>
+              </button>}
               <div className="grid grid-cols-2 gap-2">
                 <button onClick={() => setShowHangupConfirm(false)} className="py-2.5 rounded-2xl border border-white/20 text-white/80 transition active:scale-[0.97]">再聊会儿</button>
                 <button onClick={finishCall} className="py-2.5 rounded-2xl bg-rose-500/20 border border-rose-300/40 text-rose-200 font-semibold transition active:scale-[0.97]">挂了吧</button>

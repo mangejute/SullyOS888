@@ -3358,7 +3358,7 @@ const Chat: React.FC = () => {
                 onShowCharsPanel={() => setShowPanel('chars')}
                 topActions={[
                     { label: '视频通话', icon: <Phone className="w-5 h-5" weight="regular" />, onClick: () => {
-                        try { localStorage.setItem('sully-call-direct-video-intent-v1', JSON.stringify({ charId: char.id, at: Date.now() })); } catch { /* private WebView */ }
+                        try { localStorage.setItem('sully-call-direct-video-intent-v1', JSON.stringify({ charId: char.id, at: Date.now(), returnTo: 'chat' })); } catch { /* private WebView */ }
                         openApp(AppID.Call);
                     } },
                     { label: '聊天设置', icon: <GearSix className="w-5 h-5" weight="regular" />, onClick: () => setModalType('chat-settings') },
