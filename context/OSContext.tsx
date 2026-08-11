@@ -408,8 +408,8 @@ interface OSContextType {
   handleBack: () => void;
 
   // Call Suspend
-  suspendedCall: { charId: string; charName: string; charAvatar?: string; startedAt: number; bubbles?: any[]; sessionId?: string; elapsedSeconds?: number; voiceLang?: string } | null;
-  suspendCall: (info: { charId: string; charName: string; charAvatar?: string; startedAt: number; bubbles?: any[]; sessionId?: string; elapsedSeconds?: number; voiceLang?: string }) => void;
+  suspendedCall: { charId: string; charName: string; charAvatar?: string; startedAt: number; bubbles?: any[]; sessionId?: string; elapsedSeconds?: number; voiceLang?: string; returnToChat?: boolean } | null;
+  suspendCall: (info: { charId: string; charName: string; charAvatar?: string; startedAt: number; bubbles?: any[]; sessionId?: string; elapsedSeconds?: number; voiceLang?: string; returnToChat?: boolean }) => void;
   resumeCall: () => void;
   clearSuspendedCall: () => void;
 
@@ -915,7 +915,7 @@ export const OSProvider: React.FC<{ children: React.ReactNode }> = ({ children }
   const backHandlerRef = useRef<(() => boolean) | null>(null);
 
   // Call Suspend
-  const [suspendedCall, setSuspendedCall] = useState<{ charId: string; charName: string; charAvatar?: string; startedAt: number; bubbles?: any[]; sessionId?: string; elapsedSeconds?: number; voiceLang?: string } | null>(null);
+  const [suspendedCall, setSuspendedCall] = useState<{ charId: string; charName: string; charAvatar?: string; startedAt: number; bubbles?: any[]; sessionId?: string; elapsedSeconds?: number; voiceLang?: string; returnToChat?: boolean } | null>(null);
   // 聊天「见面」按钮 → 见面：记录目标角色，DateApp 挂载后消费一次并自动进入见面
   const [dateAutoStartCharId, setDateAutoStartCharId] = useState<string | null>(null);
 
@@ -4812,7 +4812,7 @@ export const OSProvider: React.FC<{ children: React.ReactNode }> = ({ children }
   const consumeDateAutoStart = () => setDateAutoStartCharId(null);
   const unlock = () => setIsLocked(false);
 
-  const suspendCall = (info: { charId: string; charName: string; charAvatar?: string; startedAt: number; bubbles?: any[]; sessionId?: string; elapsedSeconds?: number; voiceLang?: string }) => {
+  const suspendCall = (info: { charId: string; charName: string; charAvatar?: string; startedAt: number; bubbles?: any[]; sessionId?: string; elapsedSeconds?: number; voiceLang?: string; returnToChat?: boolean }) => {
     setSuspendedCall(info);
     setActiveApp(AppID.Launcher);
   };

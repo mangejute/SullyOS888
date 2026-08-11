@@ -1541,6 +1541,7 @@ const CallApp: React.FC = () => {
       if (suspendedCall.sessionId) setCurrentSessionId(suspendedCall.sessionId);
       if (typeof suspendedCall.elapsedSeconds === 'number') setElapsedSeconds(suspendedCall.elapsedSeconds);
       if (suspendedCall.voiceLang) setVoiceLang(suspendedCall.voiceLang);
+      setReturnToChatOnHangup(suspendedCall.returnToChat === true);
       const restoredTouches = suspendedCall.pendingAvatarTouches?.slice(-20) || [];
       pendingAvatarTouchesRef.current = restoredTouches;
       setPendingAvatarTouchCount(restoredTouches.length);
@@ -3777,6 +3778,7 @@ ${sentencePlan}`;
                     sessionId: currentSessionId,
                     elapsedSeconds,
                     voiceLang,
+                    returnToChat: returnToChatOnHangup,
                     pendingAvatarTouches: pendingAvatarTouchesRef.current,
                   });
                   if (returnToChatOnHangup) {
