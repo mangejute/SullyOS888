@@ -459,6 +459,7 @@ const Settings: React.FC = () => {
   const [localImageGenKey, setLocalImageGenKey] = useState(apiConfig.imageGenerationApi?.apiKey || '');
   const [localImageGenModel, setLocalImageGenModel] = useState(apiConfig.imageGenerationApi?.model || '');
   const [localImageGenPrompt, setLocalImageGenPrompt] = useState(apiConfig.imageGenerationApi?.prompt || '');
+  const [localImageGenAspectRatio, setLocalImageGenAspectRatio] = useState<NonNullable<NonNullable<typeof apiConfig.imageGenerationApi>['aspectRatio']>>(apiConfig.imageGenerationApi?.aspectRatio || '1:1');
   const [availableImageGenModels, setAvailableImageGenModels] = useState<string[]>([]);
   const [availableVisionModels, setAvailableVisionModels] = useState<string[]>(readStoredVisionModels);
   const [selectedVisionPresetId, setSelectedVisionPresetId] = useState<string | null>(null);
@@ -869,6 +870,7 @@ const Settings: React.FC = () => {
       setLocalImageGenKey(apiConfig.imageGenerationApi?.apiKey || '');
       setLocalImageGenModel(apiConfig.imageGenerationApi?.model || '');
       setLocalImageGenPrompt(apiConfig.imageGenerationApi?.prompt || '');
+      setLocalImageGenAspectRatio(apiConfig.imageGenerationApi?.aspectRatio || '1:1');
       setLocalMiniMaxKey(apiConfig.minimaxApiKey || '');
       setLocalMiniMaxGroupId(apiConfig.minimaxGroupId || '');
       setLocalMiniMaxRegion(apiConfig.minimaxRegion === 'overseas' ? 'overseas' : 'domestic');
@@ -1097,6 +1099,7 @@ const Settings: React.FC = () => {
       apiKey: normalizeApiCredential(localImageGenKey),
       model: normalizeApiModel(localImageGenModel),
       prompt: localImageGenPrompt.trim(),
+      aspectRatio: localImageGenAspectRatio,
     };
     setLocalImageGenUrl(next.baseUrl);
     setLocalImageGenKey(next.apiKey);
@@ -2517,6 +2520,16 @@ const Settings: React.FC = () => {
                     <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1.5 block pl-1">模型</label>
                     <input list="image-generation-models" type="text" value={localImageGenModel} onChange={e => { setLocalImageGenModel(e.target.value); setImageGenTestResult(null); }} placeholder="例如 dall-e-3 / flux" className="w-full bg-white/60 border border-slate-200/60 rounded-xl px-4 py-2.5 text-sm font-mono focus:bg-white transition-all" />
                     <datalist id="image-generation-models">{availableImageGenModels.map(model => <option key={model} value={model} />)}</datalist>
+                </div>
+                <div>
+                    <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1.5 block pl-1">图片比例</label>
+                    <select value={localImageGenAspectRatio} onChange={e => setLocalImageGenAspectRatio(e.target.value as typeof localImageGenAspectRatio)} className="w-full bg-white/60 border border-slate-200/60 rounded-xl px-4 py-2.5 text-sm focus:bg-white transition-all">
+                        <option value="1:1">1:1 正方形</option>
+                        <option value="3:4">3:4 竖图</option>
+                        <option value="4:3">4:3 横图</option>
+                        <option value="9:16">9:16 手机竖屏</option>
+                        <option value="16:9">16:9 宽屏</option>
+                    </select>
                 </div>
                 <div>
                     <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1.5 block pl-1">生图提示词</label>

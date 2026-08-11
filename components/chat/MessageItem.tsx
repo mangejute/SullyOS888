@@ -13,7 +13,7 @@ import McdCard from './McdCard';
 import HtmlCard from './HtmlCard';
 import LuckinCard from './LuckinCard';
 import LuckinCheckoutCard from './LuckinCheckoutCard';
-import { ArrowClockwise } from '@phosphor-icons/react';
+import { Camera, DownloadSimple, SpinnerGap, X } from '@phosphor-icons/react';
 
 // 思考链卡片支持的 12 种风格预设 — 同时被 MessageItem 与 ThinkingChainSettingsModal 复用
 export type ThinkingChainStyleId = 'echo' | 'whisper' | 'minimal' | 'ink' | 'neon' | 'terminal' | 'stellar' | 'tama' | 'pixel' | 'muji' | 'ins' | 'custom';
@@ -3287,40 +3287,53 @@ const MessageItem = React.memo(({
         const status = imageGeneration.status as 'pending' | 'success' | 'failed' | undefined;
         const description = imageGeneration.description || imageGeneration.prompt || '';
         const wasSafetyBlocked = /安全|safety|policy|moderation|无法用于生成图像/i.test(String(imageGeneration.error || ''));
+        const aspectRatio = String(imageGeneration.aspectRatio || '1:1');
+        const placeholderRatioClass = aspectRatio === '3:4' || aspectRatio === '9:16' ? 'aspect-[3/4]' : aspectRatio === '4:3' || aspectRatio === '16:9' ? 'aspect-[4/3]' : 'aspect-square';
+        const downloadImage = () => {
+            if (!m.content) return;
+            const link = document.createElement('a');
+            link.href = m.content;
+            link.download = `${charName || '角色'}-照片.png`;
+            link.click();
+        };
         return commonLayout(
             <div className="relative group">
                 {m.content ? (
-                    <button type="button" className="block w-[224px] rounded-sm bg-white p-1.5 text-left shadow-[0_5px_16px_rgba(15,23,42,0.16)] active:scale-[0.98]" onClick={() => setImagePreviewOpen(true)}>
-                        <img src={m.content} className="h-[250px] w-full object-cover" alt="角色生成的图片" loading="lazy" decoding="async" />
-                        <div className="min-h-[42px] px-2 pt-2 text-[11px] leading-relaxed text-slate-500 line-clamp-2">{description || '角色发送了一张照片'}</div>
+                    <button type="button" className="block max-w-[230px] overflow-hidden rounded-2xl text-left active:scale-[0.98]" onClick={() => setImagePreviewOpen(true)}>
+                        <img src={m.content} className="max-h-[320px] max-w-[230px] rounded-2xl object-cover" alt="角色生成的图片" loading="lazy" decoding="async" />
                     </button>
                 ) : status === 'pending' ? (
-                    <div className="w-[224px] rounded-sm bg-white p-1.5 shadow-[0_5px_16px_rgba(15,23,42,0.14)]">
-                        <div className="flex h-[250px] flex-col items-center justify-center bg-slate-100 text-center text-slate-400">
-                            <div className="mb-2 h-7 w-7 animate-spin rounded-full border-2 border-slate-300 border-t-slate-500" />
-                            <span className="text-xs">照片生成中</span>
+                    <div className={`relative w-[224px] overflow-hidden rounded-2xl bg-white shadow-[0_5px_16px_rgba(15,23,42,0.14)] ${placeholderRatioClass}`}>
+                        <div className="absolute right-3 top-3 z-10 flex h-9 w-9 items-center justify-center rounded-full bg-white/90 text-slate-600 shadow-sm">
+                            <SpinnerGap size={19} weight="bold" className="animate-spin" />
                         </div>
-                        <div className="min-h-[42px] px-2 pt-2 text-[11px] leading-relaxed text-slate-500 line-clamp-2">{description}</div>
+                        <div className="flex h-full flex-col justify-end bg-slate-100/90 p-4">
+                            <div className="text-[11px] text-slate-400">正在生成照片…</div>
+                            <div className="mt-1 line-clamp-4 text-sm leading-relaxed text-slate-700">{description}</div>
+                        </div>
                     </div>
                 ) : status === 'failed' ? (
-                    <div className="relative w-[224px] rounded-sm bg-white p-1.5 shadow-[0_5px_16px_rgba(15,23,42,0.14)]">
-                        <button type="button" aria-label="重新生成图片" title="重新生成图片" className="absolute right-3 top-3 z-10 flex h-7 w-7 items-center justify-center rounded-full bg-white text-slate-600 shadow-sm" onClick={() => onRetryImageGeneration?.(m)}><ArrowClockwise size={15} weight="bold" /></button>
-                        <div className="flex h-[250px] flex-col items-center justify-center bg-rose-50 px-5 text-center">
-                            <span className="text-sm text-rose-500">照片生成失败</span>
-                            <span className="mt-2 text-[11px] leading-relaxed text-rose-400">{wasSafetyBlocked ? '这段描述被生图服务拦截了。换成更日常、非裸露的描述后可重新生成。' : '生图服务暂时没有生成成功，点右上角按钮重试。'}</span>
+                    <div className={`relative w-[224px] overflow-hidden rounded-2xl bg-white shadow-[0_5px_16px_rgba(15,23,42,0.14)] ${placeholderRatioClass}`}>
+                        <button type="button" aria-label="重新生成图片" title="重新生成图片" className="absolute right-3 top-3 z-10 flex h-9 w-9 items-center justify-center rounded-full bg-white text-slate-600 shadow-sm" onClick={() => onRetryImageGeneration?.(m)}><Camera size={19} weight="bold" /></button>
+                        <div className="flex h-full flex-col justify-end bg-slate-100/90 p-4">
+                            <div className="text-[11px] text-slate-400">{wasSafetyBlocked ? '描述被生图服务拦截' : '照片生成失败'}</div>
+                            <div className="mt-1 line-clamp-4 text-sm leading-relaxed text-slate-700">{description}</div>
                         </div>
-                        <div className="min-h-[42px] px-2 pt-2 text-[11px] leading-relaxed text-slate-500 line-clamp-2">{description}</div>
                     </div>
                 ) : (
-                    <div className="w-[224px] rounded-sm bg-white p-1.5 shadow-[0_5px_16px_rgba(15,23,42,0.14)]">
-                        <div className="flex h-[250px] items-center justify-center bg-slate-100 text-xs italic text-slate-400">[图片已丢失]</div>
+                    <div className={`relative w-[224px] overflow-hidden rounded-2xl bg-white shadow-[0_5px_16px_rgba(15,23,42,0.14)] ${placeholderRatioClass}`}>
+                        <div className="flex h-full items-center justify-center bg-slate-100 text-xs italic text-slate-400">[图片已丢失]</div>
                     </div>
                 )}
                 {imagePreviewOpen && m.content && (
                     <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/70 p-4" onClick={() => setImagePreviewOpen(false)}>
-                        <div className="max-h-full max-w-full overflow-auto text-center" onClick={e => e.stopPropagation()}>
-                            <img src={m.content} className="mx-auto max-h-[75vh] max-w-[92vw] object-contain" alt="角色生成的大图" />
-                            {description && <div className="mt-3 max-w-[92vw] whitespace-pre-wrap text-left text-sm text-white">{description}</div>}
+                        <div className="relative flex max-h-full max-w-full flex-col items-center justify-center" onClick={e => e.stopPropagation()}>
+                            <div className="absolute right-0 top-0 z-10 flex translate-y-[-52px] gap-2">
+                                <button type="button" aria-label="下载图片" title="下载图片" className="flex h-10 w-10 items-center justify-center rounded-full bg-white/20 text-white backdrop-blur" onClick={downloadImage}><DownloadSimple size={20} weight="bold" /></button>
+                                <button type="button" aria-label="关闭大图" title="关闭大图" className="flex h-10 w-10 items-center justify-center rounded-full bg-white/20 text-white backdrop-blur" onClick={() => setImagePreviewOpen(false)}><X size={20} weight="bold" /></button>
+                            </div>
+                            <img src={m.content} className="max-h-[78vh] max-w-[92vw] rounded-2xl object-contain" alt="角色生成的大图" />
+                            {description && <div className="mt-4 max-w-[92vw] whitespace-pre-wrap text-center text-sm leading-relaxed text-white">{description}</div>}
                         </div>
                     </div>
                 )}

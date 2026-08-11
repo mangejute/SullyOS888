@@ -2,6 +2,16 @@ import { APIConfig, CharacterProfile, Message } from '../types';
 import { DB } from './db';
 
 type ImageApi = NonNullable<APIConfig['imageGenerationApi']>;
+export type ImageAspectRatio = NonNullable<ImageApi['aspectRatio']>;
+
+const ratioSize: Record<ImageAspectRatio, string> = {
+  '1:1': '1024x1024',
+  // GPT Image/OpenAI 兼容接口普遍只接受这三种固定 size；具体构图比例继续由 prompt 要求。
+  '3:4': '1024x1536',
+  '4:3': '1536x1024',
+  '9:16': '1024x1536',
+  '16:9': '1536x1024',
+};
 
 const endpoint = (baseUrl: string, path: string) => `${String(baseUrl || '').replace(/\/+$/, '')}${path}`;
 
@@ -25,17 +35,19 @@ function responseImageUrl(payload: any): string | undefined {
   return undefined;
 }
 
-export async function generateCharacterImage(args: { api?: ImageApi; character: CharacterProfile; description: string }): Promise<string> {
+export async function generateCharacterImage(args: { api?: ImageApi; character: CharacterProfile; description: string; aspectRatio?: ImageAspectRatio }): Promise<string> {
   const api = args.api;
   if (!api?.baseUrl || !api.apiKey || !api.model) throw new Error('请先在系统设置中填写生图 API、秘钥和模型');
   const references = (args.character.imageGenerationReferences || []).filter(Boolean);
+  const aspectRatio = args.aspectRatio || api.aspectRatio || '1:1';
   const prompt = [
     api.prompt?.trim(),
     `保持角色“${args.character.name}”的外观、发型、服装特征与参考图一致。`,
     references.length ? `已配置 ${references.length} 张角色参考图，请优先保持人物一致性。` : '',
+    `画面比例：${aspectRatio}。`,
     `本次画面描述：${args.description}`,
   ].filter(Boolean).join('\n');
-  const body: any = { model: api.model, prompt, n: 1, response_format: 'url' };
+  const body: any = { model: api.model, prompt, n: 1, size: ratioSize[aspectRatio], aspect_ratio: aspectRatio, response_format: 'url' };
   // 不同 OpenAI 兼容服务对参考图字段命名不统一；常见服务会忽略未知字段，
   // 而支持它们的服务可以直接利用 data URL 保持角色一致性。
   if (references.length) {
@@ -54,7 +66,7 @@ export async function generateCharacterImage(args: { api?: ImageApi; character: 
   return url;
 }
 
-export async function startImageGeneration(messageId: number, args: { api?: ImageApi; character: CharacterProfile; description: string }): Promise<void> {
+export async function startImageGeneration(messageId: number, args: { api?: ImageApi; character: CharacterProfile; description: string; aspectRatio?: ImageAspectRatio }): Promise<void> {
   try {
     const url = await generateCharacterImage(args);
     await DB.updateMessage(messageId, url);
@@ -69,9 +81,10 @@ export async function startImageGeneration(messageId: number, args: { api?: Imag
 export async function retryImageGeneration(message: Message, args: { api?: ImageApi; character: CharacterProfile }): Promise<void> {
   const generation = (message.metadata as any)?.imageGeneration;
   const description = generation?.description || generation?.prompt || '';
+  const aspectRatio = generation?.aspectRatio as ImageAspectRatio | undefined;
   if (!description) return;
   await DB.updateMessage(message.id, '');
   await DB.updateMessageMetadata(message.id, prev => ({ ...(prev || {}), imageGeneration: { ...(prev?.imageGeneration || {}), status: 'pending', error: undefined } }));
   window.dispatchEvent(new CustomEvent('active-msg-progress', { detail: { charId: args.character.id } }));
-  void startImageGeneration(message.id, { ...args, description });
+  void startImageGeneration(message.id, { ...args, description, aspectRatio });
 }

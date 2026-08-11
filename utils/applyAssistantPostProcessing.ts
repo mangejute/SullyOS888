@@ -2040,7 +2040,9 @@ export async function applyAssistantPostProcessing(
                 },
             } as any);
             setMessages(await DB.getRecentMessagesByCharId(char.id, 200));
-            void startImageGeneration(imageMessageId, { api: imageGenerationApi, character: char, description: request.description });
+            const aspectRatio = imageGenerationApi?.aspectRatio || '1:1';
+            await DB.updateMessageMetadata(imageMessageId, prev => ({ ...(prev || {}), imageGeneration: { ...(prev?.imageGeneration || {}), aspectRatio } }));
+            void startImageGeneration(imageMessageId, { api: imageGenerationApi, character: char, description: request.description, aspectRatio });
         } catch (error) {
             console.error('[image-generation] 保存待生成消息失败', error);
         }
