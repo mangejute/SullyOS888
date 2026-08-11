@@ -69,7 +69,7 @@ import { installReiSW } from '@rei-standard/amsg-sw';
  *            写回已排程的远端任务，见 utils/activeMsgRuntime.ts）。onupgradeneeded 补建
  *            kv store（SW-first 安装时主线程 schema 还没建过）。
  */
-const SW_VERSION = '1.16.0';
+const SW_VERSION = '1.16.1';
 
 const PING_INTERVAL = 15_000;
 const MAX_MANUAL_ALIVE_MS = 5 * 60_000;
