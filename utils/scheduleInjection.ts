@@ -20,10 +20,11 @@ import type { DailySchedule, ScheduleSlot } from '../types';
  */
 export type RenderableSchedule = Pick<DailySchedule, 'slots' | 'flowNarrative'>;
 
-/** 意识流独白按一天三档取：早 / 午 / 晚。 */
-export function getFlowNarrativeKey(hour: number): 'morning' | 'afternoon' | 'evening' {
+/** 意识流独白按家园同款四段取：早 / 午 / 晚 / 凌晨。 */
+export function getFlowNarrativeKey(hour: number): 'morning' | 'noon' | 'evening' | 'latenight' {
+    if (hour < 6) return 'latenight';
     if (hour < 12) return 'morning';
-    if (hour < 18) return 'afternoon';
+    if (hour < 18) return 'noon';
     return 'evening';
 }
 
@@ -75,6 +76,9 @@ export const buildScheduleInjection = (
     if (currentSlot) {
         slotHeader = `当前时段：${currentSlot.startTime} 你正在${currentSlot.activity}`;
         if (currentSlot.location) slotHeader += `（${currentSlot.location}）`;
+        if (currentSlot.worldEvent) {
+            slotHeader += `\n家园实况：${currentSlot.worldEvent}${currentSlot.worldMood ? `（你当时${currentSlot.worldMood}）` : ''}`;
+        }
         if (nextSlot) slotHeader += `\n之后安排：${nextSlot.startTime} ${nextSlot.activity}`;
         slotHeader += '\n';
     } else if (nextSlot) {
@@ -88,13 +92,16 @@ export const buildScheduleInjection = (
     if (evolvedNarrative) {
         narrative = evolvedNarrative;
     } else if (schedule.flowNarrative && Object.keys(schedule.flowNarrative).length > 0) {
-        // 前一夜的延续取「晚」档；其余照一天三档走。
-        const key = isPreDawnCarryOver ? 'evening' : getFlowNarrativeKey(now.getHours());
-        narrative = schedule.flowNarrative[key]
-            || schedule.flowNarrative['evening']
-            || schedule.flowNarrative['afternoon']
-            || schedule.flowNarrative['morning']
-            || '';
+        // 前一夜的延续优先取凌晨档；旧日程没有该字段时回退晚档。
+        const key = isPreDawnCarryOver ? 'latenight' : getFlowNarrativeKey(now.getHours());
+        // 旧日程把中午段叫 afternoon。中午缺少新字段时，必须先取这个旧字段，
+        // 不能直接跳到 evening，避免角色白天读到晚间独白。
+        const fallbackKeys = key === 'noon'
+            ? ['noon', 'afternoon', 'evening', 'latenight', 'morning']
+            : [key, 'latenight', 'evening', 'noon', 'afternoon', 'morning'];
+        narrative = fallbackKeys
+            .map(candidate => schedule.flowNarrative?.[candidate])
+            .find(value => typeof value === 'string' && value.trim()) || '';
     } else if (currentSlot?.innerThought) {
         narrative = currentSlot.innerThought;
     }

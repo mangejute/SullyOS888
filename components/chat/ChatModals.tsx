@@ -7,6 +7,7 @@ import EmotionSettingsPanel from './EmotionSettingsPanel';
 import { isTranslationLangPreset, normalizeTranslationLangLabel, TRANSLATION_LANG_MAX_LENGTH, TRANSLATION_LANG_PRESETS } from '../../utils/translationLang';
 import type { ContextRangeMode, ContextRangeSnapshot } from '../../utils/chatContextRange';
 import { trackEvent } from '../../utils/analytics';
+import { processImage } from '../../utils/file';
 
 interface ChatModalsProps {
     modalType: string;
@@ -24,6 +25,10 @@ interface ChatModalsProps {
     setSettingsContextRangeMode: (v: ContextRangeMode) => void;
     settingsHideSysLogs: boolean;
     setSettingsHideSysLogs: (v: boolean) => void;
+    settingsReplyMinCount: number;
+    setSettingsReplyMinCount: (v: number) => void;
+    settingsReplyMaxCount: number;
+    setSettingsReplyMaxCount: (v: number) => void;
     preserveContext: boolean;
     setPreserveContext: (v: boolean) => void;
     editContent: string;
@@ -63,6 +68,7 @@ interface ChatModalsProps {
     onSaveSettings: () => void;
     onBgUpload: (file: File) => void;
     onRemoveBg: () => void;
+    onSaveImageReferences?: (references: string[]) => void;
     onClearHistory: () => void;
     onArchive: () => void;
     onCreatePrompt: () => void;
@@ -231,6 +237,8 @@ const ChatModals: React.FC<ChatModalsProps> = ({
     settingsContextLimit, setSettingsContextLimit,
     settingsContextRangeMode, setSettingsContextRangeMode,
     settingsHideSysLogs, setSettingsHideSysLogs,
+    settingsReplyMinCount, setSettingsReplyMinCount,
+    settingsReplyMaxCount, setSettingsReplyMaxCount,
     preserveContext, setPreserveContext,
     editContent, setEditContent,
     newCategoryName, setNewCategoryName, onAddCategory,
@@ -241,7 +249,7 @@ const ChatModals: React.FC<ChatModalsProps> = ({
     allHistoryMessages = [],
     contextRangeSnapshot,
     onTransfer, onImportEmoji, onSaveSettings,
-    onBgUpload, onRemoveBg, onClearHistory,
+    onBgUpload, onRemoveBg, onSaveImageReferences, onClearHistory,
     onArchive, onCreatePrompt, onEditPrompt, onSavePrompt, onDeletePrompt,
     onSetHistoryStart, onRestoreAdaptiveContext, onJumpToMessageInChat, onEnterSelectionMode, onReplyMessage, onEditMessageStart, onConfirmEditMessage, onDeleteMessage, onCopyMessage, onDeleteEmoji, onDeleteCategory,
     allCharacters = [], onSaveCategoryVisibility,
@@ -258,6 +266,29 @@ const ChatModals: React.FC<ChatModalsProps> = ({
     apiPresets, onAddApiPreset, onSaveEmotion, onClearBuffs,
 }) => {
     const bgInputRef = useRef<HTMLInputElement>(null);
+    const referenceInputRef = useRef<HTMLInputElement>(null);
+    const [imageReferences, setImageReferences] = useState<string[]>(activeCharacter.imageGenerationReferences || []);
+    React.useEffect(() => {
+        setImageReferences(activeCharacter.imageGenerationReferences || []);
+    }, [activeCharacter.id, activeCharacter.imageGenerationReferences]);
+
+    const addImageReferences = async (files: FileList | null) => {
+        if (!files || !files.length) return;
+        const slots = Math.max(0, 4 - imageReferences.length);
+        const next = [...imageReferences];
+        for (const file of Array.from(files).slice(0, slots)) {
+            try {
+                next.push(await processImage(file, { maxWidth: 1200, quality: 0.86, forceJpeg: true }));
+            } catch {
+                // 单张失败不影响其它参考图继续导入。
+            }
+        }
+        setImageReferences(next);
+        onSaveImageReferences?.(next);
+        if (next.length >= 4 && files.length > slots) {
+            trackEvent('角色生图参考图达到上限');
+        }
+    };
     const [visibilitySelection, setVisibilitySelection] = useState<Set<string>>(new Set());
     const [historyPage, setHistoryPage] = useState(0);
     const [historySearch, setHistorySearch] = useState('');
@@ -386,7 +417,7 @@ const ChatModals: React.FC<ChatModalsProps> = ({
             </Modal>
 
             <Modal 
-                isOpen={modalType === 'chat-settings'} title="聊天设置" onClose={() => setModalType('none')}
+                isOpen={modalType === 'chat-settings'} title="聊天设置" onClose={() => setModalType('none')} fullScreen
                 footer={<button onClick={onSaveSettings} className="w-full py-3 bg-primary text-white font-bold rounded-2xl">保存设置</button>}
             >
                 <div className="space-y-6">
@@ -398,6 +429,40 @@ const ChatModals: React.FC<ChatModalsProps> = ({
                          </div>
                          <input type="file" ref={bgInputRef} className="hidden" accept="image/*" onChange={(e) => e.target.files?.[0] && onBgUpload(e.target.files[0])} />
                          {activeCharacter.chatBackground && <button onClick={onRemoveBg} className="text-[10px] text-red-400 mt-1">移除背景</button>}
+                     </div>
+                     <div className="pt-2 border-t border-slate-100">
+                         <div className="flex items-center justify-between mb-2">
+                             <div>
+                                 <label className="text-xs font-bold text-slate-400 uppercase block">角色生图参考图</label>
+                                 <p className="text-[10px] text-slate-400 mt-1">最多添加 4 张，用于后续生成角色时保持外观一致。</p>
+                             </div>
+                             <span className="text-[10px] text-slate-400">{imageReferences.length}/4</span>
+                         </div>
+                         <div className="grid grid-cols-4 gap-2">
+                             {Array.from({ length: 4 }).map((_, index) => {
+                                 const image = imageReferences[index];
+                                 return (
+                                     <div key={index} className="relative aspect-square overflow-hidden rounded-xl border border-slate-200 bg-slate-50">
+                                         {image ? (
+                                             <>
+                                                 <img src={image} alt={`生图参考图 ${index + 1}`} className="h-full w-full object-cover" />
+                                                 <button type="button" aria-label={`移除第 ${index + 1} 张参考图`} onClick={() => {
+                                                     const next = imageReferences.filter((_, i) => i !== index);
+                                                     setImageReferences(next);
+                                                     onSaveImageReferences?.(next);
+                                                 }} className="absolute right-1 top-1 flex h-5 w-5 items-center justify-center rounded-full bg-black/55 text-xs text-white">×</button>
+                                             </>
+                                         ) : (
+                                             <button type="button" onClick={() => referenceInputRef.current?.click()} className="flex h-full w-full flex-col items-center justify-center gap-1 text-slate-400">
+                                                 <span className="text-2xl leading-none">+</span>
+                                                 <span className="text-[9px]">添加</span>
+                                             </button>
+                                         )}
+                                     </div>
+                                 );
+                             })}
+                         </div>
+                         <input ref={referenceInputRef} type="file" accept="image/*" multiple className="hidden" onChange={event => { void addImageReferences(event.target.files); event.target.value = ''; }} />
                      </div>
                      <div>
                          {(activeCharacter.autoArchiveEnabled || activeCharacter.contextFollowsMemoryPalaceHwm) && settingsContextRangeMode === 'adaptive' ? (
@@ -470,6 +535,35 @@ const ChatModals: React.FC<ChatModalsProps> = ({
                                  )}
                              </>
                          )}
+                     </div>
+
+                     <div className="pt-2 border-t border-slate-100">
+                         <label className="text-xs font-bold text-slate-400 uppercase mb-2 block">每次回复消息条数</label>
+                         <div className="grid grid-cols-2 gap-3">
+                             <label className="text-[11px] text-slate-500">
+                                 最少
+                                 <input
+                                     type="number"
+                                     min={1}
+                                     max={settingsReplyMaxCount}
+                                     value={settingsReplyMinCount}
+                                     onChange={e => setSettingsReplyMinCount(Math.max(1, Math.min(settingsReplyMaxCount, Number(e.target.value) || 1)))}
+                                     className="w-full mt-1 bg-slate-100 rounded-xl px-3 py-2 text-sm font-bold text-slate-700"
+                                 />
+                             </label>
+                             <label className="text-[11px] text-slate-500">
+                                 最多
+                                 <input
+                                     type="number"
+                                     min={settingsReplyMinCount}
+                                     max={20}
+                                     value={settingsReplyMaxCount}
+                                     onChange={e => setSettingsReplyMaxCount(Math.max(settingsReplyMinCount, Math.min(20, Number(e.target.value) || settingsReplyMinCount)))}
+                                     className="w-full mt-1 bg-slate-100 rounded-xl px-3 py-2 text-sm font-bold text-slate-700"
+                                 />
+                             </label>
+                         </div>
+                         <p className="text-[10px] text-slate-400 mt-2 leading-relaxed">AI 会按这个范围发送气泡。超过上限会自动合并；内容太短时不会凭空重复文字。</p>
                      </div>
 
                      <div className="pt-2 border-t border-slate-100">

@@ -34,6 +34,7 @@ const VersionInfo: React.FC = () => {
     // available = 面板当前是否可用（非 prod 默认 true；prod 解锁后 true；强制关闭后 false）。
     const [available, setAvailable] = useState<boolean>(() => isDevDebugAvailable());
     const [hint, setHint] = useState<string | null>(null);
+    const [checkingUpdate, setCheckingUpdate] = useState(false);
     const tapCountRef = useRef(0);
     const tapTimerRef = useRef<number | null>(null);
     const hintTimerRef = useRef<number | null>(null);
@@ -84,6 +85,41 @@ const VersionInfo: React.FC = () => {
         tapTimerRef.current = window.setTimeout(() => { tapCountRef.current = 0; }, TAP_RESET_MS);
     };
 
+    const handleRefreshVersion = async () => {
+        if (checkingUpdate) return;
+        setCheckingUpdate(true);
+        try {
+            const response = await fetch('https://api.github.com/repos/mangejute/SullyOS888/commits/customization?per_page=1', {
+                cache: 'no-store',
+                headers: { Accept: 'application/vnd.github+json' },
+            });
+            if (!response.ok) throw new Error(`HTTP ${response.status}`);
+            const latest = String((await response.json())?.sha || '').slice(0, 7);
+            const current = String(BUILD_LABEL.split('@').pop() || '').slice(0, 7);
+            if (!latest || !current) {
+                showHint('暂时无法读取最新版本', 3000);
+            } else if (latest === current) {
+                showHint('已经是最新版本', 3000);
+            } else {
+                showHint('发现新版本，正在刷新…', 2200);
+                try {
+                    const keys = await caches.keys();
+                    await Promise.all(keys.map(key => caches.delete(key)));
+                } catch { /* 缓存 API 不可用时仍继续刷新 */ }
+                window.setTimeout(() => {
+                    const url = new URL(window.location.href);
+                    url.searchParams.set('refresh', String(Date.now()));
+                    window.location.replace(url.toString());
+                }, 350);
+            }
+        } catch (error) {
+            console.warn('[version] check latest failed', error);
+            showHint('检查失败，请确认网络后重试', 3000);
+        } finally {
+            setCheckingUpdate(false);
+        }
+    };
+
     return (
         <div className="flex flex-col items-center gap-1.5 pt-2 pb-8 select-none">
             <button
@@ -111,6 +147,14 @@ const VersionInfo: React.FC = () => {
                     {hint}
                 </div>
             )}
+            <button
+                type="button"
+                onClick={handleRefreshVersion}
+                disabled={checkingUpdate}
+                className="mt-1 rounded-full border border-slate-200 bg-white/70 px-3 py-1 text-[10px] text-slate-400 transition-colors active:scale-95 disabled:opacity-50"
+            >
+                {checkingUpdate ? '检查中…' : '刷新版本'}
+            </button>
         </div>
     );
 };

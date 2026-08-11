@@ -168,6 +168,17 @@ const DevDebugPanel: React.FC = () => {
         setAvailable(next);
         if (next) setFlags(readDevDebugFlags());
     }), []);
+    // 入口现在位于聊天加号面板内，由聊天页通过事件打开这里的调试弹窗。
+    // 保留全局挂载，确保从任意聊天页打开时都能复用同一个状态和日志。
+    useEffect(() => {
+        const handleOpen = () => {
+            if (!isDevDebugAvailable()) return;
+            setOpen(true);
+            trackEvent('打开调试面板');
+        };
+        window.addEventListener('open-dev-debug', handleOpen);
+        return () => window.removeEventListener('open-dev-debug', handleOpen);
+    }, []);
     // logCount 只在面板展开时才用得到（复制 (N) 按钮），收起 / 不可用都不订阅——
     // 避免 instant-push 高频 append 时每条都触发整个 panel re-render。
     useEffect(() => {
@@ -334,46 +345,24 @@ const DevDebugPanel: React.FC = () => {
         trackEvent('打开调试面板');
     };
 
-    if (!available) return null;
-
-    const panelPosition = getPanelPosition(floatingPosition);
-    // 面板最大高度按「实际可视高度」算（visualViewport，避开手机动态工具栏），跟定位口径一致，超出部分中间滚动。
-    const panelMaxHeight = getViewportSize().height - FLOATING_SAFE_MARGIN * 2;
+    if (!available || !open) return null;
 
     return (
         <div
-            className="fixed select-none"
-            style={{
-                left: open ? panelPosition.x : floatingPosition.x,
-                top: open ? panelPosition.y : floatingPosition.y,
-                zIndex: 2147483646,
+            className="fixed inset-0 z-[2147483646] flex items-center justify-center bg-black/25 p-4 select-none"
+            onPointerDown={(event) => {
+                // 只响应遮罩本身，弹窗内部的开关、按钮和滚动不会误关闭。
+                if (event.target === event.currentTarget) setOpen(false);
             }}
         >
-            {!open && (
-                <button
-                    type="button"
-                    aria-label="打开调试面板"
-                    onClick={handleFloatingClick}
-                    onPointerDown={handlePointerDown}
-                    onPointerMove={handlePointerMove}
-                    onPointerUp={finishDrag}
-                    onPointerCancel={finishDrag}
-                    className="relative flex h-11 w-11 cursor-grab touch-none items-center justify-center rounded-full border border-white/15 bg-black/45 text-white shadow-lg backdrop-blur-md active:scale-95 active:cursor-grabbing"
-                >
-                    <Wrench size={20} weight="bold" />
-                    {activeCount > 0 && (
-                        <span className="absolute -right-0.5 -top-0.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-amber-300 px-1 text-[10px] font-black leading-none text-black">
-                            {activeCount}
-                        </span>
-                    )}
-                </button>
-            )}
-
             {open && (
                 <section
-                    className="flex w-[min(342px,calc(100vw-32px))] flex-col overflow-hidden rounded-2xl border border-white/12 bg-zinc-950/90 text-white shadow-2xl backdrop-blur-xl"
-                    style={{ maxHeight: panelMaxHeight }}
+                    className="flex w-full max-w-[420px] flex-col overflow-hidden rounded-2xl border border-white/12 bg-zinc-950/95 text-white shadow-2xl backdrop-blur-xl"
+                    style={{ maxHeight: 'calc(100dvh - 32px)' }}
                     aria-label="开发调试面板"
+                    role="dialog"
+                    aria-modal="true"
+                    onPointerDown={(event) => event.stopPropagation()}
                 >
                     <div className="flex shrink-0 items-center justify-between gap-3 border-b border-white/10 px-4 py-3">
                         <div className="flex min-w-0 items-center gap-2">

@@ -1,5 +1,5 @@
 import React, { useRef, useState, useEffect } from 'react';
-import { ShareNetwork, Trash, Plus, Smiley, PaperPlaneTilt, Money, BookOpenText, GearSix, Image, Lock, ArrowsClockwise, ChatCircleDots, CalendarBlank, ForkKnife, Coffee, Code, Brain, PencilSimple, BellSimpleRinging, Alarm, Sparkle, FadersHorizontal, LinkSimple } from '@phosphor-icons/react';
+import { ShareNetwork, Trash, Plus, Smiley, PaperPlaneTilt, Camera, Money, BookOpenText, Image, Lock, ArrowsClockwise, ChatCircleDots, CalendarBlank, ForkKnife, Coffee, Code, Brain, PencilSimple, BellSimpleRinging, Alarm, Sparkle, FadersHorizontal, LinkSimple, Wrench, X, House } from '@phosphor-icons/react';
 import { CharacterProfile, ChatTheme, EmojiCategory, Emoji } from '../../types';
 import { PRESET_THEMES } from './ChatConstants';
 import { AcnhActionTile } from '../os/acnhIcons';
@@ -16,6 +16,8 @@ interface ChatInputAreaProps {
     showPanel: 'none' | 'actions' | 'emojis' | 'chars';
     setShowPanel: (v: 'none' | 'actions' | 'emojis' | 'chars') => void;
     onSend: () => void;
+    /** 键盘回车可保留为普通发送；不传时与屏幕发送按钮保持同一行为。 */
+    onKeyboardSend?: () => void;
     onDeleteSelected: () => void;
     onForwardSelected?: () => void;
     selectedCount: number;
@@ -33,7 +35,7 @@ interface ChatInputAreaProps {
     /** 提供时整体替换内置 actions 双页网格——群聊传自己的功能格。不传 = 原行为 */
     actionsContent?: React.ReactNode;
     onPanelAction: (type: string, payload?: any) => void;
-    onImageSelect: (file: File) => void;
+    onImageSelect: (file: File) => void | Promise<void>;
     isSummarizing: boolean;
     // Categories Support
     categories?: EmojiCategory[];
@@ -59,11 +61,13 @@ interface ChatInputAreaProps {
     chromeStyle?: 'soft' | 'flat' | 'floating' | 'pixel';
     /** 动森彩蛋模式：输入栏换成木质草绿圆角。 */
     acnh?: boolean;
+    /** 开发调试入口只在解锁后显示，放在加号面板内，不再悬浮在聊天内容上。 */
+    devDebugAvailable?: boolean;
 }
 
 const ChatInputArea: React.FC<ChatInputAreaProps> = ({
     input, setInput, isTyping, selectionMode,
-    showPanel, setShowPanel, onSend, onDeleteSelected, onForwardSelected, selectedCount,
+    showPanel, setShowPanel, onSend, onKeyboardSend = onSend, onDeleteSelected, onForwardSelected, selectedCount,
     emojis, characters = [], activeCharacterId = '', onCharSelect = () => {},
     unreadMessages = {},
     customThemes = [], onUpdateTheme = () => {}, onRemoveTheme = () => {}, activeThemeId = '',
@@ -82,9 +86,12 @@ const ChatInputArea: React.FC<ChatInputAreaProps> = ({
     sendButtonStyle = 'circle',
     chromeStyle = 'soft',
     acnh = false,
+    devDebugAvailable = false,
 }) => {
     const chatImageInputRef = useRef<HTMLInputElement>(null);
+    const cameraImageInputRef = useRef<HTMLInputElement>(null);
     const textareaRef = useRef<HTMLTextAreaElement>(null);
+    const panelRef = useRef<HTMLDivElement>(null);
     const [actionsPage, setActionsPage] = useState<0 | 1 | 2>(0);
     // 气泡样式面板：搜索 + 两步确认删除（防止 hover 小 × 误删）
     const [bubbleSearch, setBubbleSearch] = useState('');
@@ -111,19 +118,39 @@ const ChatInputArea: React.FC<ChatInputAreaProps> = ({
     const actionsSwipeMoved = useRef(false);
     const useIOSStandaloneInputFix = isIOSStandaloneWebApp();
 
+    // 功能面板打开时，点击面板以外的聊天区域即可收起面板。
+    // 用 pointerdown 统一覆盖鼠标、触摸和手写笔，避免移动端点击后面板仍停留。
+    useEffect(() => {
+        if (showPanel === 'none') return;
+
+        const handleOutsidePointerDown = (event: PointerEvent) => {
+            const target = event.target as Node | null;
+            if (target && panelRef.current?.contains(target)) return;
+            setShowPanel('none');
+        };
+
+        document.addEventListener('pointerdown', handleOutsidePointerDown);
+        return () => document.removeEventListener('pointerdown', handleOutsidePointerDown);
+    }, [showPanel, setShowPanel]);
+
     const handleKeyDown = (e: React.KeyboardEvent) => {
         if (e.key === 'Enter' && !e.shiftKey) {
             e.preventDefault();
-            onSend();
+            onKeyboardSend();
         }
     };
 
-    const handleImageChange = (e: React.ChangeEvent<HTMLInputElement>, type: 'chat' | 'bg') => {
-        const file = e.target.files?.[0];
-        if (file) {
-            onImageSelect(file);
+    const handleSendButtonClick = () => {
+        onSend();
+    };
+
+    const handleImageChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+        const files = Array.from(e.target.files || []);
+        // 先清空 input，方便用户随后再次选择同一张图。
+        e.target.value = '';
+        for (const file of files) {
+            await onImageSelect(file);
         }
-        if (e.target) e.target.value = ''; // Reset
     };
 
     // --- Unified Touch/Long-Press Logic ---
@@ -407,6 +434,13 @@ const ChatInputArea: React.FC<ChatInputAreaProps> = ({
             <div className={`fixed inset-0 z-[-1] ${isPixelStyle ? 'bg-[#eadfce]/70 backdrop-blur-[2px]' : isDiscordStyle ? 'bg-slate-950/70 backdrop-blur-[2px]' : 'bg-white/60 backdrop-blur-[2px]'}`} />
         )}
         <div className={`sully-chat-inputbar ${shellClass} pb-safe shrink-0 z-40 relative`}>
+            {showPanel === 'actions' && !selectionMode && (
+                <div
+                    className="fixed inset-0 z-0 bg-black/[0.08]"
+                    onPointerDown={() => setShowPanel('none')}
+                    aria-hidden
+                />
+            )}
             
             {selectionMode ? (
                 <div className={`p-3 flex gap-2 ${isPixelStyle ? 'bg-[#f3e7d6]' : isDiscordStyle ? 'bg-slate-900/60 backdrop-blur-md' : 'bg-white/50 backdrop-blur-md'}`}>
@@ -429,7 +463,7 @@ const ChatInputArea: React.FC<ChatInputAreaProps> = ({
                     </button>
                 </div>
             ) : (
-                <div className="p-3 px-4 flex gap-3 items-end relative">
+                <div className="p-3 px-4 flex gap-3 items-end relative z-10">
                     <button onClick={() => setShowPanel(showPanel === 'actions' ? 'none' : 'actions')} className={actionButtonClass}>
                         <Plus className="w-6 h-6" weight="bold" />
                     </button>
@@ -453,10 +487,10 @@ const ChatInputArea: React.FC<ChatInputAreaProps> = ({
                             <Smiley className="w-6 h-6" weight="regular" />
                         </button>
                     </div>
-                    <button 
-                        onClick={onSend} 
-                        disabled={!input.trim()} 
-                        className={`${sendButtonClass} ${input.trim() ? '' : 'opacity-45 shadow-none'}`}
+                    <button
+                        type="button"
+                        onClick={handleSendButtonClick}
+                        className={sendButtonClass}
                     >
                         {sendButtonStyle === 'pill' ? <span>发送</span> : <PaperPlaneTilt className="w-5 h-5" weight="fill" />}
                     </button>
@@ -470,8 +504,12 @@ const ChatInputArea: React.FC<ChatInputAreaProps> = ({
             {/* Panels — always mounted, height transitions for smooth open/close */}
             {!selectionMode && (
                 <div
-                    className={`sully-chat-panel ${panelClass} overflow-hidden relative z-0 flex flex-col will-change-[max-height] transition-[max-height] duration-200 ease-out`}
-                    style={{ maxHeight: showPanel !== 'none' ? '18rem' : '0px' }}
+                    ref={panelRef}
+                    className={`sully-chat-panel ${showPanel === 'actions' ? 'sully-action-popover !absolute bottom-full left-4 z-20 mb-3 w-[min(220px,42vw)] rounded-[22px] border border-white/80 bg-white/95 shadow-[0_16px_42px_rgba(15,23,42,0.20)] backdrop-blur-2xl' : panelClass} overflow-hidden relative flex flex-col will-change-[max-height] transition-[max-height] duration-200 ease-out`}
+                    style={{
+                        height: showPanel === 'actions' ? 'min(28rem, calc(100dvh - 8rem))' : undefined,
+                        maxHeight: showPanel === 'actions' ? 'min(28rem, calc(100dvh - 8rem))' : showPanel !== 'none' ? '18rem' : '0px',
+                    }}
                 >
                     
                     {/* Emojis Panel with Categories */}
@@ -621,21 +659,130 @@ const ChatInputArea: React.FC<ChatInputAreaProps> = ({
                     )}
 
                     {/* Actions Panel：外部提供 actionsContent 时整体替换内置双页网格 */}
+                    {showPanel === 'actions' && (
+                        <>
+                            <style>{`
+                                .sully-action-popover .sully-action-list > button {
+                                    min-height: 34px;
+                                    width: 100%;
+                                    flex-direction: row !important;
+                                    align-items: center !important;
+                                    justify-content: flex-start !important;
+                                    gap: 8px !important;
+                                    border-bottom: 1px solid rgba(60, 60, 67, 0.10);
+                                    padding: 3px 6px !important;
+                                    color: #3a3a3c !important;
+                                }
+                                .sully-action-popover .sully-action-list > button:last-of-type { border-bottom: 0; }
+                                .sully-action-popover .sully-action-list > button > div,
+                                .sully-action-popover .sully-action-list > button > span:first-child {
+                                    width: 28px !important;
+                                    height: 28px !important;
+                                    flex: 0 0 28px;
+                                    background: #f2f2f7 !important;
+                                    color: #3a3a3c !important;
+                                    border-color: rgba(60, 60, 67, 0.12) !important;
+                                    border-radius: 9px !important;
+                                    box-shadow: none !important;
+                                }
+                                .sully-action-popover .sully-action-list > button > div svg,
+                                .sully-action-popover .sully-action-list > button > span:first-child svg,
+                                .sully-action-popover .sully-action-list > button > div img {
+                                    width: 16px !important;
+                                    height: 16px !important;
+                                }
+                                .sully-action-popover .sully-action-list > button img { filter: grayscale(1) brightness(0.25) contrast(1.2); }
+                                .sully-action-popover .sully-action-list > button > span.font-bold {
+                                    flex: 1;
+                                    min-width: 0;
+                                    text-align: left !important;
+                                    font-size: 11px !important;
+                                    line-height: 1.15;
+                                    white-space: nowrap;
+                                }
+                                .sully-action-popover .sully-action-list > button::after { content: '›'; margin-left: auto; color: #8e8e93; font-size: 16px; line-height: 1; }
+                            `}</style>
+                            <div className="flex shrink-0 items-center justify-between border-b border-black/[0.07] px-3 py-2">
+                                <span className="text-[11px] font-semibold text-[#1c1c1e]">快捷功能</span>
+                                <button
+                                    type="button"
+                                    aria-label="关闭快捷功能"
+                                    onClick={() => setShowPanel('none')}
+                                    className="flex h-6 w-6 items-center justify-center rounded-full bg-[#e5e5ea] text-[#636366] active:scale-95"
+                                >
+                                    <X className="h-3.5 w-3.5" weight="bold" />
+                                </button>
+                            </div>
+                        </>
+                    )}
                     {showPanel === 'actions' && actionsContent && (
-                        <div className="overflow-y-auto no-scrollbar">
+                        <div className="flex-1 overflow-y-auto overscroll-contain no-scrollbar touch-pan-y">
                             {actionsContent}
                         </div>
                     )}
-                    {/* Actions Panel (paginated: page 0 = 内置功能, page 1 = 外部服务, page 2 = 更多) */}
+                    {/* Actions Panel：固定高度的纵向列表，内容在窗口内部上下滚动。 */}
                     {showPanel === 'actions' && !actionsContent && (
                         <div
-                            className="overflow-y-auto no-scrollbar"
+                            className="flex-1 overflow-y-auto overscroll-contain no-scrollbar touch-pan-y"
                             onTouchStart={handleActionsSwipeStart}
                             onTouchMove={handleActionsSwipeMove}
                             onTouchEnd={handleActionsSwipeEnd}
                             onClickCapture={handleActionsClickCapture}
                         >
-                          <div className={`p-6 grid grid-cols-4 gap-8 ${actionsPage === 0 ? '' : 'hidden'}`}>
+                          <div className="sully-action-list px-3 py-1">
+                            {/* 拍照：先保留入口，真实相机能力后续接入。 */}
+                            <button onClick={() => cameraImageInputRef.current?.click()} className={`flex flex-col items-center gap-2 active:scale-95 transition-transform ${acnh ? 'text-[#725d42]' : isDiscordStyle ? 'text-slate-200' : 'text-slate-600'}`}>
+                                <div className={`w-14 h-14 rounded-2xl flex items-center justify-center shadow-sm border ${isDiscordStyle ? 'bg-slate-800 text-slate-300 border-white/10' : 'bg-slate-50 text-slate-500 border-slate-100'}`}>
+                                    <Camera className="w-6 h-6" weight="bold" />
+                                </div>
+                                <span className="text-xs font-bold">拍照</span>
+                            </button>
+                            <input type="file" ref={cameraImageInputRef} className="hidden" accept="image/*" capture="environment" onChange={handleImageChange} />
+
+                            {/* 相册 */}
+                            <button onClick={() => chatImageInputRef.current?.click()} className={`flex flex-col items-center gap-2 active:scale-95 transition-transform ${acnh ? 'text-[#725d42]' : isDiscordStyle ? 'text-slate-200' : 'text-slate-600'}`}>
+                                {acnh ? <AcnhActionTile kind="image" /> : (
+                                <div className={`w-14 h-14 rounded-2xl flex items-center justify-center shadow-sm border ${isDiscordStyle ? 'bg-slate-800 text-slate-300 border-white/10' : 'bg-slate-50 text-slate-500 border-slate-100'}`}>
+                                    <Image className="w-6 h-6" weight="bold" />
+                                </div>)}
+                                <span className="text-xs font-bold">相册</span>
+                            </button>
+                            <input type="file" ref={chatImageInputRef} className="hidden" accept="image/*" multiple onChange={handleImageChange} />
+
+                            {/* 日程 */}
+                            <button onClick={() => onPanelAction('schedule')} className={`flex flex-col items-center gap-2 active:scale-95 transition-transform ${acnh ? 'text-[#725d42]' : isDiscordStyle ? 'text-slate-200' : 'text-slate-600'}`}>
+                                {acnh ? <AcnhActionTile kind="schedule" /> : (
+                                <div className={`w-14 h-14 rounded-2xl flex items-center justify-center shadow-sm border ${isDiscordStyle ? 'bg-slate-800 text-slate-300 border-white/10' : 'bg-slate-50 text-slate-500 border-slate-100'}`}>
+                                    <CalendarBlank className="w-6 h-6" weight="bold" />
+                                </div>)}
+                                <span className="text-xs font-bold">日程/情绪</span>
+                            </button>
+
+                            {/* 重新生成 */}
+                            <button onClick={onReroll} disabled={!canReroll} className={`flex flex-col items-center gap-2 active:scale-95 transition-transform ${isDiscordStyle ? 'text-slate-200' : 'text-slate-600'}`}>
+                                {acnh ? <AcnhActionTile kind="regenerate" /> : (
+                                <div className={`w-14 h-14 rounded-2xl flex items-center justify-center shadow-sm border ${isDiscordStyle ? 'bg-slate-800 text-slate-300 border-white/10' : 'bg-slate-50 text-slate-500 border-slate-100'}`}>
+                                    <ArrowsClockwise className="w-6 h-6" weight="bold" />
+                                </div>)}
+                                <span className="text-xs font-bold">重新生成</span>
+                            </button>
+
+                            {/* 直接打开家园，和聊天里的家园生活卡片使用同一个入口。 */}
+                            <button onClick={() => onPanelAction('world-home')} className={`flex flex-col items-center gap-2 active:scale-95 transition-transform ${acnh ? 'text-[#725d42]' : isDiscordStyle ? 'text-slate-200' : 'text-slate-600'}`}>
+                                <div className={`w-14 h-14 rounded-2xl flex items-center justify-center shadow-sm border ${isDiscordStyle ? 'bg-slate-800 text-slate-300 border-white/10' : 'bg-slate-50 text-slate-500 border-slate-100'}`}>
+                                    <House className="w-6 h-6" weight="bold" />
+                                </div>
+                                <span className="text-xs font-bold">家园</span>
+                            </button>
+
+                            {/* 查看当前角色和各功能会发送给 AI 的提示词。 */}
+                            <button onClick={() => onPanelAction('view-prompts')} className={`flex flex-col items-center gap-2 active:scale-95 transition-transform ${acnh ? 'text-[#725d42]' : isDiscordStyle ? 'text-slate-200' : 'text-slate-600'}`}>
+                                <div className={`w-14 h-14 rounded-2xl flex items-center justify-center shadow-sm border ${isDiscordStyle ? 'bg-slate-800 text-slate-300 border-white/10' : 'bg-slate-50 text-slate-500 border-slate-100'}`}>
+                                    <span className="text-lg font-black leading-none">Aa</span>
+                                </div>
+                                <span className="text-xs font-bold">查看提示词</span>
+                            </button>
+
                             {/* 见面：直接跳到该角色的见面模式（等同于进见面 App 并点击该角色） */}
                             <button onClick={() => onPanelAction('meetup')} className={`flex flex-col items-center gap-2 active:scale-95 transition-transform ${acnh ? 'text-[#725d42]' : isDiscordStyle ? 'text-slate-200' : 'text-slate-600'}`}>
                                 <div className={`w-14 h-14 rounded-2xl flex items-center justify-center shadow-sm border ${isDiscordStyle ? 'bg-slate-800 text-violet-300 border-violet-400/20' : 'bg-violet-50 text-violet-500 border-violet-100'}`}>
@@ -666,46 +813,10 @@ const ChatInputArea: React.FC<ChatInputAreaProps> = ({
                                 <span className="text-xs font-bold">{isSummarizing ? '归档中...' : '记忆归档'}</span>
                             </button>
                             
-                            <button onClick={() => onPanelAction('settings')} className={`flex flex-col items-center gap-2 active:scale-95 transition-transform ${acnh ? 'text-[#725d42]' : isDiscordStyle ? 'text-slate-200' : 'text-slate-600'}`}>
-                                {acnh ? <AcnhActionTile kind="settings" /> : (
-                                <div className={`w-14 h-14 rounded-2xl flex items-center justify-center shadow-sm border ${isDiscordStyle ? 'bg-slate-800 text-slate-300 border-white/10' : 'bg-slate-50 text-slate-500 border-slate-100'}`}>
-                                    <GearSix className="w-6 h-6" weight="bold" /></div>)}
-                                <span className="text-xs font-bold">设置</span>
-                            </button>
-                            
-                            <button onClick={() => chatImageInputRef.current?.click()} className={`flex flex-col items-center gap-2 active:scale-95 transition-transform ${acnh ? 'text-[#725d42]' : isDiscordStyle ? 'text-slate-200' : 'text-slate-600'}`}>
-                                {acnh ? <AcnhActionTile kind="image" /> : (
-                                <div className={`w-14 h-14 rounded-2xl flex items-center justify-center shadow-sm border ${isDiscordStyle ? 'bg-slate-800 text-pink-300 border-pink-400/20' : 'bg-pink-50 text-pink-400 border-pink-100'}`}>
-                                    <Image className="w-6 h-6" weight="bold" />
-                                </div>)}
-                                <span className="text-xs font-bold">相册</span>
-                            </button>
-                            <input type="file" ref={chatImageInputRef} className="hidden" accept="image/*" onChange={(e) => handleImageChange(e, 'chat')} />
-
-                            {/* Regenerate Button */}
-                            <button onClick={onReroll} disabled={!canReroll} className={`flex flex-col items-center gap-2 active:scale-95 transition-transform ${canReroll ? (isDiscordStyle ? 'text-slate-200' : 'text-slate-600') : 'text-slate-300 opacity-50'}`}>
-                                {acnh ? <AcnhActionTile kind="regenerate" /> : (
-                                <div className={`w-14 h-14 rounded-2xl flex items-center justify-center shadow-sm border ${canReroll ? (isDiscordStyle ? 'bg-slate-800 text-emerald-300 border-emerald-400/20' : 'bg-emerald-50 text-emerald-400 border-emerald-100') : (isDiscordStyle ? 'bg-slate-800 text-slate-600 border-white/10' : 'bg-slate-50 text-slate-300 border-slate-100')}`}>
-                                    <ArrowsClockwise className="w-6 h-6" weight="bold" />
-                                </div>)}
-                                <span className="text-xs font-bold">重新生成</span>
-                            </button>
-
-                            {/* 情绪按钮已并入日程 — 情绪/意识流与日程强制同步，配置面板在日程 Modal 下方 */}
-
-                            {/* Schedule Button */}
-                            <button onClick={() => onPanelAction('schedule')} className={`flex flex-col items-center gap-2 active:scale-95 transition-transform ${acnh ? 'text-[#725d42]' : isDiscordStyle ? 'text-slate-200' : 'text-slate-600'}`}>
-                                {acnh ? <AcnhActionTile kind="schedule" /> : (
-                                <div className={`w-14 h-14 rounded-2xl flex items-center justify-center shadow-sm border ${isDiscordStyle ? 'bg-slate-800 text-cyan-300 border-cyan-400/20' : 'bg-cyan-50 text-cyan-500 border-cyan-100'}`}>
-                                    <CalendarBlank className="w-6 h-6" weight="bold" />
-                                </div>)}
-                                <span className="text-xs font-bold">日程/情绪</span>
-                            </button>
-
                           </div>
 
                           {/* Page 1: 外部服务 */}
-                          <div className={`p-6 grid grid-cols-4 gap-8 ${actionsPage === 1 ? '' : 'hidden'}`}>
+                          <div className="sully-action-list px-3 py-1">
                             {/* Proactive Message Button（从第一页移到第二页） */}
                             <button onClick={() => onPanelAction('proactive')} className={`flex flex-col items-center gap-2 active:scale-95 transition-transform relative ${acnh ? 'text-[#725d42]' : isDiscordStyle ? 'text-slate-200' : 'text-slate-600'}`}>
                                 {acnh ? <AcnhActionTile kind="proactive" /> : (
@@ -730,7 +841,7 @@ const ChatInputArea: React.FC<ChatInputAreaProps> = ({
                                 if (!mcdConfigured) { onPanelAction('mcd-not-configured'); return; }
                                 onPanelAction(mcdActivated ? 'mcd-end' : 'mcd-request');
                               }}
-                              className={`flex flex-col items-center gap-2 active:scale-95 transition-transform ${acnh ? 'text-[#725d42]' : isDiscordStyle ? 'text-slate-200' : 'text-slate-600'} ${!mcdConfigured ? 'opacity-50' : ''}`}
+                              className={`flex flex-col items-center gap-2 active:scale-95 transition-transform ${acnh ? 'text-[#725d42]' : isDiscordStyle ? 'text-slate-200' : 'text-slate-600'}`}
                             >
                               {acnh ? <div className="relative"><AcnhActionTile kind="mcd" />{mcdActivated && <span className="absolute -top-1 -right-1 w-3 h-3 rounded-full bg-[#fc736d] border-2 border-white" />}</div> : (
                               <div className={`w-14 h-14 rounded-2xl flex items-center justify-center shadow-sm border relative ${
@@ -750,7 +861,7 @@ const ChatInputArea: React.FC<ChatInputAreaProps> = ({
                                 if (!luckinConfigured) { onPanelAction('luckin-not-configured'); return; }
                                 onPanelAction(luckinActivated ? 'luckin-end' : 'luckin-request');
                               }}
-                              className={`flex flex-col items-center gap-2 active:scale-95 transition-transform ${acnh ? 'text-[#725d42]' : isDiscordStyle ? 'text-slate-200' : 'text-slate-600'} ${!luckinConfigured ? 'opacity-50' : ''}`}
+                              className={`flex flex-col items-center gap-2 active:scale-95 transition-transform ${acnh ? 'text-[#725d42]' : isDiscordStyle ? 'text-slate-200' : 'text-slate-600'}`}
                             >
                               <div className={`w-14 h-14 rounded-2xl flex items-center justify-center shadow-sm border relative ${
                                   luckinActivated
@@ -823,7 +934,7 @@ const ChatInputArea: React.FC<ChatInputAreaProps> = ({
                           </div>
 
                           {/* Page 2: 更多 */}
-                          <div className={`p-6 grid grid-cols-4 gap-8 ${actionsPage === 2 ? '' : 'hidden'}`}>
+                          <div className="sully-action-list px-3 py-1">
                             {/* 提示音：打开该角色专属的「白框提示音」弹窗（挨着白框，独立于白框可绑定/解绑） */}
                             <button
                               onClick={() => onPanelAction('chrome-sound')}
@@ -837,7 +948,7 @@ const ChatInputArea: React.FC<ChatInputAreaProps> = ({
 
                             {/* 记忆链接与提示音同级：都是聊天工具入口，不单独占一整块。 */}
                             <button
-                              onClick={() => onPanelAction('memory-link')}
+                                onClick={() => onPanelAction('memory-link')}
                               className={`flex flex-col items-center gap-2 active:scale-95 transition-transform ${acnh ? 'text-[#725d42]' : isDiscordStyle ? 'text-slate-200' : 'text-slate-600'}`}
                             >
                               <span className={`w-14 h-14 rounded-2xl grid place-items-center shadow-sm border ${acnh ? 'bg-white/70 border-[#e6dab4] text-[#8f674a]' : isDiscordStyle ? 'bg-slate-800 text-purple-300 border-purple-400/20' : 'bg-purple-50 text-purple-500 border-purple-100'}`}>
@@ -845,29 +956,20 @@ const ChatInputArea: React.FC<ChatInputAreaProps> = ({
                               </span>
                               <span className="text-xs font-bold">记忆链接</span>
                             </button>
+
+                            {devDebugAvailable && (
+                              <button
+                                onClick={() => onPanelAction('dev-debug')}
+                                className={`flex flex-col items-center gap-2 active:scale-95 transition-transform ${acnh ? 'text-[#725d42]' : isDiscordStyle ? 'text-slate-200' : 'text-slate-600'}`}
+                              >
+                                <span className={`w-14 h-14 rounded-2xl grid place-items-center shadow-sm border ${acnh ? 'bg-white/70 border-[#e6dab4] text-[#8f674a]' : isDiscordStyle ? 'bg-slate-800 text-amber-300 border-amber-400/20' : 'bg-amber-50 text-amber-500 border-amber-100'}`}>
+                                  <Wrench className="w-6 h-6" weight="bold" />
+                                </span>
+                                <span className="text-xs font-bold">开发调试</span>
+                              </button>
+                            )}
                           </div>
 
-                          {/* 翻页指示器 */}
-                          <div className="flex items-center justify-center gap-3 pb-3 -mt-2">
-                            <button
-                              type="button"
-                              aria-label="第 1 页"
-                              onClick={() => setActionsPage(0)}
-                              className={`w-2 h-2 rounded-full transition-all ${actionsPage === 0 ? (isDiscordStyle ? 'bg-slate-200 w-5' : 'bg-slate-500 w-5') : (isDiscordStyle ? 'bg-slate-600' : 'bg-slate-300')}`}
-                            />
-                            <button
-                              type="button"
-                              aria-label="第 2 页"
-                              onClick={() => setActionsPage(1)}
-                              className={`w-2 h-2 rounded-full transition-all ${actionsPage === 1 ? (isDiscordStyle ? 'bg-slate-200 w-5' : 'bg-slate-500 w-5') : (isDiscordStyle ? 'bg-slate-600' : 'bg-slate-300')}`}
-                            />
-                            <button
-                              type="button"
-                              aria-label="第 3 页"
-                              onClick={() => setActionsPage(2)}
-                              className={`w-2 h-2 rounded-full transition-all ${actionsPage === 2 ? (isDiscordStyle ? 'bg-slate-200 w-5' : 'bg-slate-500 w-5') : (isDiscordStyle ? 'bg-slate-600' : 'bg-slate-300')}`}
-                            />
-                          </div>
                         </div>
                      )}
                      {showPanel === 'chars' && (

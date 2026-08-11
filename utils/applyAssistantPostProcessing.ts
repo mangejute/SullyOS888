@@ -25,7 +25,7 @@
  * Phase 2 会让 worker 端把识别出的副作用 (RECALL/SEARCH/...) 结构化传 directives, 这里只重放。
  */
 
-import { CharacterProfile, UserProfile, Message, Emoji, RealtimeConfig } from '../types';
+import { APIConfig, CharacterProfile, UserProfile, Message, Emoji, RealtimeConfig } from '../types';
 import { DB } from './db';
 import { ChatParser, type FrozenMusicSong } from './chatParser';
 import { resolveCharTimeZone } from './timezone';
@@ -49,6 +49,7 @@ import {
 } from './agenticTools';
 import { getLocalDateKey } from './localDate';
 import { normalizeAssistantActionFormatting } from './assistantActionFormat';
+import { extractImageGenerationRequests, startImageGeneration } from './imageGeneration';
 
 // ─── 模块内辅助 ──────────────────────────────────────────────────────────────
 
@@ -309,6 +310,8 @@ export interface PostProcessMusicHooks {
 export interface PostProcessHooks {
     setMessages: (msgs: Message[]) => void;
     addToast: (msg: string, type: 'info' | 'success' | 'error') => void;
+    /** 一条可显示的角色文字气泡落库后回调，用于后台逐条通知等会话外能力。 */
+    onAssistantTextPersisted?: (message: { id: number; content: string }) => void;
     setRecallStatus?: (s: string) => void;
     setSearchStatus?: (s: string) => void;
     setDiaryStatus?: (s: string) => void;
@@ -349,6 +352,8 @@ export interface PostProcessCtx {
     lastXhsNotesRef?: { current: XhsNote[] };
     /** API 调用配置 */
     api: PostProcessApiCall;
+    /** 独立角色生图 API 配置。 */
+    imageGenerationApi?: APIConfig['imageGenerationApi'];
     /** UI / 业务钩子 */
     hooks: PostProcessHooks;
     /**
@@ -410,6 +415,7 @@ export async function applyAssistantPostProcessing(
         mcdInheritMeta,
         xhsCaches,
         api,
+        imageGenerationApi,
         hooks,
         instantRender,
         skipSecondPassLLM,
@@ -424,8 +430,13 @@ export async function applyAssistantPostProcessing(
     // 统一落库入口：ctx.messageTimestamp（若有）盖到每条消息上，保证同一轮拆出的
     // 正文 / 表情 / 卡片 / 系统提示时间戳一致；没传则维持 DB.saveMessage 默认（写库当刻）。
     // 全函数落库一律走这里，别直接调 DB.saveMessage——漏一处就会出现气泡时间戳互相打架。
-    const persistMessage: typeof DB.saveMessage = (msg) =>
-        DB.saveMessage(messageTimestamp != null ? { ...msg, timestamp: messageTimestamp } : msg);
+    const persistMessage: typeof DB.saveMessage = async (msg) => {
+        const id = await DB.saveMessage(messageTimestamp != null ? { ...msg, timestamp: messageTimestamp } : msg);
+        if (msg.role === 'assistant' && msg.type === 'text' && typeof msg.content === 'string' && msg.content.trim()) {
+            hooks.onAssistantTextPersisted?.({ id, content: msg.content });
+        }
+        return id;
+    };
     const {
         setMessages,
         addToast,
@@ -504,6 +515,8 @@ export async function applyAssistantPostProcessing(
     // ─── Step 1: 初次粗洗 ───
     let aiContent = replayedTagPrefix ? `${replayedTagPrefix}${rawAiContent}` : rawAiContent;
     aiContent = normalizeAiContent(aiContent);
+    const imageRequests = extractImageGenerationRequests(aiContent);
+    if (imageRequests.length) aiContent = imageRequests[0].cleanedContent;
     // 在任何 lead-in/二轮渲染之前先剥掉仿卡片文本，防止它被 chunkText 拆成灰色普通气泡。
     const mimickedXhsShares = extractMimickedXhsShares(aiContent);
     aiContent = mimickedXhsShares.cleanedContent;
@@ -692,9 +705,10 @@ export async function applyAssistantPostProcessing(
                         allChunks.push(...ChatParser.chunkText(block.trim()));
                     }
                     if (allChunks.length === 0 && part.content.trim()) allChunks.push(part.content.trim());
+                    const renderedChunks = allChunks;
 
-                    for (let i = 0; i < allChunks.length; i++) {
-                        let chunk = allChunks[i];
+                    for (let i = 0; i < renderedChunks.length; i++) {
+                        let chunk = renderedChunks[i];
                         const delay = Math.min(Math.max(chunk.length * 50, 500), 2000);
                         await typingPause(delay);
 
@@ -2009,6 +2023,28 @@ export async function applyAssistantPostProcessing(
             await renderAndPersist('嗯...', pendingThinkingChain);
         } else {
             setMessages(await DB.getRecentMessagesByCharId(char.id, 200));
+        }
+    }
+
+    // 图片先落一条 pending 消息，再异步请求生图接口，不阻塞本轮文字回复。
+    for (const request of imageRequests) {
+        try {
+            const imageMessageId = await persistMessage({
+                charId: char.id,
+                role: 'assistant',
+                type: 'image',
+                content: '',
+                metadata: {
+                    ...(mcdInheritMeta || {}),
+                    imageGeneration: { status: 'pending', description: request.description, prompt: request.description },
+                },
+            } as any);
+            setMessages(await DB.getRecentMessagesByCharId(char.id, 200));
+            const aspectRatio = imageGenerationApi?.aspectRatio || '1:1';
+            await DB.updateMessageMetadata(imageMessageId, prev => ({ ...(prev || {}), imageGeneration: { ...(prev?.imageGeneration || {}), aspectRatio } }));
+            void startImageGeneration(imageMessageId, { api: imageGenerationApi, character: char, description: request.description, aspectRatio });
+        } catch (error) {
+            console.error('[image-generation] 保存待生成消息失败', error);
         }
     }
 }

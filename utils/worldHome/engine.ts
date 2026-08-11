@@ -17,13 +17,14 @@
 
 import type {
     CharacterProfile, UserProfile, GroupProfile, RealtimeConfig, APIConfig,
-    WorldProfile, WorldEpisode, WorldCharBeat, WorldCardMeta,
+    WorldProfile, WorldEpisode, WorldCharBeat, WorldCardMeta, WorldDaySegmentKey,
 } from '../../types';
 import { DB } from '../db';
 import { buildChatRequestPayload } from '../chatRequestPayload';
 import { safeFetchJson } from '../safeApi';
 import { processNewMessagesWithAutoArchive } from '../memoryPalace/autoArchive';
 import { getDailyScheduleForChar } from '../dailySchedule';
+import { ensureWorldLifePlan, syncWorldBeatToSchedule } from './lifeLink';
 import {
     worldTimeLabel, buildWorldSystemAddendum, buildWorldCharTurn, buildNpcTurn,
     parseCharBeat, parseNpcScene, realObserveTarget, formatRealClock, migrateWorldDaySegs,
@@ -259,6 +260,15 @@ async function buildFullDayScheduleBlock(world: WorldProfile, char: CharacterPro
     }
 }
 
+/** 把当天共享生活计划交给家园演绎，保证观测到的事和随后展开的细日程来自同一条生活线。 */
+function buildWorldLifePlanBlock(world: WorldProfile, char: CharacterProfile, segmentIndex?: number): string {
+    const segmentKeys: WorldDaySegmentKey[] = ['morning', 'noon', 'evening', 'latenight'];
+    const segment = world.lifePlan?.segments.find(item => item.key === segmentKeys[segmentIndex ?? world.realClock?.seg ?? 0]);
+    const mine = segment?.members.find(member => member.charId === char.id);
+    if (!segment || !mine) return '';
+    return `\n\n## 本段家园生活计划（尚未发生，作为本段行动起点）\n共同背景：${segment.event}\n你的安排：${mine.activity}，地点：${mine.location}${mine.description ? `，${mine.description}` : ''}${mine.mood ? `；心情：${mine.mood}` : ''}\n请让这半天从这份安排自然展开；可以遇到合理的意外，但不能无故脱离。`;
+}
+
 /**
  * 把某一拍作为 world_card 注入这名角色的 1v1 聊天（进上下文与记忆）。
  * 自动演绎、单拍补发都走这里——保证格式一致，也方便 UI 做「手动发送保底」。
@@ -291,9 +301,19 @@ export async function runWorldEpisode(deps: WorldEpisodeDeps): Promise<WorldEpis
     if (!api.baseUrl) return { ok: false, reason: 'no-api' };
     const baseUrl = api.baseUrl.replace(/\/+$/, '');
 
-    // real 模式：演的那一段跟着真实时钟走，且只能补当天错过的段；已追上现实就没东西可演
+    // real 模式：演的那一段跟着真实时钟走；错过的时段自然流逝，不倒灌成多轮剧情
     const realTarget = world.timeMode !== 'sim' ? realObserveTarget(world) : null;
     if (world.timeMode !== 'sim' && !realTarget) return { ok: false, reason: 'caught-up' };
+
+    const timeJump = realTarget && world.realClock && (
+        world.realClock.dayKey !== realTarget.dayKey || realTarget.seg > world.realClock.seg + 1
+    ) ? `上一次可见记录停在${formatRealClock(world.realClock)}，现在已是${formatRealClock(realTarget)}。中间的时间已经自然过去：不要把错过的早/中/晚逐条补演，不要凭空新增重大转折；只在当前这段用一两句自然带过必要的日常余韵，然后专注现在正在发生的事。` : undefined;
+
+    // 联动家园在演绎前先有当天的共同生活骨架；计划每天只生成一次，不会反复改写。
+    if (world.lifeLinkEnabled && world.timeMode !== 'sim') {
+        const plan = await ensureWorldLifePlan(world, api);
+        if (plan) world.lifePlan = plan;
+    }
 
     running.add(world.id);
     const storyTime = realTarget ? formatRealClock(realTarget) : worldTimeLabel(world);
@@ -359,7 +379,8 @@ export async function runWorldEpisode(deps: WorldEpisodeDeps): Promise<WorldEpis
                 });
                 const systemPrompt = payload.systemPrompt
                     + buildWorldSystemAddendum(world, char, userProfile?.name || '')
-                    + await buildFullDayScheduleBlock(world, worldChar);
+                    + await buildFullDayScheduleBlock(world, worldChar)
+                    + buildWorldLifePlanBlock(world, char, realTarget?.seg);
                 const directive = (world.directives || []).find(d => d.charId === char.id);
                 // sim 模式：喂回这名角色自己的单视角总结 + 本卷氛围（绝不喂全知 synopsis）
                 const priorChapter = (world.timeMode === 'sim' && latestChapter)
@@ -375,6 +396,7 @@ export async function runWorldEpisode(deps: WorldEpisodeDeps): Promise<WorldEpis
                     exposures: buildExposures(world, char.id, char.name),
                     directive: directive ? { impulseText: directive.impulseText, text: directive.text } : undefined,
                     priorChapter,
+                    timeJump,
                     userName: userProfile?.name || '',
                 });
                 if (directive) consumedDirectiveIds.push(directive.id);
@@ -418,7 +440,7 @@ export async function runWorldEpisode(deps: WorldEpisodeDeps): Promise<WorldEpis
                     headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${api.apiKey || 'sk-none'}` },
                     body: JSON.stringify({
                         model: api.model,
-                        messages: [{ role: 'user', content: buildNpcTurn({ world, members, storyTime, lastSummary, chapterAtmosphere: latestChapter?.atmosphere, inboxes: npcInboxes(world), recentPosts: recentPostsForNpc }) }],
+                    messages: [{ role: 'user', content: buildNpcTurn({ world, members, storyTime, lastSummary, chapterAtmosphere: latestChapter?.atmosphere, inboxes: npcInboxes(world), recentPosts: recentPostsForNpc, timeJump }) }],
                         temperature: 0.9, stream: false,
                     }),
                 }, 2, 0, { appName: '家园', purpose: `NPC世界引擎 · ${world.name}` });
@@ -476,6 +498,12 @@ export async function runWorldEpisode(deps: WorldEpisodeDeps): Promise<WorldEpis
             updatedAt: Date.now(),
         };
         await DB.saveWorld(updatedWorld);
+
+        // 家园实际事件只补充已生成日程的对应细项，不覆盖原有安排；下一轮聊天/情绪评估
+        // 会通过日程注入读到这份实况。单个同步失败不能影响家园主剧情落库。
+        if (updatedWorld.lifeLinkEnabled) {
+            await Promise.all(beats.map(beat => syncWorldBeatToSchedule(updatedWorld, beat).catch(() => {})));
+        }
 
         // ── 3.5 sim 模式：攒满 20 天结一卷（小说体总结 + 各角色单视角，归档原文） ──
         const newClock = updatedWorld.storyClock;
@@ -662,6 +690,7 @@ export async function rerollWorldCharBeat(
         if (worldDirty) {
             await DB.saveWorld({ ...world, threads: world.threads, seeds: world.seeds, relationships: world.relationships, feedReactions: world.feedReactions, updatedAt: Date.now() });
         }
+        if (world.lifeLinkEnabled) await syncWorldBeatToSchedule(world, beat).catch(() => {});
         dispatch('world-episode-done', { worldId: world.id, episodeId: updatedEp.id, storyTime: episode.storyTime, round: episode.round });
         return { ok: true, episode: updatedEp };
     } catch (err) {

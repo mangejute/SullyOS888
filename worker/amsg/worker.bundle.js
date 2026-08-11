@@ -5576,8 +5576,9 @@ var wallClockToTimestamp = (wallClockText, tz) => {
 
 // utils/scheduleInjection.ts
 function getFlowNarrativeKey(hour) {
+  if (hour < 6) return "latenight";
   if (hour < 12) return "morning";
-  if (hour < 18) return "afternoon";
+  if (hour < 18) return "noon";
   return "evening";
 }
 var PRE_DAWN_END_HOUR = 5;
@@ -5604,6 +5605,10 @@ var buildScheduleInjection = (schedule, evolvedNarrative, now = /* @__PURE__ */ 
   if (currentSlot) {
     slotHeader = `\u5F53\u524D\u65F6\u6BB5\uFF1A${currentSlot.startTime} \u4F60\u6B63\u5728${currentSlot.activity}`;
     if (currentSlot.location) slotHeader += `\uFF08${currentSlot.location}\uFF09`;
+    if (currentSlot.worldEvent) {
+      slotHeader += `
+\u5BB6\u56ED\u5B9E\u51B5\uFF1A${currentSlot.worldEvent}${currentSlot.worldMood ? `\uFF08\u4F60\u5F53\u65F6${currentSlot.worldMood}\uFF09` : ""}`;
+    }
     if (nextSlot) slotHeader += `
 \u4E4B\u540E\u5B89\u6392\uFF1A${nextSlot.startTime} ${nextSlot.activity}`;
     slotHeader += "\n";
@@ -5616,8 +5621,9 @@ var buildScheduleInjection = (schedule, evolvedNarrative, now = /* @__PURE__ */ 
   if (evolvedNarrative) {
     narrative = evolvedNarrative;
   } else if (schedule.flowNarrative && Object.keys(schedule.flowNarrative).length > 0) {
-    const key = isPreDawnCarryOver ? "evening" : getFlowNarrativeKey(now.getHours());
-    narrative = schedule.flowNarrative[key] || schedule.flowNarrative["evening"] || schedule.flowNarrative["afternoon"] || schedule.flowNarrative["morning"] || "";
+    const key = isPreDawnCarryOver ? "latenight" : getFlowNarrativeKey(now.getHours());
+    const fallbackKeys = key === "noon" ? ["noon", "afternoon", "evening", "latenight", "morning"] : [key, "latenight", "evening", "noon", "afternoon", "morning"];
+    narrative = fallbackKeys.map((candidate) => schedule.flowNarrative?.[candidate]).find((value) => typeof value === "string" && value.trim()) || "";
   } else if (currentSlot?.innerThought) {
     narrative = currentSlot.innerThought;
   }

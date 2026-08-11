@@ -13,8 +13,10 @@ export const BUILD_LABEL = `${__BUILD_BRANCH__}@${__BUILD_COMMIT__}`;
 /** 构建时间标签，固定由 Vite 按 UTC+8 注入，避免受用户本机时区影响。 */
 export const BUILD_TIME_LABEL = __BUILD_TIME__;
 
-/** 设置页底部的产品版本名（手工维护），跟构建 hash 是两码事——发版前改这里。 */
-export const APP_VERSION = 'v3.3 (账本与钥匙串)';
+/** 设置页底部的版本名：构建日期 + 产品版本号，用户一眼就能判断是否已更新。 */
+const buildDateMatch = BUILD_TIME_LABEL.match(/^(\d{4})-(\d{2})-(\d{2})/);
+const buildDateLabel = buildDateMatch ? `${Number(buildDateMatch[2])}月${Number(buildDateMatch[3])}日` : '未知日期';
+export const APP_VERSION = `${buildDateLabel}-1.1`;
 
 /**
  * 版本号那半截（`v3.0`）。统计给每条记录打的标签用它，面板里按版本切分数据时

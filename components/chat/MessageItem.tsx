@@ -13,6 +13,7 @@ import McdCard from './McdCard';
 import HtmlCard from './HtmlCard';
 import LuckinCard from './LuckinCard';
 import LuckinCheckoutCard from './LuckinCheckoutCard';
+import { Camera, DownloadSimple, SpinnerGap, X } from '@phosphor-icons/react';
 
 // 思考链卡片支持的 12 种风格预设 — 同时被 MessageItem 与 ThinkingChainSettingsModal 复用
 export type ThinkingChainStyleId = 'echo' | 'whisper' | 'minimal' | 'ink' | 'neon' | 'terminal' | 'stellar' | 'tama' | 'pixel' | 'muji' | 'ins' | 'custom';
@@ -1412,6 +1413,10 @@ interface MessageItemProps {
     onResolveTransfer?: (m: Message, action: 'accepted' | 'returned') => void;
     /** 用户点「生活记录」卡 → 确认 / 否决（角色代记的记录） */
     onResolveLifeRecord?: (m: Message, action: 'confirmed' | 'rejected') => void;
+    /** 点击家园生活卡，进入家园应用。 */
+    onOpenWorldHome?: () => void;
+    /** 生图失败时重新生成。 */
+    onRetryImageGeneration?: (msg: Message) => void;
     /** 思考链卡片视觉与交互 */
     thinkingChainOptions?: {
         styleId?: ThinkingChainStyleId;
@@ -1458,6 +1463,8 @@ const MessageItem = React.memo(({
     onLuckinCandidate,
     onResolveTransfer,
     onResolveLifeRecord,
+    onOpenWorldHome,
+    onRetryImageGeneration,
     thinkingChainOptions,
 }: MessageItemProps) => {
     const isUser = m.role === 'user';
@@ -1478,6 +1485,7 @@ const MessageItem = React.memo(({
     const activePointerType = useRef<string>('');
     const replyGestureActiveRef = useRef(false);
     const replyReadyRef = useRef(false);
+    const [imagePreviewOpen, setImagePreviewOpen] = useState(false);
 
     const styleConfig = isUser ? activeTheme.user : activeTheme.ai;
     const [showVoiceText, setShowVoiceText] = useState(false);
@@ -2784,7 +2792,13 @@ const MessageItem = React.memo(({
         const panel: Record<string, any> = (md.statusPanel && typeof md.statusPanel === 'object') ? md.statusPanel : {};
         const posts: string[] = Array.isArray(md.phonePosts) ? md.phonePosts : [];
         const card = (
-            <div className="w-64">
+            <button
+                type="button"
+                onClick={(event) => { event.stopPropagation(); onOpenWorldHome?.(); }}
+                disabled={!onOpenWorldHome}
+                aria-label={`打开家园 ${md.worldName || ''}`.trim()}
+                className="block w-64 text-left transition-transform active:scale-[0.99] disabled:cursor-default disabled:active:scale-100"
+            >
                 <div
                     className="relative rounded-2xl overflow-hidden border border-violet-200/70 shadow-[0_6px_20px_rgba(150,130,200,0.22)]"
                     style={{ background: 'linear-gradient(160deg,#fbf7ff 0%,#f1ebfa 55%,#eae3f6 100%)' }}
@@ -2840,7 +2854,7 @@ const MessageItem = React.memo(({
                         <span className="text-[9px] text-rose-400/80 font-bold tracking-wide">＋记忆</span>
                     </div>
                 </div>
-            </div>
+            </button>
         );
         return commonLayout(card);
     }
@@ -3269,12 +3283,59 @@ const MessageItem = React.memo(({
     }
 
     if (m.type === 'image') {
+        const imageGeneration = (m.metadata as any)?.imageGeneration || {};
+        const status = imageGeneration.status as 'pending' | 'success' | 'failed' | undefined;
+        const description = imageGeneration.description || imageGeneration.prompt || '';
+        const wasSafetyBlocked = /安全|safety|policy|moderation|无法用于生成图像/i.test(String(imageGeneration.error || ''));
+        const aspectRatio = String(imageGeneration.aspectRatio || '1:1');
+        const placeholderRatioClass = aspectRatio === '3:4' ? 'aspect-[3/4]' : aspectRatio === '9:16' ? 'aspect-[9/16]' : aspectRatio === '4:3' ? 'aspect-[4/3]' : aspectRatio === '16:9' ? 'aspect-[16/9]' : 'aspect-square';
+        const downloadImage = () => {
+            if (!m.content) return;
+            const link = document.createElement('a');
+            link.href = m.content;
+            link.download = `${charName || '角色'}-照片.png`;
+            link.click();
+        };
         return commonLayout(
             <div className="relative group">
                 {m.content ? (
-                    <img src={m.content} className="max-w-[200px] max-h-[300px] rounded-2xl" alt="Uploaded" loading="lazy" decoding="async" />
+                    <button type="button" className="block max-w-[230px] overflow-hidden rounded-2xl text-left active:scale-[0.98]" onClick={() => setImagePreviewOpen(true)}>
+                        <img src={m.content} className="max-h-[320px] max-w-[230px] rounded-2xl object-cover" alt="角色生成的图片" loading="lazy" decoding="async" />
+                    </button>
+                ) : status === 'pending' ? (
+                    <div className={`relative w-[224px] overflow-hidden rounded-2xl bg-white shadow-[0_5px_16px_rgba(15,23,42,0.14)] ${placeholderRatioClass}`}>
+                        <div className="absolute right-3 top-3 z-10 flex h-9 w-9 items-center justify-center rounded-full bg-white/90 text-slate-600 shadow-sm">
+                            <SpinnerGap size={19} weight="bold" className="animate-spin" />
+                        </div>
+                        <div className="flex h-full flex-col justify-end bg-slate-100/90 p-4">
+                            <div className="text-[11px] text-slate-400">正在生成照片…</div>
+                            <div className="mt-1 line-clamp-4 text-sm leading-relaxed text-slate-700">{description}</div>
+                        </div>
+                    </div>
+                ) : status === 'failed' ? (
+                    <div className={`relative w-[224px] overflow-hidden rounded-2xl bg-white shadow-[0_5px_16px_rgba(15,23,42,0.14)] ${placeholderRatioClass}`}>
+                        <button type="button" aria-label="重新生成图片" title="重新生成图片" className="absolute right-3 top-3 z-10 flex h-9 w-9 items-center justify-center rounded-full bg-white text-slate-600 shadow-sm" onClick={() => onRetryImageGeneration?.(m)}><Camera size={19} weight="bold" /></button>
+                        <div className="flex h-full flex-col justify-end bg-slate-100/90 p-4">
+                            <div className="text-[11px] text-slate-400">{wasSafetyBlocked ? '描述被生图服务拦截' : '照片生成失败'}</div>
+                            <div className="mt-1 line-clamp-4 text-sm leading-relaxed text-slate-700">{description}</div>
+                        </div>
+                    </div>
                 ) : (
-                    <div className="px-4 py-6 rounded-2xl bg-slate-100 text-slate-400 text-xs italic text-center min-w-[120px]">[图片已丢失]</div>
+                    <div className={`relative w-[224px] overflow-hidden rounded-2xl bg-white shadow-[0_5px_16px_rgba(15,23,42,0.14)] ${placeholderRatioClass}`}>
+                        <div className="flex h-full items-center justify-center bg-slate-100 text-xs italic text-slate-400">[图片已丢失]</div>
+                    </div>
+                )}
+                {imagePreviewOpen && m.content && (
+                    <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/70 p-4" onClick={() => setImagePreviewOpen(false)}>
+                        <div className="relative flex max-h-full max-w-full flex-col items-center justify-center" onClick={e => e.stopPropagation()}>
+                            <div className="absolute right-0 top-0 z-10 flex translate-y-[-52px] gap-2">
+                                <button type="button" aria-label="下载图片" title="下载图片" className="flex h-10 w-10 items-center justify-center rounded-full bg-white/20 text-white backdrop-blur" onClick={downloadImage}><DownloadSimple size={20} weight="bold" /></button>
+                                <button type="button" aria-label="关闭大图" title="关闭大图" className="flex h-10 w-10 items-center justify-center rounded-full bg-white/20 text-white backdrop-blur" onClick={() => setImagePreviewOpen(false)}><X size={20} weight="bold" /></button>
+                            </div>
+                            <img src={m.content} className="max-h-[78vh] max-w-[92vw] rounded-2xl object-contain" alt="角色生成的大图" />
+                            {description && <div className="mt-4 max-w-[92vw] whitespace-pre-wrap text-center text-sm leading-relaxed text-white">{description}</div>}
+                        </div>
+                    </div>
                 )}
             </div>
         );

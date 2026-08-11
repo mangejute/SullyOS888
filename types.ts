@@ -101,7 +101,7 @@ export interface OSTheme {
   /** 桌面整体皮肤。'animalcrossing' = 动森风格（NookPhone 彩色圆角图标 + 暖色界面）；
    *  'mobilegame' = 二次元手游首页风格（角色卡 + 等级经验条 + 货币栏 + 网格卡 + 罗盘 dock）；
    *  'tamagotchi' = 电子宠物养成机（桌面即角色的小屋舞台 + 四颗糖果实体键）。默认 'default'。 */
-  skin?: 'default' | 'animalcrossing' | 'mobilegame' | 'tamagotchi';
+  skin?: 'default' | 'animalcrossing' | 'mobilegame' | 'tamagotchi' | 'companion';
   /** 默认桌面的视觉版本：纸感是现行默认，nostalgia 是用户主动选择的最初粉绿白玻璃界面。 */
   desktopVariant?: 'paper' | 'nostalgia';
   /** 动森皮肤下，聊天 App 是否也跟随换成动森界面。默认 true（undefined 视为 true）。关掉则聊天保持原样式。 */
@@ -124,6 +124,12 @@ export interface OSTheme {
   statusBarMode?: 'standard' | 'compact' | 'hidden';
   /** @deprecated 旧版两档开关，仅用于兼容已有存档；新设置写入 statusBarMode。 */
   hideStatusBar?: boolean;
+  /** 打开网页时的 SullyOS 开场过场。默认关闭，避免每次刷新都等待。 */
+  bootAnimationEnabled?: boolean;
+  /** 锁屏过场。关闭后数据加载完直接进入桌面。 */
+  lockScreenEnabled?: boolean;
+  /** 从信息打开或切换到角色聊天时的头像登场过场。 */
+  chatEntryAnimationEnabled?: boolean;
   // Chat UI customization (global)
   chatAvatarShape?: 'circle' | 'rounded' | 'square';
   chatAvatarSize?: 'small' | 'medium' | 'large';
@@ -243,6 +249,14 @@ export interface APIConfig {
   apiKey: string;
   // 可选识图中转：给不支持 image_url 的主模型补视觉能力。
   visionApi?: VisionApiConfig;
+  /** 独立生图服务配置；与聊天/识图 API 分开保存。 */
+  imageGenerationApi?: {
+    baseUrl: string;
+    apiKey: string;
+    model: string;
+    prompt?: string;
+    aspectRatio?: '1:1' | '3:4' | '4:3' | '9:16' | '16:9';
+  };
   minimaxApiKey?: string;
   minimaxGroupId?: string;
   // 'domestic' → https://api.minimaxi.com (国内站)
@@ -691,6 +705,11 @@ export interface ScheduleSlot {
     location?: string;    // "河边"
     innerThought?: string; // 该时段的内心独白，生成时由AI写好，运行时直接注入
     theater?: SlotTheater; // 该时段的小剧场（窥视演出），按需生成并缓存
+    /** 家园联动：该细日程归属的家园时间段。未绑定家园时为空。 */
+    worldSegment?: WorldDaySegmentKey;
+    /** 家园观测后写入的实际事件；不覆盖原有细日程，仅补足已发生的生活事实。 */
+    worldEvent?: string;
+    worldMood?: string;
 }
 
 export interface DailySchedule {
@@ -706,6 +725,24 @@ export interface DailySchedule {
      * 注入时根据当前时间找到最近的 key，直接使用整段文本，不做拼接。
      */
     flowNarrative?: Record<string, string>;
+    /** 本日程由哪一份家园计划展开而来。 */
+    worldLink?: {
+        worldId: string;
+        worldName: string;
+        dayKey: string;
+        plannedAt: number;
+    };
+}
+
+/** 实际发给 AI 的提示词留档，用于角色聊天里的提示词查看器。 */
+export type PromptHistoryKind = 'chat' | 'schedule';
+
+export interface PromptHistoryEntry {
+    id: string;
+    charId: string;
+    kind: PromptHistoryKind;
+    content: string;
+    createdAt: number;
 }
 
 export interface RoomGeneratedState {
@@ -1328,6 +1365,29 @@ export type WorldHomeMode = 'light' | 'medium' | 'heavy';
  */
 export type WorldTimeMode = 'real' | 'sim';
 
+/** 家园与角色生活联动共用的四段时间轴。 */
+export type WorldDaySegmentKey = 'morning' | 'noon' | 'evening' | 'latenight';
+
+/** 家园当天某个角色的公开生活安排。它是日程的共同骨架，不是已经发生的剧情。 */
+export interface WorldLifePlanMember {
+    charId: string;
+    activity: string;
+    location: string;
+    description?: string;
+    mood?: string;
+}
+
+/** 每个真实时间家园每天只生成一次的共享计划。 */
+export interface WorldLifePlan {
+    dayKey: string;
+    generatedAt: number;
+    segments: Array<{
+        key: WorldDaySegmentKey;
+        event: string;
+        members: WorldLifePlanMember[];
+    }>;
+}
+
 /** 模拟时间的起始日期（sim 模式专用）。 */
 export interface WorldSimDate {
     year: number;
@@ -1477,6 +1537,10 @@ export interface WorldProfile {
     clockSegs?: number;
     /** 生成内容是否注入各成员的 1v1 聊天（默认 true） */
     injectToChat?: boolean;
+    /** 真实时间家园：把家园当天计划及已发生事件联动到成员的日程与情绪。默认关闭。 */
+    lifeLinkEnabled?: boolean;
+    /** 当前家园当天的共享生活计划；按 dayKey 自动失效并重新生成。 */
+    lifePlan?: WorldLifePlan;
     /** 该世界专属 API 覆盖；不设则回落全局 apiConfig */
     api?: { baseUrl: string; apiKey: string; model: string };
     createdAt: number;
@@ -2403,6 +2467,19 @@ export interface CharacterProfile {
   id: string;
   name: string;
   avatar: string;
+  /**
+   * 视频通话与主屏陪伴共用的本地动态形象配置。模型二进制保存在 IndexedDB，
+   * 这里仅保存轻量索引，避免将大型 VRM / Live2D 文件写入角色资料。
+   */
+  videoAvatar?: any;
+  /** 视频通话与主屏可选的静态陪伴立绘配置。 */
+  companionAvatar?: any;
+  /** 视频舞台和主屏陪伴的本地外观偏好。 */
+  videoCallBackground?: string;
+  companionBackground?: string;
+  videoCallPerformanceQuality?: 'basic' | 'high';
+  /** 角色生图一致性参考图（最多 4 张 data URL）。 */
+  imageGenerationReferences?: string[];
   description: string;
   systemPrompt: string;
   worldview?: string;
@@ -2426,6 +2503,9 @@ export interface CharacterProfile {
    *  属美化类本地偏好：随完整备份走，但角色卡分享时剥离（见 utils/characterCard.ts）。 */
   chatFineTune?: ChatFineTuneOverride;
   chatBackground?: string;
+  /** 单次聊天回复的气泡数量范围（每个角色单独设置）。 */
+  replyMessageMinCount?: number;
+  replyMessageMaxCount?: number;
   contextLimit?: number;
   /**
    * AI 原文读取范围策略：
@@ -3541,6 +3621,8 @@ export interface FullBackupData {
 
     // Character daily schedule (角色日程表 — daily_schedule store)
     dailySchedules?: DailySchedule[];
+    // 实际发给 AI 的聊天 / 日程提示词历史
+    promptHistory?: PromptHistoryEntry[];
 
     // 手账（跨角色聚合留痕本 — handbook store）
     handbooks?: HandbookEntry[];

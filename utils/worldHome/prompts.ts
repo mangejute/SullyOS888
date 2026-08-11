@@ -116,13 +116,13 @@ export function worldTzLabel(world: Pick<WorldProfile, 'timezone'>): string {
 const pad2 = (n: number) => (n < 10 ? `0${n}` : `${n}`);
 const dayKeyOf = (d: Date) => `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
 /**
- * 真实时钟 → 现实段：0~5点算「凌晨」（seg=3，归属**前一天**的剧情日，保证段序单调），
+ * 真实时钟 → 现实段：0~5:59算「凌晨」（seg=3，归属**前一天**的剧情日，保证段序单调），
  * <12 早，<18 中，否则晚。
  */
 export function realNowSeg(now: Date = new Date()): { dayKey: string; seg: number } {
     const h = now.getHours();
     const d = new Date(now);
-    if (h < 5) {
+    if (h < 6) {
         d.setDate(d.getDate() - 1);
         return { dayKey: dayKeyOf(d), seg: LATE_NIGHT_SEG };
     }
@@ -138,8 +138,7 @@ export function formatRealClock(rc: { dayKey: string; seg: number }): string {
 /**
  * real 模式下一次「观测」要演的现实段（早/中/晚/凌晨），跟着真实时钟走：
  *   - 没演过 → 演当前这一段；
- *   - 落后于今天 → 补今天还没补的下一段（不超过现在）；
- *   - 落后于过去某天 → 直接跳到今天最早一段（过去错过的补不回来）；
+ *   - 落后于现实 → 直接落到当前段；错过的时间自然流逝，不倒灌成多轮剧情；
  *   - 已追上现实 → null（这一段还没过去，没东西可演）。
  * 「现在」按**世界自己的时区**读（world.timezone；不设=本机）。
  */
@@ -147,9 +146,9 @@ export function realObserveTarget(world: WorldProfile, now: Date = worldNow(worl
     const cur = world.realClock;
     const nw = realNowSeg(now);
     if (!cur) return nw;
-    if (cur.dayKey < nw.dayKey) return { dayKey: nw.dayKey, seg: 0 }; // 过去的天丢掉，跳到今天最早一段
+    if (cur.dayKey < nw.dayKey) return nw;
     if (cur.dayKey > nw.dayKey) return null; // 数据异常（时钟回拨），不补
-    return cur.seg < nw.seg ? { dayKey: nw.dayKey, seg: cur.seg + 1 } : null; // 同一天：补下一段，或已追上
+    return cur.seg < nw.seg ? nw : null;
 }
 
 /**
@@ -328,9 +327,11 @@ export function buildWorldCharTurn(args: {
     directive?: { impulseText: string; text: string };
     /** sim 模式：上一卷归档后喂回的「该角色单方面视角总结 + 本卷氛围」（防上帝视角，只给 ta 自己的视角） */
     priorChapter?: { atmosphere?: string; charPerspective?: string };
+    /** 真实时间跳跃时的过渡说明：跳过未观测时段，不把它们倒灌成新剧情。 */
+    timeJump?: string;
     userName: string;
 }): string {
-    const { world, char, members, storyTime, round, lastSummary, npcScene, npcHooks, beatsSoFar, recentPosts, exposures, directive, priorChapter, userName } = args;
+    const { world, char, members, storyTime, round, lastSummary, npcScene, npcHooks, beatsSoFar, recentPosts, exposures, directive, priorChapter, timeJump, userName } = args;
     const isLateNight = storyTime.includes('凌晨');
     const others = members.filter(m => m.id !== char.id);
     const npcNames = new Map(world.npcs.map(n => [n.id, n.name]));
@@ -416,6 +417,7 @@ ${priorChapter && (priorChapter.charPerspective || priorChapter.atmosphere) ? `#
 ${priorChapter.charPerspective || ''}${priorChapter.atmosphere ? `\n（这段日子整体的气氛：${priorChapter.atmosphere}）` : ''}
 ` : ''}## 之前发生的事
 ${lastSummary || (priorChapter ? '（新的一段日子刚刚开始）' : '（这是这个世界的第一个半天，一切刚刚开始）')}
+${timeJump ? `\n## 时间自然流逝\n${timeJump}\n` : ''}
 ${npcScene ? `\n## 这半天镇上的动静（NPC）\n${npcScene}${npcHooks && npcHooks.length > 0 ? `\n可以接住的事件：${npcHooks.join('；')}` : ''}` : ''}
 
 ## 社交媒体（公开，大家都刷得到）
@@ -540,8 +542,10 @@ export function buildNpcTurn(args: {
     inboxes?: { npcName: string; memberName: string; recent: string }[];
     /** 最近的社交动态（让 NPC + 路人疯狂点赞/评论） */
     recentPosts?: { ref: string; name: string; post: string }[];
+    /** 真实时间跳跃时的过渡说明。 */
+    timeJump?: string;
 }): string {
-    const { world, members, storyTime, lastSummary, chapterAtmosphere, inboxes, recentPosts } = args;
+    const { world, members, storyTime, lastSummary, chapterAtmosphere, inboxes, recentPosts, timeJump } = args;
     const lateNightNote = storyTime.includes('凌晨')
         ? `\n\n## 🌙 现在是凌晨（0点~5点）\n镇子基本睡着了。scene 写夜的质感：便利店的夜班灯、末班车、巡街的猫、亮着的一两扇窗；hooks 少而轻（1条就够）；groupLines 至多 1 条（只有夜猫子 NPC 才冒泡）；点赞评论克制些——深夜刷手机的人少，但深夜 emo 的动态容易引来同样失眠的人留下感性的共情评论。`
         : '';
@@ -564,7 +568,7 @@ ${members.map(m => m.name).join('、')}
 
 ## 之前发生的事
 ${lastSummary || '（这是这个世界的第一个半天）'}
-${chapterAtmosphere ? `\n## 这段日子的氛围基调\n${chapterAtmosphere}` : ''}${lateNightNote}${inboxSection}${postsSection}
+${timeJump ? `\n## 时间自然流逝\n${timeJump}\n` : ''}${chapterAtmosphere ? `\n## 这段日子的氛围基调\n${chapterAtmosphere}` : ''}${lateNightNote}${inboxSection}${postsSection}
 剧情时间：${storyTime}。
 一次性输出这一段所有 NPC 的群像动静。严格输出一个 JSON 对象（建议用 \`\`\`json 包裹）：
 {

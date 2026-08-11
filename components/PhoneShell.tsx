@@ -20,6 +20,7 @@ const lazyApp = (factory: () => Promise<{ default: React.ComponentType<any> }>):
   Comp.preload = factory;
   return Comp;
 };
+const CompanionHome = lazyApp(() => import('./os/CompanionHome'));
 
 // 预热 React.lazy 的「负载」本身：不仅下载模块，还把 lazy 内部状态推进到 resolved，
 // 使首次渲染该 App 时不再 suspend —— 杜绝切换瞬间露出外壳粉紫底色（深色 App 上尤其扎眼）的那一帧闪烁。
@@ -492,6 +493,14 @@ const PhoneShell: React.FC = () => {
 
   // 冷启动「世界入场」是否已结束。结束前由 BootSequence 接管整屏（同时取代旧的黑屏 spinner）。
   const [bootDone, setBootDone] = useState(false);
+  const bootAnimationEnabled = theme.bootAnimationEnabled === true;
+  const lockScreenEnabled = theme.lockScreenEnabled === true;
+
+  // 关闭锁屏过场时，加载完成后直接进入桌面。锁屏状态只在本次网页启动时建立，
+  // 因而这里不会影响已经在使用中的页面。
+  useEffect(() => {
+    if (isDataLoaded && !lockScreenEnabled && isLocked) unlock();
+  }, [isDataLoaded, isLocked, lockScreenEnabled, unlock]);
 
   // 从根本上消除「每次进 App 都要加载」：数据一就绪就在后台按优先级逐个预热各 App 的代码块。
   // 关键：不等开机动画（bootDone）结束就开始 —— 否则用户在开机那 ~2 秒内点开 Chat 时 chunk 还没热，
@@ -733,15 +742,14 @@ const PhoneShell: React.FC = () => {
     });
   }, [theme.wallpaper]);
 
-  // 冷启动：先放「世界入场」cinematic（数据没就绪时它持续呼吸等待，绝不出现 spinner）。
-  // BootSequence 在「数据就绪 + 停留够时长」后推进退场，再交还控制权给下方的锁屏/桌面。
-  if (!bootDone) {
-    return <BootSequence dataReady={isDataLoaded} wallpaper={theme.wallpaper} onDone={() => setBootDone(true)} />;
-  }
-
-  // 兜底：理论上 bootDone 时数据已就绪；万一未就绪（极端慢）退化为最简静态深色屏，不闪 spinner。
+  // 关闭开场时不挂载 BootSequence；数据未就绪期间只显示静态底色，避免出现任何开场动画。
   if (!isDataLoaded) {
     return <div className="w-full h-full" style={{ background: '#05060f' }} />;
+  }
+
+  // 冷启动：用户主动开启时才放「世界入场」过场。
+  if (bootAnimationEnabled && !bootDone) {
+    return <BootSequence dataReady={isDataLoaded} wallpaper={theme.wallpaper} onDone={() => setBootDone(true)} />;
   }
 
   const getBgStyle = (wp: string) => {
@@ -754,7 +762,7 @@ const PhoneShell: React.FC = () => {
   const contentColor = theme.contentColor || '#ffffff';
   const acnhSkin = theme.skin === 'animalcrossing'; // 动森彩蛋：锁屏换暖色草地点缀
 
-  if (isLocked) {
+  if (isLocked && lockScreenEnabled) {
     const unreadCount = Object.values(unreadMessages).reduce((a,b) => a+b, 0);
     const unreadCharId = Object.keys(unreadMessages)[0];
     const unreadChar = unreadCharId ? characters.find(c => c.id === unreadCharId) : null;
@@ -869,7 +877,7 @@ const PhoneShell: React.FC = () => {
       case AppID.WorldHome: return <WorldHomeApp />;
       case AppID.CharCreatorDev: return <CharCreatorDevApp />;
       case AppID.Launcher:
-      default: return <Launcher />;
+      default: return theme.skin === 'companion' ? <CompanionHome /> : <Launcher />;
     }
   };
 

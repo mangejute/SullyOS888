@@ -52,10 +52,10 @@ describe('凌晨 0-5 点算前一夜的延续', () => {
         expect(out).toContain('稿子卡在第三段');
     });
 
-    it('一天三档的通用取法本身没变（小剧场、桌面小屋还按它取色）', () => {
-        expect(getFlowNarrativeKey(1)).toBe('morning');
+    it('按家园四段取意识流', () => {
+        expect(getFlowNarrativeKey(1)).toBe('latenight');
         expect(getFlowNarrativeKey(9)).toBe('morning');
-        expect(getFlowNarrativeKey(13)).toBe('afternoon');
+        expect(getFlowNarrativeKey(13)).toBe('noon');
         expect(getFlowNarrativeKey(21)).toBe('evening');
     });
 });

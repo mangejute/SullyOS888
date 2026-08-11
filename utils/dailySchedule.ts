@@ -60,5 +60,14 @@ export function getDailyScheduleForChar(
     char: Pick<CharacterProfile, 'id' | 'customTimezoneEnabled' | 'customTimezone'>,
     at: Date = new Date(),
 ): Promise<DailySchedule | null> {
-    return getLocalDailySchedule(char.id, at, resolveCharTimeZone(char));
+    return DB.getWorlds()
+        .then(worlds => {
+            const linkedWorld = worlds.find(world =>
+                world.lifeLinkEnabled === true
+                && (world.timeMode || 'real') === 'real'
+                && world.memberIds.includes(char.id)
+            );
+            return getLocalDailySchedule(char.id, at, linkedWorld?.timezone || resolveCharTimeZone(char));
+        })
+        .catch(() => getLocalDailySchedule(char.id, at, resolveCharTimeZone(char)));
 }

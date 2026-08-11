@@ -584,5 +584,6 @@ export const ChatParser = {
         }
 
         return result;
-    }
+    },
+
 }
