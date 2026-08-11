@@ -15,6 +15,7 @@ import { getLuckinToken, setLuckinToken as saveLuckinToken, isLuckinEnabled, set
 import { getProxyWorkerUrl, setProxyWorkerUrl, DEFAULT_PROXY_WORKER } from '../utils/proxyWorker';
 import { VOICE_ACTING_GUIDE } from '../utils/minimaxTts';
 import { FISH_VOICE_ACTING_GUIDE } from '../utils/fishAudioTts';
+import { QWEN_VOICE_ACTING_GUIDE, testQwenTtsConnection } from '../utils/qwenTts';
 import { DATE_VOICE_GUIDE } from '../utils/datePrompts';
 import { Sun, Newspaper, NotePencil, Notebook, Book, ForkKnife, Coffee, PlugsConnected, Bell, SpeakerHigh, Sparkle, LockKey, ChatCircleDots } from '@phosphor-icons/react';
 import { loadMcpServers, saveMcpServers, createMcpServer, testMcpConnection, resetMcpSession, getMcpUseNativeTools, setMcpUseNativeTools, type McpServerConfig } from '../utils/mcpClient';
@@ -73,7 +74,7 @@ const OTHER_API_PRESETS_STORAGE_KEY = 'os_other_api_presets';
 
 type ImageApiConfig = NonNullable<APIConfig['imageGenerationApi']>;
 type ImageApiPreset = { id: string; name: string; config: ImageApiConfig };
-type OtherApiPresetConfig = Pick<APIConfig, 'minimaxApiKey' | 'minimaxGroupId' | 'minimaxRegion' | 'aceStepApiKey' | 'ttsProvider' | 'fishAudioApiKey' | 'fishAudioModel' | 'voicePrompts'>;
+type OtherApiPresetConfig = Pick<APIConfig, 'minimaxApiKey' | 'minimaxGroupId' | 'minimaxRegion' | 'aceStepApiKey' | 'ttsProvider' | 'fishAudioApiKey' | 'fishAudioModel' | 'qwenTtsApiKey' | 'qwenTtsWorkspaceId' | 'qwenTtsRegion' | 'qwenTtsModel' | 'qwenTtsVoice' | 'qwenTtsAudioFormat' | 'qwenTtsEndpoint' | 'voicePrompts'>;
 type OtherApiPreset = { id: string; name: string; config: OtherApiPresetConfig };
 
 const readStoredVisionModels = (): string[] => {
@@ -500,14 +501,22 @@ const Settings: React.FC = () => {
     apiConfig.minimaxRegion === 'overseas' ? 'overseas' : 'domestic'
   );
   const [localAceStepKey, setLocalAceStepKey] = useState(apiConfig.aceStepApiKey || '');
-  const [localTtsProvider, setLocalTtsProvider] = useState<'minimax' | 'fishaudio'>(
-    apiConfig.ttsProvider === 'fishaudio' ? 'fishaudio' : 'minimax'
+  const [localTtsProvider, setLocalTtsProvider] = useState<'minimax' | 'fishaudio' | 'qwen'>(
+    apiConfig.ttsProvider === 'fishaudio' ? 'fishaudio' : apiConfig.ttsProvider === 'qwen' ? 'qwen' : 'minimax'
   );
   const [localFishKey, setLocalFishKey] = useState(apiConfig.fishAudioApiKey || '');
   const [localFishModel, setLocalFishModel] = useState(apiConfig.fishAudioModel || 's2.1-pro');
+  const [localQwenKey, setLocalQwenKey] = useState(apiConfig.qwenTtsApiKey || '');
+  const [localQwenWorkspace, setLocalQwenWorkspace] = useState(apiConfig.qwenTtsWorkspaceId || '');
+  const [localQwenRegion, setLocalQwenRegion] = useState<'beijing' | 'singapore'>(apiConfig.qwenTtsRegion === 'singapore' ? 'singapore' : 'beijing');
+  const [localQwenModel, setLocalQwenModel] = useState(apiConfig.qwenTtsModel || 'qwen-audio-3.0-tts-flash');
+  const [localQwenVoice, setLocalQwenVoice] = useState(apiConfig.qwenTtsVoice || 'longanlingxi');
+  const [localQwenFormat, setLocalQwenFormat] = useState<'mp3' | 'wav' | 'pcm' | 'opus'>(apiConfig.qwenTtsAudioFormat || 'mp3');
+  const [localQwenEndpoint, setLocalQwenEndpoint] = useState(apiConfig.qwenTtsEndpoint || '');
   // 自定义语音表演指南（留空 → 用内置默认）。按服务商分两份。
   const [localVoicePromptMinimax, setLocalVoicePromptMinimax] = useState(apiConfig.voicePrompts?.minimax || '');
   const [localVoicePromptFish, setLocalVoicePromptFish] = useState(apiConfig.voicePrompts?.fishaudio || '');
+  const [localVoicePromptQwen, setLocalVoicePromptQwen] = useState(apiConfig.voicePrompts?.qwen || '');
   const [localVoicePromptDate, setLocalVoicePromptDate] = useState(apiConfig.voicePrompts?.dateVoice || '');
   const [showVoicePrompts, setShowVoicePrompts] = useState(false);
   const [showAceStepGuide, setShowAceStepGuide] = useState(false);
@@ -905,9 +914,17 @@ const Settings: React.FC = () => {
       setLocalMiniMaxGroupId(apiConfig.minimaxGroupId || '');
       setLocalMiniMaxRegion(apiConfig.minimaxRegion === 'overseas' ? 'overseas' : 'domestic');
       setLocalAceStepKey(apiConfig.aceStepApiKey || '');
-      setLocalTtsProvider(apiConfig.ttsProvider === 'fishaudio' ? 'fishaudio' : 'minimax');
       setLocalFishKey(apiConfig.fishAudioApiKey || '');
       setLocalFishModel(apiConfig.fishAudioModel || 's2.1-pro');
+      setLocalTtsProvider(apiConfig.ttsProvider === 'fishaudio' ? 'fishaudio' : apiConfig.ttsProvider === 'qwen' ? 'qwen' : 'minimax');
+      setLocalQwenKey(apiConfig.qwenTtsApiKey || '');
+      setLocalQwenWorkspace(apiConfig.qwenTtsWorkspaceId || '');
+      setLocalQwenRegion(apiConfig.qwenTtsRegion === 'singapore' ? 'singapore' : 'beijing');
+      setLocalQwenModel(apiConfig.qwenTtsModel || 'qwen-audio-3.0-tts-flash');
+      setLocalQwenVoice(apiConfig.qwenTtsVoice || 'longanlingxi');
+      setLocalQwenFormat(apiConfig.qwenTtsAudioFormat || 'mp3');
+      setLocalQwenEndpoint(apiConfig.qwenTtsEndpoint || '');
+      setLocalVoicePromptQwen(apiConfig.voicePrompts?.qwen || '');
       setLocalVoicePromptMinimax(apiConfig.voicePrompts?.minimax || '');
       setLocalVoicePromptFish(apiConfig.voicePrompts?.fishaudio || '');
       setLocalVoicePromptDate(apiConfig.voicePrompts?.dateVoice || '');
@@ -1157,16 +1174,20 @@ const Settings: React.FC = () => {
   const currentOtherApiConfig = (): OtherApiPresetConfig => ({
     minimaxApiKey: localMiniMaxKey.trim(), minimaxGroupId: localMiniMaxGroupId.trim(), minimaxRegion: localMiniMaxRegion,
     aceStepApiKey: localAceStepKey.trim(), ttsProvider: localTtsProvider, fishAudioApiKey: localFishKey.trim(), fishAudioModel: localFishModel.trim(),
-    voicePrompts: { minimax: localVoicePromptMinimax.trim() || undefined, fishaudio: localVoicePromptFish.trim() || undefined, dateVoice: localVoicePromptDate.trim() || undefined },
+    qwenTtsApiKey: localQwenKey.trim(), qwenTtsWorkspaceId: localQwenWorkspace.trim(), qwenTtsRegion: localQwenRegion,
+    qwenTtsModel: localQwenModel.trim(), qwenTtsVoice: localQwenVoice.trim(), qwenTtsAudioFormat: localQwenFormat, qwenTtsEndpoint: localQwenEndpoint.trim(),
+    voicePrompts: { minimax: localVoicePromptMinimax.trim() || undefined, fishaudio: localVoicePromptFish.trim() || undefined, qwen: localVoicePromptQwen.trim() || undefined, dateVoice: localVoicePromptDate.trim() || undefined },
   });
 
   const loadOtherApiPreset = (preset: OtherApiPreset) => {
     const config = preset.config;
     setLocalMiniMaxKey(config.minimaxApiKey || ''); setLocalMiniMaxGroupId(config.minimaxGroupId || '');
     setLocalMiniMaxRegion(config.minimaxRegion === 'overseas' ? 'overseas' : 'domestic');
-    setLocalAceStepKey(config.aceStepApiKey || ''); setLocalTtsProvider(config.ttsProvider === 'fishaudio' ? 'fishaudio' : 'minimax');
+    setLocalAceStepKey(config.aceStepApiKey || ''); setLocalTtsProvider(config.ttsProvider === 'fishaudio' ? 'fishaudio' : config.ttsProvider === 'qwen' ? 'qwen' : 'minimax');
     setLocalFishKey(config.fishAudioApiKey || ''); setLocalFishModel(config.fishAudioModel || 's2.1-pro');
-    setLocalVoicePromptMinimax(config.voicePrompts?.minimax || ''); setLocalVoicePromptFish(config.voicePrompts?.fishaudio || ''); setLocalVoicePromptDate(config.voicePrompts?.dateVoice || '');
+    setLocalQwenKey(config.qwenTtsApiKey || ''); setLocalQwenWorkspace(config.qwenTtsWorkspaceId || ''); setLocalQwenRegion(config.qwenTtsRegion === 'singapore' ? 'singapore' : 'beijing');
+    setLocalQwenModel(config.qwenTtsModel || 'qwen-audio-3.0-tts-flash'); setLocalQwenVoice(config.qwenTtsVoice || 'longanlingxi'); setLocalQwenFormat(config.qwenTtsAudioFormat || 'mp3'); setLocalQwenEndpoint(config.qwenTtsEndpoint || '');
+    setLocalVoicePromptMinimax(config.voicePrompts?.minimax || ''); setLocalVoicePromptFish(config.voicePrompts?.fishaudio || ''); setLocalVoicePromptQwen(config.voicePrompts?.qwen || ''); setLocalVoicePromptDate(config.voicePrompts?.dateVoice || '');
     addToast(`已载入其他 API 预设「${preset.name}」，保存后生效`, 'info');
   };
 
@@ -1185,6 +1206,24 @@ const Settings: React.FC = () => {
     try { await fetchMiniMaxVoices(key, 'system'); setOtherStatusMsg('✅ MiniMax 连接正常'); }
     catch (error: any) { setOtherStatusMsg(`❌ 测试失败：${error?.message || '无法连接'}`); }
     finally { setTestingOtherApis(false); }
+  };
+
+  const testQwenApi = async () => {
+    if (!localQwenKey.trim() || !localQwenWorkspace.trim()) {
+      setOtherStatusMsg('请先填写 Qwen API Key 和 Workspace ID');
+      return;
+    }
+    setTestingOtherApis(true); setOtherStatusMsg('正在测试 Qwen TTS…');
+    try {
+      await testQwenTtsConnection({
+        ...apiConfig,
+        qwenTtsApiKey: localQwenKey.trim(), qwenTtsWorkspaceId: localQwenWorkspace.trim(), qwenTtsRegion: localQwenRegion,
+        qwenTtsModel: localQwenModel.trim(), qwenTtsVoice: localQwenVoice.trim(), qwenTtsAudioFormat: localQwenFormat, qwenTtsEndpoint: localQwenEndpoint.trim() || undefined,
+      });
+      setOtherStatusMsg('✅ Qwen TTS 连接正常');
+    } catch (error: any) {
+      setOtherStatusMsg(`❌ Qwen 测试失败：${error?.message || '无法连接'}`);
+    } finally { setTestingOtherApis(false); }
   };
 
   const handleSaveImageGenerationApi = () => {
@@ -1268,9 +1307,17 @@ const Settings: React.FC = () => {
       ttsProvider: localTtsProvider,
       fishAudioApiKey: localFishKey,
       fishAudioModel: localFishModel,
+      qwenTtsApiKey: localQwenKey,
+      qwenTtsWorkspaceId: localQwenWorkspace,
+      qwenTtsRegion: localQwenRegion,
+      qwenTtsModel: localQwenModel,
+      qwenTtsVoice: localQwenVoice,
+      qwenTtsAudioFormat: localQwenFormat,
+      qwenTtsEndpoint: localQwenEndpoint,
       voicePrompts: {
         minimax: localVoicePromptMinimax.trim() ? localVoicePromptMinimax : undefined,
         fishaudio: localVoicePromptFish.trim() ? localVoicePromptFish : undefined,
+        qwen: localVoicePromptQwen.trim() ? localVoicePromptQwen : undefined,
         dateVoice: localVoicePromptDate.trim() ? localVoicePromptDate : undefined,
       },
     });
@@ -1281,7 +1328,7 @@ const Settings: React.FC = () => {
   // 选「谁来做语音生成」立即落库——不需要再点下面的保存。
   // 连同当前「其他 API」草稿一起提交（与保存按钮同一份 payload）：一是即时生效，
   // 二是避免 [apiConfig] 同步 effect 把刚填、还没保存的 Key 草稿冲掉。
-  const selectTtsProvider = (provider: 'minimax' | 'fishaudio') => {
+  const selectTtsProvider = (provider: 'minimax' | 'fishaudio' | 'qwen') => {
     setLocalTtsProvider(provider);
     updateApiConfig({
       minimaxApiKey: localMiniMaxKey,
@@ -1290,14 +1337,22 @@ const Settings: React.FC = () => {
       aceStepApiKey: localAceStepKey,
       fishAudioApiKey: localFishKey,
       fishAudioModel: localFishModel,
+      qwenTtsApiKey: localQwenKey,
+      qwenTtsWorkspaceId: localQwenWorkspace,
+      qwenTtsRegion: localQwenRegion,
+      qwenTtsModel: localQwenModel,
+      qwenTtsVoice: localQwenVoice,
+      qwenTtsAudioFormat: localQwenFormat,
+      qwenTtsEndpoint: localQwenEndpoint,
       voicePrompts: {
         minimax: localVoicePromptMinimax.trim() ? localVoicePromptMinimax : undefined,
         fishaudio: localVoicePromptFish.trim() ? localVoicePromptFish : undefined,
+        qwen: localVoicePromptQwen.trim() ? localVoicePromptQwen : undefined,
         dateVoice: localVoicePromptDate.trim() ? localVoicePromptDate : undefined,
       },
       ttsProvider: provider,
     });
-    addToast(provider === 'fishaudio' ? '语音生成已切到鱼声 Fish' : '语音生成已切到 MiniMax', 'success');
+    addToast(provider === 'fishaudio' ? '语音生成已切到鱼声 Fish' : provider === 'qwen' ? '语音生成已切到 Qwen TTS' : '语音生成已切到 MiniMax', 'success');
   };
 
   // 选鱼声模型：立即落库（同上，连带草稿一起提交，避免被同步 effect 冲掉）。
@@ -1311,9 +1366,17 @@ const Settings: React.FC = () => {
       fishAudioApiKey: localFishKey,
       ttsProvider: localTtsProvider,
       fishAudioModel: model,
+      qwenTtsApiKey: localQwenKey,
+      qwenTtsWorkspaceId: localQwenWorkspace,
+      qwenTtsRegion: localQwenRegion,
+      qwenTtsModel: localQwenModel,
+      qwenTtsVoice: localQwenVoice,
+      qwenTtsAudioFormat: localQwenFormat,
+      qwenTtsEndpoint: localQwenEndpoint,
       voicePrompts: {
         minimax: localVoicePromptMinimax.trim() ? localVoicePromptMinimax : undefined,
         fishaudio: localVoicePromptFish.trim() ? localVoicePromptFish : undefined,
+        qwen: localVoicePromptQwen.trim() ? localVoicePromptQwen : undefined,
         dateVoice: localVoicePromptDate.trim() ? localVoicePromptDate : undefined,
       },
     });
@@ -2701,7 +2764,7 @@ const Settings: React.FC = () => {
 
             <div className="space-y-4">
                 <p className="text-[11px] text-slate-400 -mt-1 pl-1 leading-relaxed">
-                    🎙️ 语音生成支持 <span className="font-semibold text-slate-500">MiniMax</span> 和 <span className="font-semibold text-slate-500">鱼声 Fish</span> 两家——下面两边都可以填，最后在底部「当前语音引擎」里二选一。
+                    🎙️ 语音生成支持 <span className="font-semibold text-slate-500">MiniMax</span>、<span className="font-semibold text-slate-500">鱼声 Fish</span> 和 <span className="font-semibold text-slate-500">Qwen TTS</span>——配置都可以保留，最后在底部切换当前引擎。
                 </p>
 
                 {otherApiPresets.length > 0 && <div className="flex gap-2 flex-wrap">
@@ -2731,6 +2794,26 @@ const Settings: React.FC = () => {
                             ? '海外站（api.minimax.io）— 请使用海外账号签发的 Key。'
                             : '国服（api.minimaxi.com）— 默认，适配国内账号。'}
                     </p>
+                </div>
+
+                {/* 阿里云 Qwen-Audio-TTS / CosyVoice */}
+                <div className="group rounded-2xl border border-slate-200/70 bg-white/50 p-3">
+                    <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-1.5 block pl-1">Qwen TTS（阿里云百炼）</label>
+                    <input type="password" name="qwen-tts-api-key" autoComplete="new-password" spellCheck={false} value={localQwenKey} onChange={e => setLocalQwenKey(e.target.value)} placeholder="DashScope API Key" className="w-full bg-white/70 border border-slate-200/60 rounded-xl px-4 py-2.5 text-sm font-mono focus:bg-white transition-all" />
+                    <input type="text" value={localQwenWorkspace} onChange={e => setLocalQwenWorkspace(e.target.value)} placeholder="Workspace ID（业务空间 ID）" className="w-full mt-2 bg-white/70 border border-slate-200/60 rounded-xl px-4 py-2.5 text-sm font-mono focus:bg-white transition-all" />
+                    <div className="grid grid-cols-2 gap-2 mt-2">
+                        <select value={localQwenRegion} onChange={e => setLocalQwenRegion(e.target.value as 'beijing' | 'singapore')} className="w-full bg-white/70 border border-slate-200/60 rounded-xl px-3 py-2.5 text-sm focus:bg-white transition-all">
+                            <option value="beijing">华北 2（北京）</option>
+                            <option value="singapore">新加坡</option>
+                        </select>
+                        <select value={localQwenFormat} onChange={e => setLocalQwenFormat(e.target.value as 'mp3' | 'wav' | 'pcm' | 'opus')} className="w-full bg-white/70 border border-slate-200/60 rounded-xl px-3 py-2.5 text-sm focus:bg-white transition-all">
+                            <option value="mp3">MP3</option><option value="wav">WAV</option><option value="pcm">PCM（自动封装 WAV）</option><option value="opus">Opus</option>
+                        </select>
+                    </div>
+                    <input type="text" value={localQwenModel} onChange={e => setLocalQwenModel(e.target.value)} placeholder="模型，例如 qwen-audio-3.0-tts-flash" className="w-full mt-2 bg-white/70 border border-slate-200/60 rounded-xl px-4 py-2.5 text-sm font-mono focus:bg-white transition-all" />
+                    <input type="text" value={localQwenVoice} onChange={e => setLocalQwenVoice(e.target.value)} placeholder="音色，例如 longanlingxi" className="w-full mt-2 bg-white/70 border border-slate-200/60 rounded-xl px-4 py-2.5 text-sm font-mono focus:bg-white transition-all" />
+                    <input type="text" value={localQwenEndpoint} onChange={e => setLocalQwenEndpoint(e.target.value)} placeholder="自建 WebSocket 中转地址（可选，留空用项目 Worker）" className="w-full mt-2 bg-white/70 border border-slate-200/60 rounded-xl px-4 py-2.5 text-xs font-mono focus:bg-white transition-all" />
+                    <p className="text-[11px] text-slate-400 mt-1 pl-1 leading-relaxed">浏览器不能直接给 WebSocket 加鉴权请求头，留空会使用项目 Worker 转发到阿里云。Worker 只转发，不保存你的 Key。</p>
                 </div>
 
                 <div className="group">
@@ -2769,14 +2852,15 @@ const Settings: React.FC = () => {
                     </p>
                 </div>
 
-                {/* 底部：当前语音引擎二选一 —— radio 样式（不是 tab 切换，配置都在上面，这里只挑用哪家） */}
+                {/* 底部：当前语音引擎 —— radio 样式（配置都在上面，这里只挑用哪家） */}
                 <div className="group rounded-2xl border border-slate-200/70 bg-slate-50/60 p-3">
-                    <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-0.5 block">当前语音引擎（二选一）</label>
-                    <p className="text-[11px] text-slate-400 mb-2.5">聊天语音条 / 约会 / 电话用哪一家。上面两边的 Key 都会保留，这里只切换当前生效的。</p>
+                    <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-0.5 block">当前语音引擎（三选一）</label>
+                    <p className="text-[11px] text-slate-400 mb-2.5">聊天语音条 / 约会 / 电话用哪一家。各家的配置都会保留，这里只切换当前生效的。</p>
                     <div className="space-y-2">
                         {([
                             ['minimax', 'MiniMax', '国内可直连，默认推荐'],
                             ['fishaudio', '鱼声 Fish', '需科学上网（梯子 / 魔法），否则一直合成失败'],
+                            ['qwen', 'Qwen TTS', '阿里云百炼，使用 WebSocket 实时合成'],
                         ] as const).map(([key, name, desc]) => {
                             const active = localTtsProvider === key;
                             return (
@@ -2823,6 +2907,7 @@ const Settings: React.FC = () => {
                             {([
                                 ['minimax', 'MiniMax 语音指南', localVoicePromptMinimax, setLocalVoicePromptMinimax, VOICE_ACTING_GUIDE, '聊天 + 电话 · MiniMax 引擎时生效'] as const,
                                 ['fishaudio', '鱼声 Fish 语音指南', localVoicePromptFish, setLocalVoicePromptFish, FISH_VOICE_ACTING_GUIDE, '聊天 + 电话 · 鱼声引擎时生效'] as const,
+                                ['qwen', 'Qwen TTS 语音指南', localVoicePromptQwen, setLocalVoicePromptQwen, QWEN_VOICE_ACTING_GUIDE, '聊天 + 电话 · Qwen 引擎时生效'] as const,
                                 ['dateVoice', '见面（约会）语音情绪', localVoicePromptDate, setLocalVoicePromptDate, DATE_VOICE_GUIDE, '见面专用 [v:xxx] 规则 · 角色开了见面语音时生效，与引擎无关'] as const,
                             ]).map(([key, title, value, setValue, def, hint]) => {
                                 const active = localTtsProvider === key;
@@ -2950,7 +3035,7 @@ const Settings: React.FC = () => {
                 </div>
 
                 <div className="flex gap-2 mt-2"><input value={newOtherPresetName} onChange={e => setNewOtherPresetName(e.target.value)} placeholder="其他 API 预设名称" className="min-w-0 flex-1 bg-white/60 border border-slate-200/60 rounded-xl px-3 py-2 text-xs" /><button type="button" onClick={saveOtherApiPreset} className="shrink-0 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-bold text-amber-600">保存预设</button></div>
-                <div className="grid grid-cols-2 gap-2 mt-2"><button type="button" onClick={() => { void testOtherApis(); }} disabled={testingOtherApis} className="w-full py-3 rounded-2xl font-bold text-amber-700 border border-amber-200 bg-amber-50 active:scale-95 transition-all disabled:opacity-50">{testingOtherApis ? '测试中…' : '测试 MiniMax'}</button><button onClick={handleSaveOtherApis} className="w-full py-3 rounded-2xl font-bold text-white shadow-lg shadow-amber-500/20 bg-amber-500 active:scale-95 transition-all">
+                <div className="grid grid-cols-3 gap-2 mt-2"><button type="button" onClick={() => { void testOtherApis(); }} disabled={testingOtherApis} className="w-full py-3 rounded-2xl font-bold text-amber-700 border border-amber-200 bg-amber-50 active:scale-95 transition-all disabled:opacity-50">{testingOtherApis ? '测试中…' : '测试 MiniMax'}</button><button type="button" onClick={() => { void testQwenApi(); }} disabled={testingOtherApis} className="w-full py-3 rounded-2xl font-bold text-sky-700 border border-sky-200 bg-sky-50 active:scale-95 transition-all disabled:opacity-50">{testingOtherApis ? '测试中…' : '测试 Qwen'}</button><button onClick={handleSaveOtherApis} className="w-full py-3 rounded-2xl font-bold text-white shadow-lg shadow-amber-500/20 bg-amber-500 active:scale-95 transition-all">
                     {otherStatusMsg || '保存其他 API'}
                 </button></div>
             </div>

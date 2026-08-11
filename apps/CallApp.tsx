@@ -8,6 +8,7 @@ import { hashTtsParams, getCachedTts, saveCachedTts } from '../utils/ttsCache';
 import { cleanTextForTts, insertSpeechBreaks, convertHexAudioToBlob, fetchRemoteAudioBlob, VALID_EMOTIONS, stripEmotionTags, VOICE_ACTING_GUIDE, cleanVoiceMarkupForDisplay } from '../utils/minimaxTts';
 import { normalizeVoiceTags } from '../utils/sanitize';
 import { FISH_VOICE_ACTING_GUIDE, synthesizeSpeechFishDetailed, resolveFishAudioApiKey, cleanTextForTtsFish, stripFishMarkupForDisplay } from '../utils/fishAudioTts';
+import { QWEN_VOICE_ACTING_GUIDE, synthesizeSpeechQwenDetailed } from '../utils/qwenTts';
 import { resolveTtsProvider, getTtsProvider, getVoicePromptOverride } from '../utils/ttsProvider';
 import { VOICE_LANGUAGE_OPTIONS } from '../utils/voiceLanguage';
 import { startStt, isSttSupported, type SttSession } from '../utils/speechToText';
@@ -464,7 +465,7 @@ const buildCallPrompt = (
 
 注意：不要写小说式中文旁白，如”（我靠在椅背上，目光看向远方）”——会被直接删掉，等于白写。
 
-${getVoicePromptOverride(getTtsProvider()) ?? (getTtsProvider() === 'fishaudio' ? FISH_VOICE_ACTING_GUIDE : VOICE_ACTING_GUIDE)}
+${getVoicePromptOverride(getTtsProvider()) ?? (getTtsProvider() === 'fishaudio' ? FISH_VOICE_ACTING_GUIDE : getTtsProvider() === 'qwen' ? QWEN_VOICE_ACTING_GUIDE : VOICE_ACTING_GUIDE)}
 
 ### 历史消息的来源标记（重要）
 
@@ -1219,11 +1220,15 @@ const CallApp: React.FC = () => {
   };
   // ── TTS 服务商分发：电话语音也支持 MiniMax ↔ 鱼声二选一 ──
   const isFishTts = resolveTtsProvider(apiConfig) === 'fishaudio';
+  const isQwenTts = resolveTtsProvider(apiConfig) === 'qwen';
   // 当前服务商下，这个角色能否合成语音（决定要不要走 TTS / 给"语音未配置"提示）。
   const canSpeakVoice = (): boolean => {
     if (!isSpeakerOn) return false;
     if (isFishTts) {
       return !!resolveFishAudioApiKey(apiConfig) && !!selectedChar?.voiceProfile?.fishReferenceId;
+    }
+    if (isQwenTts) {
+      return !!apiConfig.qwenTtsApiKey && !!apiConfig.qwenTtsWorkspaceId;
     }
     const voiceId = resolveVoiceId();
     const hasTimber = (selectedChar?.voiceProfile?.timberWeights?.length || 0) > 1;
@@ -1248,6 +1253,11 @@ const CallApp: React.FC = () => {
     if (isFishTts) {
       const fishUrl = await synthesizeFishCallUrl(rawText, emotion);
       return { url: fishUrl || '', traceIds: [] };
+    }
+    if (isQwenTts) {
+      if (!selectedChar) throw new Error('未选择角色');
+      const { url } = await synthesizeSpeechQwenDetailed(rawText, selectedChar, apiConfig);
+      return { url: url || '', traceIds: [] };
     }
     const minimaxApiKey = resolveMiniMaxApiKey(apiConfig);
     const voiceId = resolveVoiceId();
