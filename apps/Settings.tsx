@@ -1809,7 +1809,7 @@ const Settings: React.FC = () => {
                     <div className="p-2 bg-white rounded-lg text-amber-500 shadow-sm"><SpeakerHigh size={18} weight="fill" /></div>
                     <span className="flex-1 min-w-0">
                         <span className="block text-xs font-bold text-slate-700">后台保活</span>
-                        <span className="block text-[10px] text-slate-400 leading-relaxed mt-0.5">循环播放 10 秒静音音频，尽量减少浏览器切到后台后被暂停。</span>
+                        <span className="block text-[10px] text-slate-400 leading-relaxed mt-0.5">循环播放 10 秒极低音量音频；暂停、切回前台或重新打开时会自动尝试恢复。</span>
                     </span>
                     <input
                         type="checkbox"
