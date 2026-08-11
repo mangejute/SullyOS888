@@ -3288,7 +3288,7 @@ const MessageItem = React.memo(({
         const description = imageGeneration.description || imageGeneration.prompt || '';
         const wasSafetyBlocked = /安全|safety|policy|moderation|无法用于生成图像/i.test(String(imageGeneration.error || ''));
         const aspectRatio = String(imageGeneration.aspectRatio || '1:1');
-        const placeholderRatioClass = aspectRatio === '3:4' || aspectRatio === '9:16' ? 'aspect-[3/4]' : aspectRatio === '4:3' || aspectRatio === '16:9' ? 'aspect-[4/3]' : 'aspect-square';
+        const placeholderRatioClass = aspectRatio === '3:4' ? 'aspect-[3/4]' : aspectRatio === '9:16' ? 'aspect-[9/16]' : aspectRatio === '4:3' ? 'aspect-[4/3]' : aspectRatio === '16:9' ? 'aspect-[16/9]' : 'aspect-square';
         const downloadImage = () => {
             if (!m.content) return;
             const link = document.createElement('a');
