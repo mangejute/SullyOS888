@@ -4,6 +4,7 @@ import { useOS } from '../context/OSContext';
 import { DB } from '../utils/db';
 import { AppID, Message, MessageType, MemoryFragment, Emoji, EmojiCategory, DailySchedule, ScheduleSlot } from '../types';
 import { processImage } from '../utils/file';
+import { deleteBlobRef, putImageBlob } from '../utils/blobRef';
 import { safeResponseJson, extractContent } from '../utils/safeApi';
 import { buildChatFineTuneCss, mergeChatFineTune } from '../utils/chatFineTuneCss';
 import ChatFineTunePanel from '../components/chat/ChatFineTunePanel';
@@ -3263,6 +3264,27 @@ const Chat: React.FC = () => {
                 onToggleChatVoiceAutoPlay={() => updateCharacter(char.id, { chatVoiceAutoPlay: !char.chatVoiceAutoPlay })}
                 chatVoiceLang={char.chatVoiceLang || ''}
                 onSetChatVoiceLang={(lang: string) => updateCharacter(char.id, { chatVoiceLang: lang })}
+                callDreamTalkEnabled={char.callSettings?.dreamTalkEnabled !== false}
+                onToggleCallDreamTalk={() => updateCharacter(char.id, { callSettings: { ...char.callSettings, dreamTalkEnabled: !(char.callSettings?.dreamTalkEnabled !== false) } })}
+                callSleepNoiseId={char.callSettings?.sleepNoiseId || 'none'}
+                callCustomSleepNoises={char.callSettings?.customSleepNoises || []}
+                onSelectCallSleepNoise={(id: string) => updateCharacter(char.id, { callSettings: { ...char.callSettings, sleepNoiseId: id } })}
+                onAddCallSleepNoise={(file: File) => { void (async () => {
+                    if (!file.type.startsWith('audio/')) { addToast('请选择音频文件', 'error'); return; }
+                    if (file.size > 25 * 1024 * 1024) { addToast('音频请控制在 25 MB 以内', 'error'); return; }
+                    const audioRef = await putImageBlob(file);
+                    const current = char.callSettings?.customSleepNoises || [];
+                    const noise = { id: `sleep-noise-${Date.now()}`, name: file.name.replace(/\.[^.]+$/, '') || '自定义白噪音', audioRef, mimeType: file.type };
+                    updateCharacter(char.id, { callSettings: { ...char.callSettings, sleepNoiseId: noise.id, customSleepNoises: [...current, noise] } });
+                    addToast('白噪音已添加，会保存在这台设备', 'success');
+                })()}}
+                onRemoveCallSleepNoise={(id: string) => { void (async () => {
+                    const current = char.callSettings?.customSleepNoises || [];
+                    const removed = current.find(item => item.id === id);
+                    updateCharacter(char.id, { callSettings: { ...char.callSettings, sleepNoiseId: char.callSettings?.sleepNoiseId === id ? 'none' : char.callSettings?.sleepNoiseId, customSleepNoises: current.filter(item => item.id !== id) } });
+                    if (removed?.audioRef) await deleteBlobRef(removed.audioRef);
+                    addToast('白噪音已删除', 'success');
+                })()}}
                 voiceAvailable={characterHasVoice(char, apiConfig)}
                 onGenerateVoice={selectedMessage ? () => handleManualTts(selectedMessage) : undefined}
                 voiceDownloadable={!!(selectedMessage?.id && voiceDataMap[selectedMessage.id])}
@@ -3335,7 +3357,10 @@ const Chat: React.FC = () => {
                  showTrigger={false}
                 onShowCharsPanel={() => setShowPanel('chars')}
                 topActions={[
-                    { label: '电话（即将上线）', icon: <Phone className="w-5 h-5" weight="regular" />, onClick: () => addToast('电话功能即将上线', 'info') },
+                    { label: '视频通话', icon: <Phone className="w-5 h-5" weight="regular" />, onClick: () => {
+                        try { localStorage.setItem('sully-call-direct-video-intent-v1', JSON.stringify({ charId: char.id, at: Date.now() })); } catch { /* private WebView */ }
+                        openApp(AppID.Call);
+                    } },
                     { label: '聊天设置', icon: <GearSix className="w-5 h-5" weight="regular" />, onClick: () => setModalType('chat-settings') },
                 ]}
                 onDeleteBuff={(buffId) => {

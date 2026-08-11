@@ -243,11 +243,23 @@ export interface VisionApiConfig {
   model: string;
 }
 
+export interface SpeechRecognitionConfig {
+  /** browser = 浏览器内置识别；siliconflow = 硅基流动 OpenAI 兼容语音转文字。 */
+  provider: 'browser' | 'siliconflow';
+  baseUrl: string;
+  apiKey: string;
+  model: string;
+  language: string;
+  cleanEmotionEmoji: boolean;
+}
+
 export interface APIConfig {
   baseUrl: string;
   apiKey: string;
   // 可选识图中转：给不支持 image_url 的主模型补视觉能力。
   visionApi?: VisionApiConfig;
+  /** 视频/语音通话的语音识别服务配置。秘钥只保存在本机配置中。 */
+  speechRecognition?: SpeechRecognitionConfig;
   /** 独立生图服务配置；与聊天/识图 API 分开保存。 */
   imageGenerationApi?: {
     baseUrl: string;
@@ -2655,6 +2667,12 @@ export interface CharacterProfile {
   dateVoiceLang?: string;
   // Call (voice phone) — remembered translation language for this character
   callVoiceLang?: string;
+  /** 视频/语音通话设置与陪睡模式（音频文件只保存本地 blob 引用）。 */
+  callSettings?: {
+    dreamTalkEnabled?: boolean;
+    sleepNoiseId?: string;
+    customSleepNoises?: Array<{ id: string; name: string; audioRef: string; mimeType?: string }>;
+  };
 
   // Cross-session guidebook insights: what char has discovered about user across games
   guidebookInsights?: string[];

@@ -116,6 +116,14 @@ interface ChatModalsProps {
     onToggleChatVoiceAutoPlay?: () => void;
     chatVoiceLang?: string;
     onSetChatVoiceLang?: (lang: string) => void;
+    // 电话 / 陪睡设置
+    callDreamTalkEnabled?: boolean;
+    onToggleCallDreamTalk?: () => void;
+    callSleepNoiseId?: string;
+    callCustomSleepNoises?: Array<{ id: string; name: string; audioRef: string; mimeType?: string }>;
+    onSelectCallSleepNoise?: (id: string) => void;
+    onAddCallSleepNoise?: (file: File) => void;
+    onRemoveCallSleepNoise?: (id: string) => void;
     // Voice generation from long-press
     onGenerateVoice?: () => void;
     voiceAvailable?: boolean; // true if char has voiceProfile configured
@@ -263,6 +271,7 @@ const ChatModals: React.FC<ChatModalsProps> = ({
     xhsEnabled, onToggleXhs,
     htmlModeEnabled, onToggleHtmlMode, htmlModeCustomPrompt, setHtmlModeCustomPrompt,
     chatVoiceEnabled, onToggleChatVoice, chatVoiceAutoPlay, onToggleChatVoiceAutoPlay, chatVoiceLang, onSetChatVoiceLang,
+    callDreamTalkEnabled, onToggleCallDreamTalk, callSleepNoiseId, callCustomSleepNoises = [], onSelectCallSleepNoise, onAddCallSleepNoise, onRemoveCallSleepNoise,
     onGenerateVoice, voiceAvailable, onDownloadVoice, voiceDownloadable,
     scheduleData, isScheduleGenerating, onScheduleEdit, onScheduleDelete, onScheduleReroll, onScheduleCoverChange,
     onScheduleStyleChange, onPlayTheater,
@@ -273,6 +282,7 @@ const ChatModals: React.FC<ChatModalsProps> = ({
 }) => {
     const bgInputRef = useRef<HTMLInputElement>(null);
     const referenceInputRef = useRef<HTMLInputElement>(null);
+    const sleepNoiseInputRef = useRef<HTMLInputElement>(null);
     const [imageReferences, setImageReferences] = useState<string[]>(activeCharacter.imageGenerationReferences || []);
     React.useEffect(() => {
         setImageReferences(activeCharacter.imageGenerationReferences || []);
@@ -707,6 +717,26 @@ const ChatModals: React.FC<ChatModalsProps> = ({
                                  {chatVoiceLang && <p className="text-[10px] text-emerald-600/70 mt-1.5">选择非默认语种时，AI 台词会先翻译再生成语音。</p>}
                              </div>
                          )}
+                     </div>
+
+                     <div className="pt-2 border-t border-slate-100">
+                         <div className="flex justify-between items-center cursor-pointer" onClick={onToggleCallDreamTalk}>
+                             <label className="text-xs font-bold text-slate-400 uppercase pointer-events-none">电话设置 · 关闭梦话</label>
+                             <div className={`w-10 h-6 rounded-full p-1 transition-colors flex items-center ${!callDreamTalkEnabled ? 'bg-slate-700' : 'bg-slate-200'}`}>
+                                 <div className={`w-4 h-4 bg-white rounded-full shadow-sm transition-transform ${!callDreamTalkEnabled ? 'translate-x-4' : ''}`}></div>
+                             </div>
+                         </div>
+                         <p className="text-[10px] text-slate-400 mt-2 leading-relaxed">打开“关闭梦话”后，陪睡时角色不会偶尔说简短梦话；关闭时才会在长时间安静后低频呢喃，不会连续打扰你。</p>
+                         <div className="mt-4">
+                             <label className="text-xs font-bold text-slate-400 uppercase block">🌙 陪睡白噪音</label>
+                             <p className="text-[10px] text-slate-400 mt-1 leading-relaxed">选择后会在陪睡模式里循环播放。内置白噪音位置先保留；你上传的音频可以直接使用并保存在本机。</p>
+                             <div className="mt-2 flex flex-wrap gap-1.5">
+                                 <button type="button" onClick={() => onSelectCallSleepNoise?.('none')} className={`rounded-full border px-2.5 py-1 text-[11px] ${!callSleepNoiseId || callSleepNoiseId === 'none' ? 'border-primary bg-primary/10 text-primary' : 'border-slate-200 text-slate-500'}`}>无</button>
+                                 {callCustomSleepNoises.map(noise => <span key={noise.id} className={`inline-flex items-center overflow-hidden rounded-full border ${callSleepNoiseId === noise.id ? 'border-primary bg-primary/10 text-primary' : 'border-slate-200 text-slate-500'}`}><button type="button" onClick={() => onSelectCallSleepNoise?.(noise.id)} className="px-2.5 py-1 text-[11px]">{noise.name}</button><button type="button" onClick={() => onRemoveCallSleepNoise?.(noise.id)} className="border-l border-current/15 px-2 py-1 text-[11px]" aria-label={`删除 ${noise.name}`}>×</button></span>)}
+                             </div>
+                             <input ref={sleepNoiseInputRef} type="file" accept="audio/*" className="hidden" onChange={event => { const file = event.target.files?.[0]; event.target.value = ''; if (file) onAddCallSleepNoise?.(file); }} />
+                             <button type="button" onClick={() => sleepNoiseInputRef.current?.click()} className="mt-3 w-full rounded-xl border border-dashed border-slate-300 py-2.5 text-xs font-bold text-slate-500 active:scale-[.98]">＋ 添加自定义白噪音</button>
+                         </div>
                      </div>
 
                      {/* 时间感知 / 自定义时区 / 线下时间感知 已统一迁移至「神经链接」角色设定页 */}

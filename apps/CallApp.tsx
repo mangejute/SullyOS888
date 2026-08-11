@@ -142,6 +142,9 @@ const VIDEO_CALL_LAYOUT_KEY = 'sully-call-video-layout-v1';
 const FAKE_USER_CAMERA_IMAGE_KEY = 'sully-call-fake-camera-image-v1';
 const USER_CAMERA_PREVIEW_SIZE_KEY = 'sully-call-camera-preview-size-v1';
 const CALL_SETUP_GUIDE_KEY = 'sully-call-setup-guide-v2';
+const DIRECT_VIDEO_CALL_INTENT_KEY = 'sully-call-direct-video-intent-v1';
+const VIDEO_CALL_DEFAULT_CAMERA_KEY = 'sully-call-default-camera-v1';
+const STT_SILENCE_SECONDS_KEY = 'sully-call-stt-silence-seconds-v1';
 const VIDEO_CALL_LAYOUTS: Array<{ id: VideoCallLayout; name: string; hint: string }> = [
   { id: 'stage', name: '沉浸', hint: '角色最大，聊天收成字幕' },
   { id: 'story', name: '剧情', hint: '角色与完整对话均衡展示' },
@@ -154,6 +157,18 @@ const loadVideoCallLayout = (): VideoCallLayout => {
   } catch {
     return 'stage';
   }
+};
+const loadDefaultCallCameraMode = (): UserCameraMode => {
+  try {
+    const value = localStorage.getItem(VIDEO_CALL_DEFAULT_CAMERA_KEY);
+    return value === 'off' || value === 'fake' || value === 'emotion' || value === 'snapshot' ? value : 'snapshot';
+  } catch { return 'snapshot'; }
+};
+const loadSttSilenceSeconds = (): number => {
+  try {
+    const value = Number(localStorage.getItem(STT_SILENCE_SECONDS_KEY));
+    return Number.isFinite(value) && value >= 1 && value <= 6 ? value : 2;
+  } catch { return 2; }
 };
 const USER_CAMERA_PREVIEW_SIZES: Array<{ id: UserCameraPreviewSize; label: string; frameClass: string }> = [
   { id: 'small', label: '小', frameClass: 'h-[5rem] w-[3.75rem]' },
@@ -386,6 +401,7 @@ const buildCallPrompt = (
   voiceLang?: string,
   mode: CallMode = 'voice',
   tz?: string,
+  dreamTalkEnabled = false,
 ) => {
   const resolvedCharName = charName || '你的角色';
   // 电话里角色说的「现在几点 / 今天什么日子」是 ta 那边的时间，跟角色自定义时区走
@@ -404,6 +420,10 @@ const buildCallPrompt = (
 这不是文字，这是一通真正的电话。你能听到对方的呼吸、语气、停顿。你也有自己的呼吸。
 
 ### 你正拿着手机贴在耳边`;
+  const dreamTalkPrompt = dreamTalkEnabled ? `
+
+### 陪睡梦话
+如果这通陪睡通话中用户长时间没有说话，保持安静，不要主动打扰；只有偶尔自然地说一两句很短的梦话或含糊呢喃（如“嗯……还在”“晚安……”），不要解释自己在说梦话，也不要连续输出。` : '';
   const callPrompt = `${sceneOpening}
 
 你这会儿在做什么？在哪儿？身边什么声音？
@@ -474,7 +494,7 @@ ${getVoicePromptOverride(getTtsProvider()) ?? (getTtsProvider() === 'fishaudio' 
 
 ### 底线
 
-只输出你在电话里会**说出口**的话。不要输出 [通话]、[聊天]、[约会] 这类系统标记，不要输出时间戳。`;
+只输出你在电话里会**说出口**的话。不要输出 [通话]、[聊天]、[约会] 这类系统标记，不要输出时间戳。${dreamTalkPrompt}`;
   const langLabel = voiceLang ? VOICE_LANGUAGE_OPTIONS.find(o => o.value === voiceLang)?.label || voiceLang : '';
   const voiceLangPrompt = voiceLang ? `### 语音语种翻译
 
@@ -503,6 +523,7 @@ const CallApp: React.FC = () => {
 
   const [viewMode, setViewMode] = useState<ViewMode>('role-select');
   const [selectedCharId, setSelectedCharId] = useState<string>(activeCharacterId || characters[0]?.id || '');
+  const [directVideoPendingId, setDirectVideoPendingId] = useState<string | null>(null);
   const ROLES_PER_PAGE = 6;
   const [roleGroupId, setRoleGroupId] = useState<string>(GROUP_FILTER_ALL); // 选人页的分组筛选
   const [rolePage, setRolePage] = useState<number>(() => {
@@ -531,7 +552,22 @@ const CallApp: React.FC = () => {
   const [currentSessionId, setCurrentSessionId] = useState<string>(() => `call-${Date.now()}`);
   const [draftInput, setDraftInput] = useState('');
   const [isListening, setIsListening] = useState(false);
+  const [autoVoiceMode, setAutoVoiceMode] = useState(false);
+  const [sttSilenceSeconds, setSttSilenceSeconds] = useState(loadSttSilenceSeconds);
+  const [showVoiceInputSettings, setShowVoiceInputSettings] = useState(false);
+  const [showSleepMode, setShowSleepMode] = useState(false);
+  const [sleeping, setSleeping] = useState(false);
+  const [sleepDurationMinutes, setSleepDurationMinutes] = useState(0);
+  const sleepAudioRef = useRef<HTMLAudioElement | null>(null);
+  const sleepTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const sttSessionRef = useRef<SttSession | null>(null);
+  const sttSilenceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const sttButtonLongPressTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const sttButtonLongPressRef = useRef(false);
+  const sttSubmittingRef = useRef(false);
+  const autoVoiceModeRef = useRef(false);
+  const handleTurnRef = useRef<(spoken?: string) => void>(() => undefined);
+  const sttProvider = apiConfig.speechRecognition?.provider === 'siliconflow' ? 'siliconflow' : 'browser';
   const sttSupported = useMemo(() => isSttSupported(), []);
   const [audioUrl, setAudioUrl] = useState<string>('');
   const [traceId, setTraceId] = useState<string>('');
@@ -553,7 +589,7 @@ const CallApp: React.FC = () => {
   const [live2DWardrobeOnboarding, setLive2DWardrobeOnboarding] = useState(false);
   const [showCallSetupGuide, setShowCallSetupGuide] = useState(false);
   const [callSetupGuideStep, setCallSetupGuideStep] = useState<CallSetupGuideStep>('model');
-  const [setupCameraMode, setSetupCameraMode] = useState<UserCameraMode>('off');
+  const [setupCameraMode, setSetupCameraMode] = useState<UserCameraMode>(loadDefaultCallCameraMode);
   const [avatarImportStatus, setAvatarImportStatus] = useState('');
   const [pendingVRoidImport, setPendingVRoidImport] = useState<PendingVRoidImport | null>(null);
   const [vroidImportBusy, setVRoidImportBusy] = useState(false);
@@ -799,6 +835,56 @@ const CallApp: React.FC = () => {
   // VRM 模型的自定义表情名（加载时由画布回传），喂给基础版主模型或高质量导演。
   const vrmExpressionsRef = useRef<string[]>([]);
   const selectedChar = useMemo(() => characters.find(c => c.id === selectedCharId) || null, [characters, selectedCharId]);
+  const selectedSleepNoise = selectedChar?.callSettings?.customSleepNoises?.find(item => item.id === selectedChar.callSettings?.sleepNoiseId);
+  const selectedSleepNoiseUrl = useBlobRefUrl(selectedSleepNoise?.audioRef);
+  const stopSleepMode = () => {
+    if (sleepTimerRef.current) clearTimeout(sleepTimerRef.current);
+    sleepTimerRef.current = null;
+    sleepAudioRef.current?.pause();
+    if (sleepAudioRef.current) sleepAudioRef.current.currentTime = 0;
+    sleepAudioRef.current = null;
+    setSleeping(false);
+  };
+  const startSleepMode = () => {
+    if (!selectedChar) return;
+    autoVoiceModeRef.current = false;
+    setAutoVoiceMode(false);
+    if (sleepTimerRef.current) clearTimeout(sleepTimerRef.current);
+    sleepAudioRef.current?.pause();
+    if (selectedSleepNoiseUrl) {
+      const audio = new Audio(selectedSleepNoiseUrl);
+      audio.loop = true;
+      audio.volume = 0.32;
+      sleepAudioRef.current = audio;
+      void audio.play().catch(() => addToast('白噪音已准备好，请再次点击开始播放', 'info'));
+    } else if (selectedChar.callSettings?.sleepNoiseId && selectedChar.callSettings.sleepNoiseId !== 'none') {
+      addToast('这个白噪音还没有音频，请先在聊天设置里上传', 'info');
+    }
+    setSleeping(true);
+    setShowSleepMode(false);
+    handleTurnRef.current('我想睡了，陪我安静待一会儿。');
+    if (sleepDurationMinutes > 0) {
+      sleepTimerRef.current = setTimeout(() => { stopSleepMode(); addToast('陪睡时间到了，白噪音已停止', 'info'); }, sleepDurationMinutes * 60_000);
+    }
+  };
+  useEffect(() => () => stopSleepMode(), []);
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem(DIRECT_VIDEO_CALL_INTENT_KEY);
+      if (!raw) return;
+      localStorage.removeItem(DIRECT_VIDEO_CALL_INTENT_KEY);
+      const intent = JSON.parse(raw) as { charId?: string; at?: number };
+      if (!intent.charId || !characters.some(character => character.id === intent.charId)) return;
+      if (intent.at && Date.now() - intent.at > 30_000) return;
+      const target = characters.find(character => character.id === intent.charId);
+      if (target && (!target.companionAvatar?.source || target.companionAvatar.source === 'model') && (target.companionAvatar?.imageRef || target.avatar)) {
+        updateCharacter(target.id, { companionAvatar: { ...target.companionAvatar, version: 1, source: 'upload', imageRef: target.companionAvatar?.imageRef || target.avatar } });
+      }
+      setSelectedCharId(intent.charId);
+      setCallMode('video');
+      setDirectVideoPendingId(intent.charId);
+    } catch { /* private WebView or malformed intent */ }
+  }, []);
   const selectedVisualSource = companionAvatarSource(selectedChar);
   const selectedDateOutfits = useMemo(() => listCompanionDateOutfits(selectedChar), [selectedChar]);
   const selectedDateOutfitId = normalizeCompanionSkinSetId(selectedChar?.companionAvatar?.skinSetId);
@@ -1441,26 +1527,91 @@ const CallApp: React.FC = () => {
   }, [suspendedCall]);
   useEffect(() => () => {
     revokeSessionBlobs();
+    if (sttSilenceTimerRef.current) clearTimeout(sttSilenceTimerRef.current);
+    if (sttButtonLongPressTimerRef.current) clearTimeout(sttButtonLongPressTimerRef.current);
     sttSessionRef.current?.stop();
   }, []);
-  // Voice input: toggle speech-to-text into the draft input box.
-  const toggleStt = async () => {
-    if (isListening) { sttSessionRef.current?.stop(); trackEvent('切换语音输入', { action: 'stop' }); return; }
-    if (!sttSupported) { addToast('当前环境不支持语音输入', 'info'); return; }
+  const clearSttSilenceTimer = () => {
+    if (sttSilenceTimerRef.current) clearTimeout(sttSilenceTimerRef.current);
+    sttSilenceTimerRef.current = null;
+  };
+  const armSttSilenceTimer = (text: string) => {
+    clearSttSilenceTimer();
+    const spoken = text.trim();
+    if (!spoken || !autoVoiceModeRef.current) return;
+    sttSilenceTimerRef.current = setTimeout(() => {
+      sttSilenceTimerRef.current = null;
+      if (!autoVoiceModeRef.current || !spoken) return;
+      sttButtonLongPressRef.current = false;
+      sttSubmittingRef.current = true;
+      sttSessionRef.current?.stop();
+      sttSessionRef.current = null;
+      setIsListening(false);
+      handleTurnRef.current(spoken);
+    }, sttSilenceSeconds * 1000);
+  };
+  const startAutoStt = async () => {
+    if (!autoVoiceModeRef.current || isListening || !sttSupported || ['connecting', 'thinking', 'speaking'].includes(callState)) return;
     try {
       setIsListening(true);
-      trackEvent('切换语音输入', { action: 'start' });
-      sttSessionRef.current = await startStt('zh-CN', {
-        onPartial: (t) => setDraftInput(t),
-        onFinal: (t) => setDraftInput(t),
+      let latest = '';
+      const speechConfig = apiConfig.speechRecognition;
+      sttSessionRef.current = await startStt(speechConfig?.language || 'zh-CN', {
+        onPartial: (t) => { latest = t; setDraftInput(t); armSttSilenceTimer(t); },
+        onFinal: (t) => {
+          latest = t; setDraftInput(t);
+          if (sttProvider === 'siliconflow') {
+            clearSttSilenceTimer();
+            sttSubmittingRef.current = true;
+            setIsListening(false);
+            handleTurnRef.current(t);
+          } else {
+            armSttSilenceTimer(t);
+          }
+        },
         onError: (m) => { if (m) addToast(m, 'info'); },
-        onEnd: () => { setIsListening(false); sttSessionRef.current = null; },
-      });
+        onEnd: () => {
+          sttSessionRef.current = null;
+          setIsListening(false);
+          if (sttSubmittingRef.current) { sttSubmittingRef.current = false; return; }
+          if (latest.trim() && autoVoiceModeRef.current) armSttSilenceTimer(latest);
+        },
+      }, { provider: sttProvider, siliconflow: speechConfig, silenceMs: sttSilenceSeconds * 1000 });
     } catch (e: any) {
       setIsListening(false);
       sttSessionRef.current = null;
       addToast(e?.message || '无法启动语音输入', 'error');
     }
+  };
+  // 点击麦克风进入免手模式：说完后静音指定秒数自动发送，角色回复和语音播放完再自动续听。
+  const toggleStt = async () => {
+    if (autoVoiceModeRef.current) {
+      autoVoiceModeRef.current = false;
+      setAutoVoiceMode(false);
+      clearSttSilenceTimer();
+      sttSubmittingRef.current = false;
+      sttSessionRef.current?.stop();
+      sttSessionRef.current = null;
+      setIsListening(false);
+      trackEvent('切换语音输入', { action: 'stop' });
+      return;
+    }
+    if (!sttSupported) { addToast('当前环境不支持语音识别', 'info'); return; }
+    autoVoiceModeRef.current = true;
+    setAutoVoiceMode(true);
+    trackEvent('切换语音输入', { action: 'hands-free-start' });
+    await startAutoStt();
+  };
+  const handleSttButtonPointerDown = () => {
+    sttButtonLongPressRef.current = false;
+    sttButtonLongPressTimerRef.current = setTimeout(() => {
+      sttButtonLongPressRef.current = true;
+      setShowVoiceInputSettings(true);
+    }, 500);
+  };
+  const clearSttButtonLongPress = () => {
+    if (sttButtonLongPressTimerRef.current) clearTimeout(sttButtonLongPressTimerRef.current);
+    sttButtonLongPressTimerRef.current = null;
   };
   // 下载某条通话语音：移动端优先调系统分享/保存，避免 WebView 的 <a download> 假成功。
   const handleDownloadCallAudio = async (url?: string, ts?: number) => {
@@ -1603,7 +1754,7 @@ const CallApp: React.FC = () => {
     setShowCallSetupGuide(false);
   };
   const openCallSetupGuide = (step: CallSetupGuideStep = 'model') => {
-    setSetupCameraMode('off');
+    setSetupCameraMode(loadDefaultCallCameraMode());
     setCallSetupGuideStep(step);
     callSetupGuideOpenRef.current = true;
     setShowCallSetupGuide(true);
@@ -1630,17 +1781,23 @@ const CallApp: React.FC = () => {
     if (callMode === 'video') {
       let guideCompleted = false;
       try { guideCompleted = localStorage.getItem(CALL_SETUP_GUIDE_KEY) === 'complete'; } catch { /* private WebView */ }
-      if (!guideCompleted) {
+      if (!guideCompleted && !hasSelectedVideoVisual) {
         openCallSetupGuide(hasSelectedVideoVisual ? 'camera' : 'model');
         return;
       }
     }
-    beginSelectedCall('off');
+    beginSelectedCall(callMode === 'video' ? loadDefaultCallCameraMode() : 'off');
   };
   const finishCallSetupGuide = () => {
     try { localStorage.setItem(CALL_SETUP_GUIDE_KEY, 'complete'); } catch { /* private WebView */ }
+    try { localStorage.setItem(VIDEO_CALL_DEFAULT_CAMERA_KEY, setupCameraMode); } catch { /* private WebView */ }
     beginSelectedCall(setupCameraMode);
   };
+  useEffect(() => {
+    if (!directVideoPendingId || selectedCharId !== directVideoPendingId || callMode !== 'video') return;
+    setDirectVideoPendingId(null);
+    beginSelectedCall(loadDefaultCallCameraMode());
+  }, [directVideoPendingId, selectedCharId, callMode]);
   const finishCall = async () => {
     if (selectedChar?.id) {
       const userTurns = bubbles.filter(b => b.role === 'user').length;
@@ -1912,6 +2069,7 @@ ${sentencePlan}`;
           voiceLang || undefined,
           callMode,
           resolveCharTimeZone(selectedChar),
+          sleeping && selectedChar.callSettings?.dreamTalkEnabled !== false,
         )
       : buildCallPrompt(userName, undefined, undefined, voiceLang || undefined, callMode);
     const thinkingPrompt = selectedChar?.showThinkingChain
@@ -2057,6 +2215,7 @@ ${sentencePlan}`;
       silentSpeechTimerRef.current = null;
       clearPerformanceCueTimers();
       setCallState(prev => (prev === 'speaking' ? 'listening' : prev));
+      if (autoVoiceModeRef.current) window.setTimeout(() => { void startAutoStt(); }, 180);
     }, durationMs);
   };
   useEffect(() => () => {
@@ -2197,9 +2356,9 @@ ${sentencePlan}`;
     avatarTouchEffectTimersRef.current.forEach(timer => window.clearTimeout(timer));
     avatarTouchEffectTimersRef.current = [];
   }, []);
-  const handleTurn = async () => {
+  const handleTurn = async (spokenOverride?: string) => {
     if (isListening) { sttSessionRef.current?.stop(); setIsListening(false); }
-    const typedInput = draftInput.trim();
+    const typedInput = (spokenOverride ?? draftInput).trim();
     const retryInput = getPendingReplyText(bubbles);
     const input = typedInput || retryInput;
     if (!input) return addToast('说点什么吧', 'info');
@@ -2396,6 +2555,7 @@ ${sentencePlan}`;
       addToast(`TTS失败：${e?.message || '语音生成失败'}，已保留文本并启用无声表演`, 'info');
     }
   };
+  handleTurnRef.current = (spoken?: string) => { void handleTurn(spoken); };
   const sendingBusy = ['connecting', 'thinking'].includes(callState);
   const pendingCallRetryText = getPendingReplyText(bubbles);
   const displayCallState: CallState = isAudioPlaying ? 'speaking' : callState;
@@ -3076,6 +3236,7 @@ ${sentencePlan}`;
             ))}
           </span>
           <span style={{ color: accentColor }}>✦</span>
+          <button type="button" onClick={() => setShowSleepMode(true)} title="陪睡模式" className="ml-2 rounded-full border border-white/15 bg-white/[.06] px-2 py-1 text-[10px] tracking-normal text-white/75 active:scale-95">{sleeping ? '陪睡中' : '陪睡'}</button>
         </div>
         {/* name block */}
         <div className={`${callMode === 'video' ? 'pt-3' : 'pt-7'} text-center`}>
@@ -3368,13 +3529,16 @@ ${sentencePlan}`;
           <div className={`${callMode === 'video' ? 'rounded-[1.15rem] p-1.5' : 'rounded-2xl p-2'} border border-white/12 bg-black/30 backdrop-blur-md flex gap-2 items-center`} style={{ boxShadow: `inset 0 0 20px ${accentColor}1f` }}>
             {sttSupported && (
               <button
-                onClick={toggleStt}
+                onClick={() => { if (sttButtonLongPressRef.current) { sttButtonLongPressRef.current = false; return; } void toggleStt(); }}
+                onPointerDown={handleSttButtonPointerDown}
+                onPointerUp={clearSttButtonLongPress}
+                onPointerLeave={clearSttButtonLongPress}
                 disabled={sendingBusy}
-                title={isListening ? '结束语音输入' : '按一下开始说话'}
+                title={isListening ? '关闭自动听写' : '点击开始自动听写，长按调整静音发送时间'}
                 className="w-9 h-9 rounded-full flex items-center justify-center shrink-0 transition active:scale-90 disabled:opacity-40"
-                style={isListening ? { background: '#f0569f', boxShadow: '0 0 14px #f0569f99' } : { background: 'rgba(255,255,255,0.08)' }}
+                style={autoVoiceMode ? { background: '#f0569f', boxShadow: '0 0 14px #f0569f99' } : { background: 'rgba(255,255,255,0.08)' }}
               >
-                <Microphone size={18} weight="fill" className={isListening ? 'text-white animate-pulse' : 'text-white/70'} />
+                <Microphone size={18} weight="fill" className={autoVoiceMode ? 'text-white animate-pulse' : 'text-white/70'} />
               </button>
             )}
             <input
@@ -3387,7 +3551,7 @@ ${sentencePlan}`;
             <button onClick={handleTurn} disabled={sendingBusy} className="keep-white shrink-0 px-4 py-2 rounded-xl text-sm font-medium text-white disabled:opacity-40 transition active:scale-95" style={{ backgroundColor: accentColor, boxShadow: `0 0 16px ${accentColor}66` }}>{sendingBusy ? '…' : '发送'}</button>
           </div>
           {!sendingBusy && pendingCallRetryText && !draftInput.trim() && <div className="text-[10px] text-amber-200/70 mt-1 px-1">上一句话还没得到回复，点击重试即可继续</div>}
-          {isListening && <div className="text-[10px] text-white/40 mt-1 px-1 animate-pulse">正在聆听，点麦克风结束</div>}
+          {autoVoiceMode && <div className="text-[10px] text-white/40 mt-1 px-1 animate-pulse">{isListening ? `自动聆听中，静音 ${sttSilenceSeconds} 秒后发送` : '等待角色回复完成后自动继续聆听'}</div>}
         </div>
       )}
       <div className={`${callMode === 'video' ? 'px-3 pb-2 pt-0.5' : 'px-7 pb-7 pt-1.5'}`} data-testid={callMode === 'video' ? 'video-call-compact-controls' : undefined}>
@@ -3472,8 +3636,39 @@ ${sentencePlan}`;
           }
         }}
         onPause={() => { setIsAudioPlaying(false); clearPerformanceCueTimers(); if (callState === 'speaking') setCallState('listening'); }}
-        onEnded={() => { setIsAudioPlaying(false); clearPerformanceCueTimers(); if (callState === 'speaking') setCallState('listening'); }}
+        onEnded={() => { setIsAudioPlaying(false); clearPerformanceCueTimers(); if (callState === 'speaking') setCallState('listening'); if (autoVoiceModeRef.current) window.setTimeout(() => { void startAutoStt(); }, 180); }}
       />
+      {showVoiceInputSettings && (
+        <div className="absolute inset-0 z-[220] flex items-end bg-black/60 backdrop-blur-sm" onClick={() => setShowVoiceInputSettings(false)}>
+          <div className="w-full rounded-t-[1.75rem] border-t border-white/15 bg-[#100b1c] px-5 pb-[max(1.25rem,var(--safe-bottom))] pt-5 text-white" onClick={event => event.stopPropagation()}>
+            <div className="mx-auto mb-4 h-1 w-10 rounded-full bg-white/20" />
+            <div className="flex items-center justify-between">
+              <div><div className="text-[9px] tracking-[.24em] text-white/40">VOICE INPUT</div><h2 className="mt-1 text-lg font-semibold">语音设置</h2></div>
+              <button type="button" onClick={() => setShowVoiceInputSettings(false)} className="rounded-full border border-white/15 px-3 py-1.5 text-xs text-white/65">完成</button>
+            </div>
+            <p className="mt-3 text-[11px] leading-5 text-white/45">你说完后，持续没有声音达到下面时间，就自动把这句话发送给角色。</p>
+            <div className="mt-4 grid grid-cols-3 gap-2">
+              {[1, 2, 3, 4, 5, 6].map(seconds => (
+                <button key={seconds} type="button" onClick={() => { setSttSilenceSeconds(seconds); try { localStorage.setItem(STT_SILENCE_SECONDS_KEY, String(seconds)); } catch { /* private WebView */ } setShowVoiceInputSettings(false); }} className={`rounded-xl border px-3 py-2.5 text-sm ${sttSilenceSeconds === seconds ? 'border-fuchsia-400 bg-fuchsia-400/20 text-white' : 'border-white/10 bg-white/[.04] text-white/60'}`}>{seconds} 秒</button>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
+      {showSleepMode && (
+        <div className="absolute inset-0 z-[220] flex items-end bg-black/65 backdrop-blur-sm" onClick={() => setShowSleepMode(false)}>
+          <div className="w-full max-h-[82%] overflow-y-auto rounded-t-[1.75rem] border-t border-white/15 bg-[#111522] px-5 pb-[max(1.25rem,var(--safe-bottom))] pt-5 text-white" onClick={event => event.stopPropagation()}>
+            <div className="flex items-start justify-between gap-3"><div><div className="text-[9px] tracking-[.24em] text-white/40">SLEEP COMPANION</div><h2 className="mt-1 text-xl font-semibold">🌙 陪睡 · 哄睡</h2></div><button type="button" onClick={() => setShowSleepMode(false)} className="rounded-full border border-white/15 px-3 py-1.5 text-xs text-white/65">完成</button></div>
+            <p className="mt-3 text-[11px] leading-5 text-white/50">开启后会先让角色轻声陪你说几句，之后保持安静；白噪音会在本机循环播放。你可以随时停止。</p>
+            <div className="mt-5 flex items-center justify-between"><span className="text-sm font-semibold">定时结束</span><div className="flex flex-wrap justify-end gap-1.5">{[0, 30, 60, 120, 480].map(minutes => <button key={minutes} type="button" onClick={() => setSleepDurationMinutes(minutes)} className={`rounded-full border px-2.5 py-1.5 text-[10px] ${sleepDurationMinutes === minutes ? 'border-fuchsia-400 bg-fuchsia-400/20 text-white' : 'border-white/10 text-white/55'}`}>{minutes === 0 ? '不自动挂断' : minutes < 60 ? `${minutes} 分钟` : `${minutes / 60} 小时`}</button>)}</div></div>
+            <div className="mt-5 border-t border-white/10 pt-4"><div className="flex items-center justify-between"><span className="text-sm font-semibold">🎵 白噪音陪伴</span><span className="text-[10px] text-white/35">自定义音效在聊天设置管理</span></div>
+              <div className="mt-3 flex flex-wrap gap-2">{['none', 'ocean', 'book', 'night', 'market', 'birds'].map(id => { const label = id === 'none' ? '无' : id === 'ocean' ? '海浪' : id === 'book' ? '翻书' : id === 'night' ? '夜晚' : id === 'market' ? '市场' : '鸟叫'; const custom = selectedChar?.callSettings?.customSleepNoises?.find(item => item.id === id); const active = selectedChar?.callSettings?.sleepNoiseId === id || (!selectedChar?.callSettings?.sleepNoiseId && id === 'none'); return <button key={id} type="button" disabled={id !== 'none' && !custom} onClick={() => selectedChar && updateCharacter(selectedChar.id, { callSettings: { ...selectedChar.callSettings, sleepNoiseId: id } })} className={`rounded-full border px-3 py-2 text-xs ${active ? 'border-fuchsia-400 bg-fuchsia-400/20 text-white' : 'border-white/10 text-white/50'} disabled:opacity-35`}>{custom?.name || label}{id !== 'none' && !custom ? '（待添加）' : ''}</button>; })}</div>
+              {!!selectedChar?.callSettings?.customSleepNoises?.length && <div className="mt-2 flex flex-wrap gap-2">{selectedChar.callSettings.customSleepNoises.map(item => <button key={item.id} type="button" onClick={() => updateCharacter(selectedChar.id, { callSettings: { ...selectedChar.callSettings, sleepNoiseId: item.id } })} className={`rounded-full border px-3 py-2 text-xs ${selectedChar.callSettings?.sleepNoiseId === item.id ? 'border-fuchsia-400 bg-fuchsia-400/20 text-white' : 'border-white/10 text-white/55'}`}>{item.name}</button>)}</div>}
+            </div>
+            <button type="button" onClick={sleeping ? stopSleepMode : startSleepMode} className={`mt-5 w-full rounded-2xl py-3.5 text-sm font-semibold ${sleeping ? 'bg-white/10 text-white' : 'bg-fuchsia-500 text-white shadow-lg shadow-fuchsia-500/20'}`}>{sleeping ? '停止陪睡' : '开始陪睡'}</button>
+          </div>
+        </div>
+      )}
       {showUserCameraModePicker && callMode === 'video' && (
         <UserCameraModePicker
           mode={userCameraMode}

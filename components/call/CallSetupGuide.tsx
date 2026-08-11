@@ -124,7 +124,7 @@ const CallSetupGuide: React.FC<CallSetupGuideProps> = ({
               <p className="mt-2 text-[11px] leading-5" style={{ color: muted }}>
                 {step === 'model'
                   ? `动态模型、静态图片和见面立绘都在这里切换，桌面与视频通话共用同一选择。`
-                  : '选择只对本次通话生效；下次打开仍从关闭开始。'}
+                  : '这里选择的视频通话默认镜头；保存后，下次接通会直接使用，不必重复选择。'}
               </p>
             </div>
             <button type="button" onClick={onClose} className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full border active:scale-90" style={{ borderColor: line }} aria-label="关闭">

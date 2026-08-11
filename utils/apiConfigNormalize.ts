@@ -18,6 +18,7 @@ export const normalizeApiModel = (value: unknown): string =>
 
 export function normalizeApiConfig(config: APIConfig): APIConfig {
   const visionApi = config.visionApi;
+  const speechRecognition = config.speechRecognition;
   return {
     ...config,
     baseUrl: normalizeApiBaseUrl(config.baseUrl),
@@ -29,6 +30,16 @@ export function normalizeApiConfig(config: APIConfig): APIConfig {
         baseUrl: normalizeApiBaseUrl(visionApi.baseUrl),
         apiKey: normalizeApiCredential(visionApi.apiKey),
         model: normalizeApiModel(visionApi.model),
+      },
+    } : {}),
+    ...(speechRecognition ? {
+      speechRecognition: {
+        provider: speechRecognition.provider === 'siliconflow' ? 'siliconflow' : 'browser',
+        baseUrl: normalizeApiBaseUrl(speechRecognition.baseUrl),
+        apiKey: normalizeApiCredential(speechRecognition.apiKey),
+        model: normalizeApiModel(speechRecognition.model),
+        language: cleanEdgeCharacters(speechRecognition.language || 'zh-CN') || 'zh-CN',
+        cleanEmotionEmoji: speechRecognition.cleanEmotionEmoji !== false,
       },
     } : {}),
   };

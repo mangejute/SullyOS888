@@ -17,7 +17,7 @@ import { VOICE_ACTING_GUIDE } from '../utils/minimaxTts';
 import { FISH_VOICE_ACTING_GUIDE } from '../utils/fishAudioTts';
 import { getQwenTtsVoices, previewQwenTtsVoice, QWEN_TTS_MODELS, QWEN_VOICE_ACTING_GUIDE, testQwenTtsConnection } from '../utils/qwenTts';
 import { DATE_VOICE_GUIDE } from '../utils/datePrompts';
-import { Sun, Newspaper, NotePencil, Notebook, Book, ForkKnife, Coffee, PlugsConnected, Bell, SpeakerHigh, Sparkle, LockKey, ChatCircleDots } from '@phosphor-icons/react';
+import { Sun, Newspaper, NotePencil, Notebook, Book, ForkKnife, Coffee, PlugsConnected, Bell, SpeakerHigh, Sparkle, LockKey, ChatCircleDots, Microphone } from '@phosphor-icons/react';
 import { loadMcpServers, saveMcpServers, createMcpServer, testMcpConnection, resetMcpSession, getMcpUseNativeTools, setMcpUseNativeTools, type McpServerConfig } from '../utils/mcpClient';
 import { loadPushConfig, savePushConfig, registerScheduleOnWorker, startHeartbeat, stopHeartbeat, isPushConfigAvailable, ensureSubscribed, sendTestPush, getPushDiagnostics, resetSubscription, deepResetSubscription, type PushDiagnostics } from '../utils/proactivePushConfig';
 import { ProactiveChat } from '../utils/proactiveChat';
@@ -39,6 +39,8 @@ import { describeImageWithVisionApi, VISION_API_TEST_IMAGE_DATA_URL, visionApiCo
 import { fetchMiniMaxVoices } from '../utils/minimaxVoice';
 import { getBrowserNotificationPermission, isBackgroundKeepAliveEnabled, isBrowserNotificationsEnabled, requestBrowserNotifications, setBackgroundKeepAlive, setBrowserNotificationsEnabled, showCharacterNotification } from '../utils/browserFeatures';
 import { snapshotLocalStorageMirror } from '../utils/lsMirror';
+import { DEFAULT_SILICONFLOW_STT_MODEL, DEFAULT_SILICONFLOW_STT_URL, testSiliconFlowSttConnection } from '../utils/siliconFlowStt';
+import type { APIConfig } from '../types';
 
 // hot_news（news.orz.ai）可选热榜平台。key 必须与 API 的 ?platform= 完全一致。
 const HOTNEWS_PLATFORM_OPTIONS: { key: string; label: string }[] = [
@@ -462,6 +464,7 @@ const Settings: React.FC = () => {
       cloudBackupConfig, updateCloudBackupConfig,
       cloudBackupToWebDAV, cloudRestoreFromWebDAV, listCloudBackups,
       theme, updateTheme,
+      memoryPalaceConfig,
   } = useOS();
   
   const [localKey, setLocalKey] = useState(apiConfig.apiKey);
@@ -475,6 +478,16 @@ const Settings: React.FC = () => {
   const [localVisionUrl, setLocalVisionUrl] = useState(apiConfig.visionApi?.baseUrl || '');
   const [localVisionKey, setLocalVisionKey] = useState(apiConfig.visionApi?.apiKey || '');
   const [localVisionModel, setLocalVisionModel] = useState(apiConfig.visionApi?.model || '');
+  const [localSttProvider, setLocalSttProvider] = useState<'browser' | 'siliconflow'>(apiConfig.speechRecognition?.provider === 'siliconflow' ? 'siliconflow' : 'browser');
+  const [localSttUrl, setLocalSttUrl] = useState(apiConfig.speechRecognition?.baseUrl || memoryPalaceConfig.embedding.baseUrl || DEFAULT_SILICONFLOW_STT_URL);
+  const [localSttKey, setLocalSttKey] = useState(apiConfig.speechRecognition?.apiKey || memoryPalaceConfig.embedding.apiKey || '');
+  const [localSttModel, setLocalSttModel] = useState(apiConfig.speechRecognition?.model || DEFAULT_SILICONFLOW_STT_MODEL);
+  const [localSttLanguage, setLocalSttLanguage] = useState(apiConfig.speechRecognition?.language || 'zh-CN');
+  const [localSttCleanEmoji, setLocalSttCleanEmoji] = useState(apiConfig.speechRecognition?.cleanEmotionEmoji !== false);
+  const [availableSttModels, setAvailableSttModels] = useState<string[]>([]);
+  const [sttModelFilter, setSttModelFilter] = useState('');
+  const [sttStatus, setSttStatus] = useState('');
+  const [testingStt, setTestingStt] = useState(false);
   const [localImageGenUrl, setLocalImageGenUrl] = useState(apiConfig.imageGenerationApi?.baseUrl || '');
   const [localImageGenKey, setLocalImageGenKey] = useState(apiConfig.imageGenerationApi?.apiKey || '');
   const [localImageGenModel, setLocalImageGenModel] = useState(apiConfig.imageGenerationApi?.model || '');
@@ -922,6 +935,12 @@ const Settings: React.FC = () => {
       setLocalVisionUrl(apiConfig.visionApi?.baseUrl || '');
       setLocalVisionKey(apiConfig.visionApi?.apiKey || '');
       setLocalVisionModel(apiConfig.visionApi?.model || '');
+      setLocalSttProvider(apiConfig.speechRecognition?.provider === 'siliconflow' ? 'siliconflow' : 'browser');
+      setLocalSttUrl(apiConfig.speechRecognition?.baseUrl || memoryPalaceConfig.embedding.baseUrl || DEFAULT_SILICONFLOW_STT_URL);
+      setLocalSttKey(apiConfig.speechRecognition?.apiKey || memoryPalaceConfig.embedding.apiKey || '');
+      setLocalSttModel(apiConfig.speechRecognition?.model || DEFAULT_SILICONFLOW_STT_MODEL);
+      setLocalSttLanguage(apiConfig.speechRecognition?.language || 'zh-CN');
+      setLocalSttCleanEmoji(apiConfig.speechRecognition?.cleanEmotionEmoji !== false);
       setLocalImageGenUrl(apiConfig.imageGenerationApi?.baseUrl || '');
       setLocalImageGenKey(apiConfig.imageGenerationApi?.apiKey || '');
       setLocalImageGenModel(apiConfig.imageGenerationApi?.model || '');
@@ -945,7 +964,7 @@ const Settings: React.FC = () => {
       setLocalVoicePromptMinimax(apiConfig.voicePrompts?.minimax || '');
       setLocalVoicePromptFish(apiConfig.voicePrompts?.fishaudio || '');
       setLocalVoicePromptDate(apiConfig.voicePrompts?.dateVoice || '');
-  }, [apiConfig]);
+  }, [apiConfig, memoryPalaceConfig.embedding.baseUrl, memoryPalaceConfig.embedding.apiKey]);
 
   const selectedApiPreset = useMemo(
       () => apiPresets.find(preset => preset.id === selectedPresetId) || null,
@@ -1351,6 +1370,48 @@ const Settings: React.FC = () => {
     } finally {
       setTestingImageGenApi(false);
     }
+  };
+
+  const fetchSpeechRecognitionModels = async () => {
+    const baseUrl = normalizeApiBaseUrl(localSttUrl);
+    const apiKey = normalizeApiCredential(localSttKey);
+    if (!baseUrl || !apiKey) { setSttStatus('请先填写硅基流动连接和 Key'); return; }
+    setTestingStt(true); setSttStatus('正在获取语音识别模型…');
+    try {
+      const response = await fetch(`${baseUrl}/models`, { headers: { Authorization: `Bearer ${apiKey}` } });
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      const models = extractModelIds(await safeResponseJson(response));
+      const sttModels = models.filter(model => /sensevoice|whisper|audio|speech/i.test(model));
+      setAvailableSttModels(sttModels.length ? sttModels : models);
+      setSttStatus(`✅ 获取到 ${sttModels.length || models.length} 个模型`);
+    } catch (error: any) {
+      setSttStatus(`❌ 获取模型失败：${error?.message || '无法连接'}`);
+    } finally { setTestingStt(false); }
+  };
+
+  const handleTestSpeechRecognition = async () => {
+    if (localSttProvider === 'browser') { setSttStatus('✅ 系统网页识别无需 API，当前设备支持后即可使用'); return; }
+    setTestingStt(true); setSttStatus('正在测试硅基流动连接…');
+    try {
+      await testSiliconFlowSttConnection({ baseUrl: localSttUrl.trim(), apiKey: localSttKey.trim(), model: localSttModel.trim() });
+      setSttStatus(`✅ 连接成功，模型「${localSttModel.trim()}」可用`);
+    } catch (error: any) {
+      setSttStatus(`❌ 测试失败：${error?.message || '无法连接'}`);
+    } finally { setTestingStt(false); }
+  };
+
+  const handleSaveSpeechRecognition = () => {
+    const next = {
+      provider: localSttProvider,
+      baseUrl: normalizeApiBaseUrl(localSttUrl),
+      apiKey: normalizeApiCredential(localSttKey),
+      model: normalizeApiModel(localSttModel) || DEFAULT_SILICONFLOW_STT_MODEL,
+      language: localSttLanguage || 'zh-CN',
+      cleanEmotionEmoji: localSttCleanEmoji,
+    } as const;
+    setLocalSttUrl(next.baseUrl); setLocalSttKey(next.apiKey); setLocalSttModel(next.model);
+    updateApiConfig({ speechRecognition: next });
+    setSttStatus(`已保存：${next.provider === 'browser' ? '系统网页识别' : next.model}`);
   };
 
   const handleSaveOtherApis = () => {
@@ -3118,6 +3179,52 @@ const Settings: React.FC = () => {
                 <div className="grid grid-cols-3 gap-2 mt-2"><button type="button" onClick={() => { void testOtherApis(); }} disabled={testingOtherApis} className="w-full py-3 rounded-2xl font-bold text-amber-700 border border-amber-200 bg-amber-50 active:scale-95 transition-all disabled:opacity-50">{testingOtherApis ? '测试中…' : '测试 MiniMax'}</button><button type="button" onClick={() => { void testQwenApi(); }} disabled={testingOtherApis} className="w-full py-3 rounded-2xl font-bold text-sky-700 border border-sky-200 bg-sky-50 active:scale-95 transition-all disabled:opacity-50">{testingOtherApis ? '测试中…' : '测试 Qwen'}</button><button onClick={handleSaveOtherApis} className="w-full py-3 rounded-2xl font-bold text-white shadow-lg shadow-amber-500/20 bg-amber-500 active:scale-95 transition-all">
                     {otherStatusMsg || '保存其他 API'}
                 </button></div>
+            </div>
+        </SettingsSection>
+
+        <SettingsSection
+            title="语音识别"
+            icon={<div className="p-2 bg-emerald-100 rounded-xl text-emerald-600"><Microphone size={18} weight="fill" /></div>}
+            badge={<span className={`text-[9px] font-bold px-2 py-1 rounded-full ${localSttProvider === 'siliconflow' ? 'bg-emerald-100 text-emerald-600' : 'bg-slate-100 text-slate-500'}`}>{localSttProvider === 'siliconflow' ? '硅基流动' : '系统网页'}</span>}
+        >
+            <div className="space-y-3 py-1">
+                <p className="text-[10px] text-slate-400 leading-relaxed">视频通话的麦克风识别服务。系统网页识别不需要 Key；硅基流动模式默认沿用向量配置里的连接和 Key，也可以在这里单独修改。</p>
+                <div className="grid grid-cols-2 gap-2">
+                    {([
+                        ['browser', '系统网页识别', '浏览器自带 SpeechRecognition'],
+                        ['siliconflow', '硅基流动', 'SenseVoiceSmall 等模型'],
+                    ] as const).map(([value, title, desc]) => (
+                        <button key={value} type="button" onClick={() => setLocalSttProvider(value)} className={`text-left rounded-2xl border px-3 py-3 transition-all ${localSttProvider === value ? 'border-emerald-400 bg-emerald-50 shadow-sm' : 'border-slate-200 bg-white/60'}`}>
+                            <div className="text-xs font-bold text-slate-700">{title}</div>
+                            <div className="text-[10px] text-slate-400 mt-1">{desc}</div>
+                        </button>
+                    ))}
+                </div>
+                {localSttProvider === 'siliconflow' && <>
+                    <div>
+                        <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1.5 block pl-1">连接</label>
+                        <input type="text" value={localSttUrl} onChange={e => { setLocalSttUrl(e.target.value); setSttStatus(''); }} placeholder={DEFAULT_SILICONFLOW_STT_URL} className="w-full bg-white/60 border border-slate-200/60 rounded-xl px-4 py-2.5 text-sm font-mono focus:bg-white transition-all" />
+                    </div>
+                    <div>
+                        <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1.5 block pl-1">秘钥</label>
+                        <input type="password" value={localSttKey} onChange={e => { setLocalSttKey(e.target.value); setSttStatus(''); }} placeholder="sk-..." className="w-full bg-white/60 border border-slate-200/60 rounded-xl px-4 py-2.5 text-sm font-mono focus:bg-white transition-all" />
+                    </div>
+                    <div>
+                        <div className="flex items-center justify-between mb-1.5"><label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest pl-1">模型</label><button type="button" onClick={() => { void fetchSpeechRecognitionModels(); }} disabled={testingStt} className="text-[10px] text-emerald-600 font-bold disabled:text-slate-300">刷新模型列表</button></div>
+                        {availableSttModels.length > 0 && <div className="flex gap-2 mb-2"><input value={sttModelFilter} onChange={e => setSttModelFilter(e.target.value)} placeholder="搜索模型" className="min-w-0 flex-1 bg-white/60 border border-slate-200/60 rounded-xl px-3 py-2 text-xs" /><select value={localSttModel} onChange={e => setLocalSttModel(e.target.value)} className="min-w-0 flex-1 bg-white/60 border border-slate-200/60 rounded-xl px-3 py-2 text-xs"><option value="">选择模型</option>{availableSttModels.filter(model => !sttModelFilter.trim() || model.toLowerCase().includes(sttModelFilter.trim().toLowerCase())).map(model => <option key={model} value={model}>{model}</option>)}</select></div>}
+                        <input list="speech-recognition-models" type="text" value={localSttModel} onChange={e => { setLocalSttModel(e.target.value); setSttStatus(''); }} placeholder={DEFAULT_SILICONFLOW_STT_MODEL} className="w-full bg-white/60 border border-slate-200/60 rounded-xl px-4 py-2.5 text-sm font-mono focus:bg-white transition-all" />
+                        <datalist id="speech-recognition-models">{availableSttModels.map(model => <option key={model} value={model} />)}</datalist>
+                    </div>
+                </>}
+                <div>
+                    <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1.5 block pl-1">语言</label>
+                    <select value={localSttLanguage} onChange={e => setLocalSttLanguage(e.target.value)} className="w-full bg-white/60 border border-slate-200/60 rounded-xl px-4 py-2.5 text-sm focus:bg-white transition-all">
+                        <option value="zh-CN">中文（简体）</option><option value="zh-TW">中文（繁体）</option><option value="en-US">English</option><option value="ja-JP">日本語</option><option value="ko-KR">한국어</option><option value="auto">自动识别</option>
+                    </select>
+                </div>
+                {localSttProvider === 'siliconflow' && <label className="flex items-center gap-3 rounded-xl border border-emerald-100 bg-emerald-50/60 px-3 py-3 cursor-pointer"><span className="flex-1"><span className="block text-xs font-bold text-slate-700">清理自动情绪 emoji</span><span className="block text-[10px] text-slate-400 mt-1">去掉 SenseVoice 追加在识别文字末尾的情绪表情。</span></span><input type="checkbox" checked={localSttCleanEmoji} onChange={e => setLocalSttCleanEmoji(e.target.checked)} className="sr-only peer" /><span className="w-10 h-6 bg-slate-200 rounded-full relative transition-colors peer-checked:bg-emerald-500 after:content-[''] after:absolute after:w-4 after:h-4 after:bg-white after:rounded-full after:left-1 after:top-1 after:transition-transform peer-checked:after:translate-x-4" /></label>}
+                <div className="grid grid-cols-2 gap-2"><button type="button" onClick={() => { void handleTestSpeechRecognition(); }} disabled={testingStt} className="py-3 rounded-2xl font-bold text-emerald-700 border border-emerald-200 bg-emerald-50 active:scale-95 transition-all disabled:opacity-50">{testingStt ? '测试中…' : '测试连接'}</button><button type="button" onClick={handleSaveSpeechRecognition} className="py-3 rounded-2xl font-bold text-white bg-emerald-500 shadow-lg shadow-emerald-500/20 active:scale-95 transition-all">保存语音识别</button></div>
+                {sttStatus && <div className={`text-[11px] text-center px-3 py-2 rounded-xl ${sttStatus.startsWith('✅') || sttStatus.startsWith('已保存') ? 'bg-emerald-50 text-emerald-700' : sttStatus.startsWith('❌') ? 'bg-rose-50 text-rose-600' : 'bg-slate-100 text-slate-500'}`}>{sttStatus}</div>}
             </div>
         </SettingsSection>
 

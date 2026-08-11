@@ -701,6 +701,10 @@ const ChatInputArea: React.FC<ChatInputAreaProps> = ({
                                     white-space: nowrap;
                                 }
                                 .sully-action-popover .sully-action-list > button::after { content: '›'; margin-left: auto; color: #8e8e93; font-size: 16px; line-height: 1; }
+                                .sully-action-popover .sully-action-list + .sully-action-list {
+                                    border-top: 1px solid rgba(60, 60, 67, 0.10);
+                                    padding-top: 0 !important;
+                                }
                             `}</style>
                             <div className="flex shrink-0 items-center justify-between border-b border-black/[0.07] px-3 py-2">
                                 <span className="text-[11px] font-semibold text-[#1c1c1e]">快捷功能</span>
