@@ -145,6 +145,11 @@ const CALL_SETUP_GUIDE_KEY = 'sully-call-setup-guide-v2';
 const DIRECT_VIDEO_CALL_INTENT_KEY = 'sully-call-direct-video-intent-v1';
 const VIDEO_CALL_DEFAULT_CAMERA_KEY = 'sully-call-default-camera-v1';
 const STT_SILENCE_SECONDS_KEY = 'sully-call-stt-silence-seconds-v1';
+const BUILTIN_SLEEP_NOISES = [
+  // 相对路径兼容 GitHub Pages 的仓库子路径（/SullyOS888/）。
+  { id: 'builtin-sleep', name: '深度睡眠引导', audioUrl: './audio/sleep-guidance.mp3', mimeType: 'audio/mpeg' },
+  { id: 'builtin-healing', name: '肝经疏解疗愈', audioUrl: './audio/liver-relaxation.mp3', mimeType: 'audio/mpeg' },
+] as const;
 const VIDEO_CALL_LAYOUTS: Array<{ id: VideoCallLayout; name: string; hint: string }> = [
   { id: 'stage', name: '沉浸', hint: '角色最大，聊天收成字幕' },
   { id: 'story', name: '剧情', hint: '角色与完整对话均衡展示' },
@@ -519,7 +524,7 @@ ${getVoicePromptOverride(getTtsProvider()) ?? (getTtsProvider() === 'fishaudio' 
   return [coreContext, timeContext, callPrompt, voiceLangPrompt].filter(Boolean).join('\n\n');
 };
 const CallApp: React.FC = () => {
-  const { closeApp, openApp, characters, activeCharacterId, setActiveCharacterId, addToast, apiConfig, userProfile, customThemes, suspendCall, suspendedCall, clearSuspendedCall, updateCharacter, characterGroups, groups, realtimeConfig, memoryPalaceConfig } = useOS();
+  const { closeApp, openApp, characters, activeCharacterId, setActiveCharacterId, addToast, apiConfig, userProfile, customThemes, suspendCall, suspendedCall, clearSuspendedCall, updateCharacter, characterGroups, groups, realtimeConfig, memoryPalaceConfig, isDataLoaded } = useOS();
 
   const [viewMode, setViewMode] = useState<ViewMode>('role-select');
   const [selectedCharId, setSelectedCharId] = useState<string>(activeCharacterId || characters[0]?.id || '');
@@ -841,8 +846,18 @@ const CallApp: React.FC = () => {
   // VRM 模型的自定义表情名（加载时由画布回传），喂给基础版主模型或高质量导演。
   const vrmExpressionsRef = useRef<string[]>([]);
   const selectedChar = useMemo(() => characters.find(c => c.id === selectedCharId) || null, [characters, selectedCharId]);
-  const selectedSleepNoise = selectedChar?.callSettings?.customSleepNoises?.find(item => item.id === selectedChar.callSettings?.sleepNoiseId);
-  const selectedSleepNoiseUrl = useBlobRefUrl(selectedSleepNoise?.audioRef);
+  const selectedSleepNoiseId = selectedChar?.callSettings?.sleepNoiseId;
+  const selectedSleepNoise = selectedSleepNoiseId
+    ? BUILTIN_SLEEP_NOISES.find(item => item.id === selectedSleepNoiseId)
+      || selectedChar?.callSettings?.customSleepNoises?.find(item => item.id === selectedSleepNoiseId)
+    : undefined;
+  const selectedSleepNoiseUrl = useBlobRefUrl(
+    selectedSleepNoise && 'audioRef' in selectedSleepNoise ? selectedSleepNoise.audioRef : undefined,
+    selectedSleepNoise && 'mimeType' in selectedSleepNoise ? selectedSleepNoise.mimeType : undefined,
+  );
+  const selectedSleepAudioUrl = selectedSleepNoise && 'audioUrl' in selectedSleepNoise
+    ? selectedSleepNoise.audioUrl
+    : selectedSleepNoiseUrl;
   const stopSleepMode = () => {
     if (callHangupTimerRef.current) clearTimeout(callHangupTimerRef.current);
     if (sleepNoiseTimerRef.current) clearTimeout(sleepNoiseTimerRef.current);
@@ -854,7 +869,6 @@ const CallApp: React.FC = () => {
       previousAudio.currentTime = 0;
       previousAudio.removeAttribute('src');
       previousAudio.load();
-      previousAudio.parentElement?.removeChild(previousAudio);
     }
     sleepAudioRef.current = null;
     setSleepNoiseState('idle');
@@ -867,37 +881,25 @@ const CallApp: React.FC = () => {
       setSleepNoiseError('');
       return false;
     }
-    if (!selectedSleepNoise || !selectedSleepNoiseUrl) {
+    if (!selectedSleepNoise || !selectedSleepAudioUrl) {
       setSleepNoiseState('error');
       setSleepNoiseError('音频还在读取，等一两秒后点“重新播放”即可。');
       return false;
     }
 
-    const previousAudio = sleepAudioRef.current;
-    previousAudio?.pause();
-    previousAudio?.parentElement?.removeChild(previousAudio);
-    const audio = new Audio();
-    // 移动浏览器对动态创建的音频元素更严格：明确声明内联播放，避免它被
-    // 当成需要跳转到系统播放器的媒体；音频播放仍在用户点击的调用栈中发起。
-    audio.setAttribute('playsinline', 'true');
-    audio.setAttribute('webkit-playsinline', 'true');
-    audio.autoplay = false;
-    // 不使用 display:none：部分 Android WebView 会把完全隐藏的媒体元素静音。
-    Object.assign(audio.style, {
-      position: 'fixed',
-      width: '1px',
-      height: '1px',
-      opacity: '0.01',
-      pointerEvents: 'none',
-      left: '-2px',
-      bottom: '-2px',
-    });
-    document.body.appendChild(audio);
+    // 使用页面中真实存在的 audio 元素。Edge 手机版会拦截“动态创建且完全隐藏”的
+    // 音频，即使 play() 返回成功也可能没有扬声器输出；真实播放器可以由用户直接点播放。
+    const audio = sleepAudioRef.current;
+    if (!audio) {
+      setSleepNoiseState('error');
+      setSleepNoiseError('播放器还没准备好，请关闭陪睡面板后重新打开。');
+      return false;
+    }
+    audio.pause();
     audio.preload = 'auto';
     audio.loop = true;
     audio.volume = 0.72;
-    audio.src = selectedSleepNoiseUrl;
-    sleepAudioRef.current = audio;
+    audio.src = selectedSleepAudioUrl;
     setSleepNoiseState('loading');
     setSleepNoiseError('');
 
@@ -910,13 +912,13 @@ const CallApp: React.FC = () => {
     const explainFailure = () => {
       if (sleepAudioRef.current !== audio || playbackStarted) return;
       setSleepNoiseState('error');
-      setSleepNoiseError('这条音频无法在当前浏览器播放，请重新上传 MP3、M4A 或 WAV 格式的文件。');
+      setSleepNoiseError('浏览器拦截了自动播放，请直接点下面播放器的播放键。');
     };
     const tryPlay = () => {
       void audio.play().then(markPlaying).catch(() => {
         // 手机上的 object URL 偶尔会在音频还没读完时拒绝第一次播放；等可播放后再补一次。
-        if (audio.readyState < HTMLMediaElement.HAVE_FUTURE_DATA) return;
-        explainFailure();
+          if (audio.readyState < HTMLMediaElement.HAVE_FUTURE_DATA) return;
+          explainFailure();
       });
     };
     audio.oncanplay = () => {
@@ -955,7 +957,6 @@ const CallApp: React.FC = () => {
           audio.currentTime = 0;
           audio.removeAttribute('src');
           audio.load();
-          audio.parentElement?.removeChild(audio);
         }
         sleepAudioRef.current = null;
         addToast('白噪音时间到了，通话仍在继续', 'info');
@@ -978,13 +979,17 @@ const CallApp: React.FC = () => {
       const intent = JSON.parse(raw) as { charId?: string; at?: number; returnTo?: string };
       // 手机端 IndexedDB 角色资料通常比桌面端晚一拍加载。不要在 characters=[]
       // 时先删掉跳转标记，否则后续资料加载完成也无法自动接通视频。
-      if (!intent.charId || characters.length === 0) return;
+      if (!intent.charId || characters.length === 0 || !isDataLoaded) return;
       const target = characters.find(character => character.id === intent.charId);
       if (!target) {
         localStorage.removeItem(DIRECT_VIDEO_CALL_INTENT_KEY);
         return;
       }
-      if (intent.at && Date.now() - intent.at > 30_000) return;
+      // 移动端首次打开时 IndexedDB 可能需要几十秒；不要因为加载慢而丢掉直达通话标记。
+      if (intent.at && Date.now() - intent.at > 10 * 60_000) {
+        localStorage.removeItem(DIRECT_VIDEO_CALL_INTENT_KEY);
+        return;
+      }
       localStorage.removeItem(DIRECT_VIDEO_CALL_INTENT_KEY);
       if (target && (!target.companionAvatar?.source || target.companionAvatar.source === 'model') && (target.companionAvatar?.imageRef || target.avatar)) {
         updateCharacter(target.id, { companionAvatar: { ...target.companionAvatar, version: 1, source: 'upload', imageRef: target.companionAvatar?.imageRef || target.avatar } });
@@ -994,7 +999,7 @@ const CallApp: React.FC = () => {
       setCallMode('video');
       setDirectVideoPendingId(intent.charId);
     } catch { /* private WebView or malformed intent */ }
-  }, [characters]);
+  }, [characters, isDataLoaded]);
   const selectedVisualSource = companionAvatarSource(selectedChar);
   const selectedDateOutfits = useMemo(() => listCompanionDateOutfits(selectedChar), [selectedChar]);
   const selectedDateOutfitId = normalizeCompanionSkinSetId(selectedChar?.companionAvatar?.skinSetId);
@@ -3746,6 +3751,24 @@ ${sentencePlan}`;
         </div>
       </div>
       <audio
+        ref={sleepAudioRef}
+        src={(showSleepMode || sleeping) ? (selectedSleepAudioUrl || undefined) : undefined}
+        preload="metadata"
+        loop
+        playsInline
+        controls
+        aria-label="白噪音播放器"
+        className={showSleepMode && selectedSleepAudioUrl
+          ? 'mx-5 mb-2 h-9 w-[calc(100%-2.5rem)] rounded-lg opacity-90'
+          : 'pointer-events-none fixed bottom-0 left-0 h-px w-px opacity-0'}
+        onPlay={() => { setSleepNoiseState('playing'); setSleepNoiseError(''); }}
+        onPause={() => { if (sleeping) setSleepNoiseState('idle'); }}
+        onError={() => {
+          setSleepNoiseState('error');
+          setSleepNoiseError('这条音频无法在当前浏览器播放，请直接点播放器播放键或重新上传音频。');
+        }}
+      />
+      <audio
         ref={audioRef}
         src={audioUrl}
         muted={!isSpeakerOn}
@@ -3791,9 +3814,10 @@ ${sentencePlan}`;
             <div className="mt-5 flex items-start justify-between gap-3"><span className="shrink-0 pt-1 text-sm font-semibold text-white">定时结束</span><div className="flex flex-wrap justify-end gap-1.5">{[0, 30, 60, 120, 480].map(minutes => <button key={minutes} type="button" onClick={() => setCallHangupDurationMinutes(minutes)} className={`rounded-full border px-2.5 py-1.5 text-[11px] font-medium ${callHangupDurationMinutes === minutes ? 'border-fuchsia-300 bg-fuchsia-500/35 text-white' : 'border-white/25 bg-white/[.06] text-white/85'}`}>{minutes === 0 ? '不自动挂断' : minutes < 60 ? `${minutes} 分钟` : `${minutes / 60} 小时`}</button>)}</div></div>
             <div className="mt-5 border-t border-white/20 pt-4"><div className="flex items-start justify-between gap-3"><span className="shrink-0 text-sm font-semibold text-white">🎵 白噪音陪伴</span><span className="text-right text-[11px] leading-4 text-white/70">在聊天设置里上传和管理</span></div>
               <div className="mt-3 flex items-start justify-between gap-3"><span className="shrink-0 pt-1 text-xs font-medium text-white/85">白噪音时长</span><div className="flex flex-wrap justify-end gap-1.5">{[0, 30, 60, 120, 480].map(minutes => <button key={minutes} type="button" onClick={() => setSleepNoiseDurationMinutes(minutes)} className={`rounded-full border px-2.5 py-1.5 text-[11px] font-medium ${sleepNoiseDurationMinutes === minutes ? 'border-fuchsia-300 bg-fuchsia-500/35 text-white' : 'border-white/25 bg-white/[.06] text-white/85'}`}>{minutes === 0 ? '一直循环' : minutes < 60 ? `${minutes} 分钟` : `${minutes / 60} 小时`}</button>)}</div></div>
-              <div className="mt-4 flex flex-wrap gap-2">{['none', 'ocean', 'book', 'night', 'market', 'birds'].map(id => { const label = id === 'none' ? '无' : id === 'ocean' ? '海浪' : id === 'book' ? '翻书' : id === 'night' ? '夜晚' : id === 'market' ? '市场' : '鸟叫'; const custom = selectedChar?.callSettings?.customSleepNoises?.find(item => item.id === id); const active = selectedChar?.callSettings?.sleepNoiseId === id || (!selectedChar?.callSettings?.sleepNoiseId && id === 'none'); return <button key={id} type="button" disabled={id !== 'none' && !custom} onClick={() => selectedChar && updateCharacter(selectedChar.id, { callSettings: { ...selectedChar.callSettings, sleepNoiseId: id } })} className={`rounded-full border px-3 py-2 text-xs font-medium ${active ? 'border-fuchsia-300 bg-fuchsia-500/35 text-white' : 'border-white/25 bg-white/[.06] text-white/80'} disabled:opacity-45`}>{custom?.name || label}{id !== 'none' && !custom ? '（待添加）' : ''}</button>; })}</div>
+              <div className="mt-4 flex flex-wrap gap-2">{['none', ...BUILTIN_SLEEP_NOISES.map(item => item.id), 'ocean', 'book', 'night', 'market', 'birds'].map(id => { const builtin = BUILTIN_SLEEP_NOISES.find(item => item.id === id); const label = id === 'none' ? '无' : builtin?.name || ({ ocean: '海浪', book: '翻书', night: '夜晚', market: '市场', birds: '鸟叫' } as Record<string, string>)[id] || '自定义'; const custom = selectedChar?.callSettings?.customSleepNoises?.find(item => item.id === id); const available = id === 'none' || Boolean(builtin) || Boolean(custom); const active = selectedChar?.callSettings?.sleepNoiseId === id || (!selectedChar?.callSettings?.sleepNoiseId && id === 'none'); return <button key={id} type="button" disabled={!available} onClick={() => selectedChar && updateCharacter(selectedChar.id, { callSettings: { ...selectedChar.callSettings, sleepNoiseId: id } })} className={`rounded-full border px-3 py-2 text-xs font-medium ${active ? 'border-fuchsia-300 bg-fuchsia-500/35 text-white' : 'border-white/25 bg-white/[.06] text-white/80'} disabled:opacity-45`}>{builtin?.name || custom?.name || label}{!available ? '（待添加）' : ''}</button>; })}</div>
               {!!selectedChar?.callSettings?.customSleepNoises?.length && <div className="mt-3 space-y-2">{selectedChar.callSettings.customSleepNoises.map(item => <button key={item.id} type="button" onClick={() => updateCharacter(selectedChar.id, { callSettings: { ...selectedChar.callSettings, sleepNoiseId: item.id } })} className={`block w-full rounded-xl border px-3 py-2 text-left text-xs font-medium leading-5 ${selectedChar.callSettings?.sleepNoiseId === item.id ? 'border-fuchsia-300 bg-fuchsia-500/35 text-white' : 'border-white/25 bg-white/[.06] text-white/85'}`}>{item.name}</button>)}</div>}
               {selectedSleepNoise && <div className={`mt-3 rounded-xl border px-3 py-2 text-[11px] leading-5 ${sleepNoiseState === 'error' ? 'border-rose-300/70 bg-rose-500/15 text-white' : 'border-white/20 bg-black/20 text-white/80'}`}><span className="font-semibold text-white">当前音频：{selectedSleepNoise.name}</span><br />{sleepNoiseState === 'playing' ? '正在循环播放' : sleepNoiseState === 'loading' ? '正在加载音频…' : sleepNoiseState === 'error' ? sleepNoiseError : '点击开始陪睡后播放'}</div>}
+              {selectedSleepAudioUrl && <p className="mt-2 text-[10px] leading-4 text-white/55">Edge 手机上如果自动播放被拦截，请直接点上方播放器的播放键；点一次即可持续循环。</p>}
               {sleeping && selectedSleepNoise && <button type="button" onClick={playSelectedSleepNoise} className="mt-3 w-full rounded-xl border border-white/30 bg-white/[.1] py-2.5 text-xs font-semibold text-white active:scale-[.98]">重新播放白噪音</button>}
             </div>
             <button type="button" onClick={sleeping ? stopSleepMode : startSleepMode} className={`mt-5 w-full rounded-2xl py-3.5 text-sm font-semibold ${sleeping ? 'border border-white/30 bg-white/[.1] text-white' : 'bg-fuchsia-500 text-white shadow-lg shadow-fuchsia-500/30'}`}>{sleeping ? '停止陪睡' : '开始陪睡'}</button>

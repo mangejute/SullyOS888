@@ -243,7 +243,7 @@ export async function resolveBlobRefsDeep(root: unknown): Promise<void> {
  *   · 其它（data: / http(s) / 渐变 / undefined）→ 原样返回。
  * 令牌解析前返回 undefined（首帧可能无图，等 Blob 读出后再渲染，属预期）。
  */
-export function useBlobRefUrl(value: string | undefined | null): string | undefined {
+export function useBlobRefUrl(value: string | undefined | null, mimeType?: string): string | undefined {
     const [url, setUrl] = useState<string | undefined>(
         isBlobRef(value) ? undefined : (value ?? undefined)
     );
@@ -258,7 +258,10 @@ export function useBlobRefUrl(value: string | undefined | null): string | undefi
         getBlobForRef(value).then(blob => {
             if (!alive) return;
             if (blob) {
-                objUrl = URL.createObjectURL(blob);
+                // Older uploads may have been stored without a MIME type. Re-wrap them
+                // with the saved/inferred type so Android can choose its MP3 decoder.
+                const typedBlob = mimeType && blob.type !== mimeType ? new Blob([blob], { type: mimeType }) : blob;
+                objUrl = URL.createObjectURL(typedBlob);
                 setUrl(objUrl);
             } else {
                 setUrl(undefined);
@@ -268,7 +271,7 @@ export function useBlobRefUrl(value: string | undefined | null): string | undefi
             alive = false;
             if (objUrl) URL.revokeObjectURL(objUrl);
         };
-    }, [value]);
+    }, [value, mimeType]);
 
     return url;
 }

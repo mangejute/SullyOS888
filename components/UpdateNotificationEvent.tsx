@@ -61,6 +61,19 @@ const markUpdateSeen = (key: string): void => {
     } catch { /* storage 不可用时不阻断按钮行为 */ }
 };
 
+// 存储空间已满时不能可靠记录“已读”。这时不应继续弹出全屏更新卡片遮住整个手机，
+// 让用户先正常使用；下次空间可用时再按正常逻辑显示。
+const canWriteUpdateMarker = (): boolean => {
+    try {
+        const probe = '__sully_update_marker_probe__';
+        localStorage.setItem(probe, '1');
+        localStorage.removeItem(probe);
+        return true;
+    } catch {
+        return false;
+    }
+};
+
 interface UpdatePopupProps {
     /** 这条用户自己关掉了 —— 接着弹队列里的下一条。 */
     onDone: () => void;
@@ -393,7 +406,7 @@ const UPDATE_QUEUE: { key: string; render: (props: UpdatePopupProps) => React.Re
     { key: UPDATE_NOTIFICATION_KEY_2026_08_02, render: (props) => <StoryPremierePopup {...props} /> },
 ];
 
-export const shouldShowUpdateNotification = (): boolean => UPDATE_QUEUE.some((entry) => !isUpdateSeen(entry.key));
+export const shouldShowUpdateNotification = (): boolean => canWriteUpdateMarker() && UPDATE_QUEUE.some((entry) => !isUpdateSeen(entry.key));
 
 interface UpdateNotificationControllerProps {
     onClose: () => void;
