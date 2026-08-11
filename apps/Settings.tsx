@@ -15,7 +15,7 @@ import { getLuckinToken, setLuckinToken as saveLuckinToken, isLuckinEnabled, set
 import { getProxyWorkerUrl, setProxyWorkerUrl, DEFAULT_PROXY_WORKER } from '../utils/proxyWorker';
 import { VOICE_ACTING_GUIDE } from '../utils/minimaxTts';
 import { FISH_VOICE_ACTING_GUIDE } from '../utils/fishAudioTts';
-import { QWEN_VOICE_ACTING_GUIDE, testQwenTtsConnection } from '../utils/qwenTts';
+import { getQwenTtsVoices, previewQwenTtsVoice, QWEN_TTS_MODELS, QWEN_VOICE_ACTING_GUIDE, testQwenTtsConnection } from '../utils/qwenTts';
 import { DATE_VOICE_GUIDE } from '../utils/datePrompts';
 import { Sun, Newspaper, NotePencil, Notebook, Book, ForkKnife, Coffee, PlugsConnected, Bell, SpeakerHigh, Sparkle, LockKey, ChatCircleDots } from '@phosphor-icons/react';
 import { loadMcpServers, saveMcpServers, createMcpServer, testMcpConnection, resetMcpSession, getMcpUseNativeTools, setMcpUseNativeTools, type McpServerConfig } from '../utils/mcpClient';
@@ -513,6 +513,10 @@ const Settings: React.FC = () => {
   const [localQwenVoice, setLocalQwenVoice] = useState(apiConfig.qwenTtsVoice || 'longanlingxi');
   const [localQwenFormat, setLocalQwenFormat] = useState<'mp3' | 'wav' | 'pcm' | 'opus'>(apiConfig.qwenTtsAudioFormat || 'mp3');
   const [localQwenEndpoint, setLocalQwenEndpoint] = useState(apiConfig.qwenTtsEndpoint || '');
+  const [showCustomQwenVoice, setShowCustomQwenVoice] = useState(false);
+  const [qwenPreviewingVoice, setQwenPreviewingVoice] = useState<string | null>(null);
+  const qwenPreviewAudioRef = useRef<HTMLAudioElement | null>(null);
+  const qwenPreviewUrlRef = useRef<string | null>(null);
   // 自定义语音表演指南（留空 → 用内置默认）。按服务商分两份。
   const [localVoicePromptMinimax, setLocalVoicePromptMinimax] = useState(apiConfig.voicePrompts?.minimax || '');
   const [localVoicePromptFish, setLocalVoicePromptFish] = useState(apiConfig.voicePrompts?.fishaudio || '');
@@ -530,6 +534,19 @@ const Settings: React.FC = () => {
   const [selectedPresetName, setSelectedPresetName] = useState('');
   const [holdingDeletePresetId, setHoldingDeletePresetId] = useState<string | null>(null);
   const presetDeleteTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const qwenVoiceOptions = useMemo(() => getQwenTtsVoices(localQwenModel), [localQwenModel]);
+  const qwenModelOptions = useMemo(() => {
+    const known = QWEN_TTS_MODELS.some(option => option.id === localQwenModel);
+    return known || !localQwenModel.trim()
+      ? QWEN_TTS_MODELS
+      : [{ id: localQwenModel, name: `${localQwenModel}（自定义）`, description: '当前保存的自定义模型' }, ...QWEN_TTS_MODELS];
+  }, [localQwenModel]);
+
+  useEffect(() => () => {
+    qwenPreviewAudioRef.current?.pause();
+    if (qwenPreviewUrlRef.current) URL.revokeObjectURL(qwenPreviewUrlRef.current);
+  }, []);
   
   // UI States
   const [showModelModal, setShowModelModal] = useState(false);
@@ -1224,6 +1241,44 @@ const Settings: React.FC = () => {
     } catch (error: any) {
       setOtherStatusMsg(`❌ Qwen 测试失败：${error?.message || '无法连接'}`);
     } finally { setTestingOtherApis(false); }
+  };
+
+  const previewQwenVoice = async (voice: string) => {
+    if (!localQwenKey.trim() || !localQwenWorkspace.trim()) {
+      addToast('请先填写 Qwen API Key 和 Workspace ID', 'error');
+      return;
+    }
+    qwenPreviewAudioRef.current?.pause();
+    if (qwenPreviewUrlRef.current) URL.revokeObjectURL(qwenPreviewUrlRef.current);
+    setQwenPreviewingVoice(voice);
+    try {
+      const { url } = await previewQwenTtsVoice({
+        ...apiConfig,
+        qwenTtsApiKey: localQwenKey.trim(), qwenTtsWorkspaceId: localQwenWorkspace.trim(), qwenTtsRegion: localQwenRegion,
+        qwenTtsModel: localQwenModel.trim(), qwenTtsVoice: voice, qwenTtsAudioFormat: localQwenFormat, qwenTtsEndpoint: localQwenEndpoint.trim() || undefined,
+      }, voice);
+      const audio = new Audio(url);
+      qwenPreviewAudioRef.current = audio;
+      qwenPreviewUrlRef.current = url;
+      audio.onended = () => {
+        if (qwenPreviewUrlRef.current === url) qwenPreviewUrlRef.current = null;
+        URL.revokeObjectURL(url);
+        setQwenPreviewingVoice(null);
+      };
+      await audio.play();
+    } catch (error: any) {
+      addToast(`试听失败：${error?.message || '未知错误'}`, 'error');
+      setQwenPreviewingVoice(null);
+    }
+  };
+
+  const selectQwenModel = (model: string) => {
+    setLocalQwenModel(model);
+    const voices = getQwenTtsVoices(model);
+    if (voices.length && !voices.some(voice => voice.id === localQwenVoice)) {
+      setLocalQwenVoice(voices[0].id);
+      setShowCustomQwenVoice(false);
+    }
   };
 
   const handleSaveImageGenerationApi = () => {
@@ -2810,8 +2865,33 @@ const Settings: React.FC = () => {
                             <option value="mp3">MP3</option><option value="wav">WAV</option><option value="pcm">PCM（自动封装 WAV）</option><option value="opus">Opus</option>
                         </select>
                     </div>
-                    <input type="text" value={localQwenModel} onChange={e => setLocalQwenModel(e.target.value)} placeholder="模型，例如 qwen-audio-3.0-tts-flash" className="w-full mt-2 bg-white/70 border border-slate-200/60 rounded-xl px-4 py-2.5 text-sm font-mono focus:bg-white transition-all" />
-                    <input type="text" value={localQwenVoice} onChange={e => setLocalQwenVoice(e.target.value)} placeholder="音色，例如 longanlingxi" className="w-full mt-2 bg-white/70 border border-slate-200/60 rounded-xl px-4 py-2.5 text-sm font-mono focus:bg-white transition-all" />
+                    <div className="mt-2">
+                        <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1 block pl-1">模型</label>
+                        <select value={localQwenModel} onChange={e => selectQwenModel(e.target.value)} className="w-full bg-white/70 border border-slate-200/60 rounded-xl px-3 py-2.5 text-sm focus:bg-white transition-all">
+                            {qwenModelOptions.map(option => <option key={option.id} value={option.id}>{option.name} · {option.description}</option>)}
+                        </select>
+                    </div>
+                    <div className="mt-2">
+                        <div className="flex items-center justify-between gap-2 mb-1 pl-1">
+                            <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">音色</label>
+                            <span className="text-[10px] text-slate-400">随模型自动筛选</span>
+                        </div>
+                        <div className="flex gap-2">
+                            <select value={showCustomQwenVoice ? '__custom__' : localQwenVoice} onChange={e => {
+                                if (e.target.value === '__custom__') { setShowCustomQwenVoice(true); return; }
+                                setShowCustomQwenVoice(false); setLocalQwenVoice(e.target.value);
+                            }} className="min-w-0 flex-1 bg-white/70 border border-slate-200/60 rounded-xl px-3 py-2.5 text-sm focus:bg-white transition-all">
+                                {!qwenVoiceOptions.some(voice => voice.id === localQwenVoice) && !showCustomQwenVoice && <option value={localQwenVoice}>{localQwenVoice}（自定义）</option>}
+                                {qwenVoiceOptions.map(voice => <option key={voice.id} value={voice.id}>{voice.name} · {voice.description}</option>)}
+                                <option value="__custom__">自定义 / 复刻音色…</option>
+                            </select>
+                            <button type="button" onClick={() => { void previewQwenVoice(localQwenVoice); }} disabled={qwenPreviewingVoice !== null || !localQwenVoice.trim()} className="shrink-0 rounded-xl border border-sky-200 bg-sky-50 px-3 text-xs font-bold text-sky-700 active:scale-95 disabled:opacity-50">
+                                {qwenPreviewingVoice === localQwenVoice ? '试听中…' : '试听'}
+                            </button>
+                        </div>
+                        {showCustomQwenVoice && <input type="text" value={localQwenVoice} onChange={e => setLocalQwenVoice(e.target.value)} placeholder="填写你的复刻音色 ID" className="w-full mt-2 bg-white/70 border border-slate-200/60 rounded-xl px-4 py-2.5 text-sm font-mono focus:bg-white transition-all" />}
+                        {qwenVoiceOptions.find(voice => voice.id === localQwenVoice) && <p className="text-[11px] text-slate-400 mt-1 pl-1">{qwenVoiceOptions.find(voice => voice.id === localQwenVoice)?.description}</p>}
+                    </div>
                     <input type="text" value={localQwenEndpoint} onChange={e => setLocalQwenEndpoint(e.target.value)} placeholder="自建 WebSocket 中转地址（可选，留空用项目 Worker）" className="w-full mt-2 bg-white/70 border border-slate-200/60 rounded-xl px-4 py-2.5 text-xs font-mono focus:bg-white transition-all" />
                     <p className="text-[11px] text-slate-400 mt-1 pl-1 leading-relaxed">浏览器不能直接给 WebSocket 加鉴权请求头，留空会使用项目 Worker 转发到阿里云。Worker 只转发，不保存你的 Key。</p>
                 </div>

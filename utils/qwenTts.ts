@@ -18,6 +18,54 @@ const WS_TIMEOUT_MS = 45_000;
 
 export const QWEN_VOICE_ACTING_GUIDE = '语音台词请直接输出自然、口语化的正文，不要输出 [emotion]、<#...#> 或其它语音控制标记。';
 
+export type QwenTtsModelOption = { id: string; name: string; description: string };
+export type QwenTtsVoiceOption = { id: string; name: string; description: string; modelIds: string[] };
+
+// 阿里云文档没有提供可直接从浏览器拉取的稳定「音色列表」接口，因此维护官方系统音色
+// 目录；选择模型后只展示该模型可用的音色。复刻/自定义音色仍可在设置里手动填写。
+export const QWEN_TTS_MODELS: QwenTtsModelOption[] = [
+  { id: 'qwen-audio-3.0-tts-flash', name: 'Qwen Audio TTS Flash', description: '速度快，适合聊天和日常陪伴' },
+  { id: 'qwen-audio-3.0-tts-plus', name: 'Qwen Audio TTS Plus', description: '旗舰音色，表现更细腻' },
+  { id: 'cosyvoice-v3-flash', name: 'CosyVoice V3 Flash', description: '中文、方言与多语种音色丰富' },
+  { id: 'cosyvoice-v3-plus', name: 'CosyVoice V3 Plus', description: '高质量社交陪伴音色' },
+  { id: 'cosyvoice-v2', name: 'CosyVoice V2', description: '兼容型号' },
+];
+
+export const QWEN_TTS_VOICES: QwenTtsVoiceOption[] = [
+  { id: 'longanlingxi', name: '龙安灵希', description: '可爱甜美女声 · 中文/英文', modelIds: ['qwen-audio-3.0-tts-flash'] },
+  { id: 'longanfengyue', name: '龙安风悦', description: '自然亲切女声 · 中文/英文', modelIds: ['qwen-audio-3.0-tts-flash'] },
+  { id: 'longanyuanfei', name: '龙安元妃', description: '高傲妃子音 · 中文/英文', modelIds: ['qwen-audio-3.0-tts-flash'] },
+  { id: 'longanxiaoxin', name: '龙安小昕', description: '亲切活泼女声 · 中文/英文', modelIds: ['qwen-audio-3.0-tts-flash'] },
+  { id: 'longanhuan_v3.6', name: '龙安欢', description: '欢脱元气女声 · 中文/英文', modelIds: ['qwen-audio-3.0-tts-flash'] },
+  { id: 'longjielidou_v3.6', name: '龙杰力豆', description: '天真男童 · 中文/英文', modelIds: ['qwen-audio-3.0-tts-flash'] },
+  { id: 'longpaopao_v3.6', name: '龙泡泡', description: '软糯女童 · 中文/英文', modelIds: ['qwen-audio-3.0-tts-flash'] },
+  { id: 'longhuohuo_v3.6', name: '龙火火', description: '顽皮少年音 · 中文/英文', modelIds: ['qwen-audio-3.0-tts-flash'] },
+  { id: 'longchuanshu_v3.6', name: '龙川叔', description: '川普大叔音 · 中文/英文', modelIds: ['qwen-audio-3.0-tts-flash'] },
+  { id: 'loongmary', name: 'loongmary', description: '温暖英音女声 · 英文', modelIds: ['qwen-audio-3.0-tts-flash'] },
+  { id: 'loongjohn', name: 'loongJohn', description: '沉稳亲切男声 · 英文', modelIds: ['qwen-audio-3.0-tts-flash'] },
+  { id: 'longanlingxin', name: '龙安灵心', description: '知心温暖女声 · 中文/英文', modelIds: ['qwen-audio-3.0-tts-plus'] },
+  { id: 'longanlufeng', name: '龙安鲁风', description: '明亮开朗男声 · 中文/英文', modelIds: ['qwen-audio-3.0-tts-plus'] },
+  { id: 'longanyang', name: '龙安洋', description: '阳光大男孩 · 中文/英文', modelIds: ['cosyvoice-v3-flash', 'cosyvoice-v3-plus'] },
+  { id: 'longanhuan_v3', name: '龙安欢（V3）', description: '欢脱元气女声 · 中文/英文', modelIds: ['cosyvoice-v3-flash'] },
+  { id: 'longhuhu_v3', name: '龙呼呼', description: '天真烂漫女童 · 中文/英文', modelIds: ['cosyvoice-v3-flash'] },
+  { id: 'longpaopao_v3', name: '龙泡泡（V3）', description: '飞天泡泡女童 · 中文/英文', modelIds: ['cosyvoice-v3-flash'] },
+  { id: 'longjielidou_v3', name: '龙杰力豆（V3）', description: '阳光顽皮男童 · 中文/英文', modelIds: ['cosyvoice-v3-flash'] },
+  { id: 'longanwen_v3', name: '龙安温', description: '优雅知性女声 · 中文/英文', modelIds: ['cosyvoice-v3-flash'] },
+  { id: 'longanlang_v3', name: '龙安朗', description: '清爽利落男声 · 中文/英文', modelIds: ['cosyvoice-v3-flash'] },
+  { id: 'longhua_v3', name: '龙华', description: '元气甜美女声 · 中文/英文', modelIds: ['cosyvoice-v3-flash'] },
+  { id: 'longwan_v3', name: '龙婉', description: '细腻柔声女声 · 中文/英文', modelIds: ['cosyvoice-v3-flash'] },
+  { id: 'longdaiyu_v3', name: '龙黛玉', description: '娇柔才女音 · 中文/英文', modelIds: ['cosyvoice-v3-flash'] },
+  { id: 'longanyue_v3', name: '龙安粤', description: '欢脱粤语男声 · 粤语/英文', modelIds: ['cosyvoice-v3-flash'] },
+  { id: 'loongriko_v3', name: 'Riko', description: '二次元日语女声 · 日语', modelIds: ['cosyvoice-v3-flash'] },
+  { id: 'loongtomoya_v3', name: 'loongtomoya', description: '日语男声 · 日语', modelIds: ['cosyvoice-v3-flash'] },
+  { id: 'longanhuan', name: '龙安欢', description: '欢脱元气女声 · 中文/英文', modelIds: ['cosyvoice-v3-plus'] },
+  { id: 'longyingxiao', name: '龙应笑', description: '清甜女声 · 中文/英文', modelIds: ['cosyvoice-v2'] },
+  { id: 'longjiqi', name: '龙机器', description: '呆萌机器人 · 中文/英文', modelIds: ['cosyvoice-v2'] },
+];
+
+export const getQwenTtsVoices = (model: string): QwenTtsVoiceOption[] =>
+  QWEN_TTS_VOICES.filter(voice => voice.modelIds.includes(model));
+
 const normalizeApiKey = (value: string | undefined): string => (value || '').trim();
 
 const toBase64Url = (value: string): string => {
@@ -169,4 +217,9 @@ export async function synthesizeSpeechQwen(text: string, char: CharacterProfile,
 export async function testQwenTtsConnection(apiConfig: APIConfig): Promise<void> {
   const result = await synthesizeQwenText('连接测试成功。', apiConfig);
   try { URL.revokeObjectURL(result.url); } catch { /* ignore */ }
+}
+
+/** 设置页试听：使用当前模型、指定音色真实合成一句，不会改动聊天记录。 */
+export async function previewQwenTtsVoice(apiConfig: APIConfig, voice: string): Promise<TtsResult> {
+  return synthesizeQwenText('你好呀，这是当前音色的试听。', apiConfig, voice);
 }
