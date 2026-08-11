@@ -558,6 +558,8 @@ const CallApp: React.FC = () => {
   const [showVoiceInputSettings, setShowVoiceInputSettings] = useState(false);
   const [showSleepMode, setShowSleepMode] = useState(false);
   const [sleeping, setSleeping] = useState(false);
+  const [sleepNoiseState, setSleepNoiseState] = useState<'idle' | 'loading' | 'playing' | 'error'>('idle');
+  const [sleepNoiseError, setSleepNoiseError] = useState('');
   const [callHangupDurationMinutes, setCallHangupDurationMinutes] = useState(0);
   const [sleepNoiseDurationMinutes, setSleepNoiseDurationMinutes] = useState(0);
   const sleepAudioRef = useRef<HTMLAudioElement | null>(null);
@@ -849,7 +851,58 @@ const CallApp: React.FC = () => {
     sleepAudioRef.current?.pause();
     if (sleepAudioRef.current) sleepAudioRef.current.currentTime = 0;
     sleepAudioRef.current = null;
+    setSleepNoiseState('idle');
+    setSleepNoiseError('');
     setSleeping(false);
+  };
+  const playSelectedSleepNoise = () => {
+    if (!selectedChar?.callSettings?.sleepNoiseId || selectedChar.callSettings.sleepNoiseId === 'none') {
+      setSleepNoiseState('idle');
+      setSleepNoiseError('');
+      return false;
+    }
+    if (!selectedSleepNoise || !selectedSleepNoiseUrl) {
+      setSleepNoiseState('error');
+      setSleepNoiseError('音频还在读取，等一两秒后点“重新播放”即可。');
+      return false;
+    }
+
+    sleepAudioRef.current?.pause();
+    const audio = new Audio();
+    audio.preload = 'auto';
+    audio.loop = true;
+    audio.volume = 0.32;
+    audio.src = selectedSleepNoiseUrl;
+    sleepAudioRef.current = audio;
+    setSleepNoiseState('loading');
+    setSleepNoiseError('');
+
+    let playbackStarted = false;
+    const markPlaying = () => {
+      playbackStarted = true;
+      setSleepNoiseState('playing');
+      setSleepNoiseError('');
+    };
+    const explainFailure = () => {
+      if (sleepAudioRef.current !== audio || playbackStarted) return;
+      setSleepNoiseState('error');
+      setSleepNoiseError('这条音频无法在当前浏览器播放，请重新上传 MP3、M4A 或 WAV 格式的文件。');
+    };
+    const tryPlay = () => {
+      void audio.play().then(markPlaying).catch(() => {
+        // 手机上的 object URL 偶尔会在音频还没读完时拒绝第一次播放；等可播放后再补一次。
+        if (audio.readyState < HTMLMediaElement.HAVE_FUTURE_DATA) return;
+        explainFailure();
+      });
+    };
+    audio.oncanplay = () => {
+      if (!playbackStarted && audio.paused) tryPlay();
+    };
+    audio.onplay = markPlaying;
+    audio.onerror = explainFailure;
+    audio.load();
+    tryPlay();
+    return true;
   };
   const startSleepMode = () => {
     if (!selectedChar) return;
@@ -860,19 +913,13 @@ const CallApp: React.FC = () => {
     callHangupTimerRef.current = null;
     sleepNoiseTimerRef.current = null;
     sleepAudioRef.current?.pause();
-    if (selectedSleepNoiseUrl) {
-      const audio = new Audio(selectedSleepNoiseUrl);
-      audio.loop = true;
-      audio.volume = 0.32;
-      sleepAudioRef.current = audio;
-      void audio.play().catch(() => addToast('白噪音已准备好，请再次点击开始播放', 'info'));
-    } else if (selectedChar.callSettings?.sleepNoiseId && selectedChar.callSettings.sleepNoiseId !== 'none') {
-      addToast('这个白噪音还没有音频，请先在聊天设置里上传', 'info');
+    const hasNoise = playSelectedSleepNoise();
+    if (!hasNoise && selectedChar.callSettings?.sleepNoiseId && selectedChar.callSettings.sleepNoiseId !== 'none') {
+      addToast('白噪音还没准备好，可在陪睡面板里点“重新播放”', 'info');
     }
     setSleeping(true);
-    setShowSleepMode(false);
     handleTurnRef.current('我想睡了，陪我安静待一会儿。');
-    if (sleepNoiseDurationMinutes > 0 && selectedSleepNoiseUrl) {
+    if (sleepNoiseDurationMinutes > 0 && hasNoise) {
       sleepNoiseTimerRef.current = setTimeout(() => {
         sleepNoiseTimerRef.current = null;
         sleepAudioRef.current?.pause();
@@ -1894,6 +1941,8 @@ const CallApp: React.FC = () => {
     const filtered = palaceFiltered.filter(m => !(skipDbId && m.id === skipDbId));
     const { apiMessages } = ChatPrompts.buildMessageHistory(
       filtered, limit, selectedChar, userProfile || ({} as any), emojis,
+      undefined,
+      { onlyCurrentTurnImages: true },
     );
     const lastMsg = filtered[filtered.length - 1];
     const timeGapHint = ChatPrompts.getTimeGapHint(lastMsg, Date.now());
@@ -2522,9 +2571,14 @@ ${sentencePlan}`;
       setAvatarEmotion(reply.performance.emotion);
       setAvatarPerformance(reply.performance);
     } catch (err: any) {
-      setErrorMessage(err?.message || '文本回复失败');
+      const rawError = err?.message || '文本回复失败';
+      const isExpiredImageError = /get file data|failed to download file|convert_request_failed/i.test(rawError);
+      const friendlyError = isExpiredImageError
+        ? '历史里有一张已经失效的图片链接。本轮已不会再携带旧图片，请点发送重试。'
+        : rawError;
+      setErrorMessage(friendlyError);
       setCallState('error');
-      return addToast(`文本回复失败：${err?.message || '未知错误'}`, 'error');
+      return addToast(`文本回复失败：${friendlyError}`, 'error');
     }
     const assistantBubbleId = `${Date.now()}-a`;
     const assistantBubble: CallBubble = {
@@ -3691,17 +3745,19 @@ ${sentencePlan}`;
         </div>
       )}
       {showSleepMode && (
-        <div className="absolute inset-0 z-[220] flex items-end bg-black/65 backdrop-blur-sm" onClick={() => setShowSleepMode(false)}>
-          <div className="w-full max-h-[82%] overflow-y-auto rounded-t-[1.75rem] border-t border-white/15 bg-[#111522] px-5 pb-[max(1.25rem,var(--safe-bottom))] pt-5 text-white" onClick={event => event.stopPropagation()}>
-            <div className="flex items-start justify-between gap-3"><div><div className="text-[9px] tracking-[.24em] text-white/40">SLEEP COMPANION</div><h2 className="mt-1 text-xl font-semibold">🌙 陪睡 · 哄睡</h2></div><button type="button" onClick={() => setShowSleepMode(false)} className="rounded-full border border-white/15 px-3 py-1.5 text-xs text-white/65">完成</button></div>
-            <p className="mt-3 text-[11px] leading-5 text-white/50">开启后会先让角色轻声陪你说几句，之后保持安静。上面的定时结束控制整通电话；白噪音时长只控制声音，声音结束后电话仍会继续。</p>
-            <div className="mt-5 flex items-center justify-between gap-3"><span className="shrink-0 text-sm font-semibold">定时结束</span><div className="flex flex-wrap justify-end gap-1.5">{[0, 30, 60, 120, 480].map(minutes => <button key={minutes} type="button" onClick={() => setCallHangupDurationMinutes(minutes)} className={`rounded-full border px-2.5 py-1.5 text-[10px] ${callHangupDurationMinutes === minutes ? 'border-fuchsia-400 bg-fuchsia-400/20 text-white' : 'border-white/10 text-white/55'}`}>{minutes === 0 ? '不自动挂断' : minutes < 60 ? `${minutes} 分钟` : `${minutes / 60} 小时`}</button>)}</div></div>
-            <div className="mt-5 border-t border-white/10 pt-4"><div className="flex items-center justify-between gap-3"><span className="shrink-0 text-sm font-semibold">🎵 白噪音陪伴</span><span className="text-[10px] text-white/35">自定义音效在聊天设置管理</span></div>
-              <div className="mt-3 flex items-center justify-between gap-3"><span className="shrink-0 text-xs text-white/55">白噪音时长</span><div className="flex flex-wrap justify-end gap-1.5">{[0, 30, 60, 120, 480].map(minutes => <button key={minutes} type="button" onClick={() => setSleepNoiseDurationMinutes(minutes)} className={`rounded-full border px-2.5 py-1.5 text-[10px] ${sleepNoiseDurationMinutes === minutes ? 'border-fuchsia-400 bg-fuchsia-400/20 text-white' : 'border-white/10 text-white/55'}`}>{minutes === 0 ? '一直循环' : minutes < 60 ? `${minutes} 分钟` : `${minutes / 60} 小时`}</button>)}</div></div>
-              <div className="mt-3 flex flex-wrap gap-2">{['none', 'ocean', 'book', 'night', 'market', 'birds'].map(id => { const label = id === 'none' ? '无' : id === 'ocean' ? '海浪' : id === 'book' ? '翻书' : id === 'night' ? '夜晚' : id === 'market' ? '市场' : '鸟叫'; const custom = selectedChar?.callSettings?.customSleepNoises?.find(item => item.id === id); const active = selectedChar?.callSettings?.sleepNoiseId === id || (!selectedChar?.callSettings?.sleepNoiseId && id === 'none'); return <button key={id} type="button" disabled={id !== 'none' && !custom} onClick={() => selectedChar && updateCharacter(selectedChar.id, { callSettings: { ...selectedChar.callSettings, sleepNoiseId: id } })} className={`rounded-full border px-3 py-2 text-xs ${active ? 'border-fuchsia-400 bg-fuchsia-400/20 text-white' : 'border-white/10 text-white/50'} disabled:opacity-35`}>{custom?.name || label}{id !== 'none' && !custom ? '（待添加）' : ''}</button>; })}</div>
-              {!!selectedChar?.callSettings?.customSleepNoises?.length && <div className="mt-2 flex flex-wrap gap-2">{selectedChar.callSettings.customSleepNoises.map(item => <button key={item.id} type="button" onClick={() => updateCharacter(selectedChar.id, { callSettings: { ...selectedChar.callSettings, sleepNoiseId: item.id } })} className={`rounded-full border px-3 py-2 text-xs ${selectedChar.callSettings?.sleepNoiseId === item.id ? 'border-fuchsia-400 bg-fuchsia-400/20 text-white' : 'border-white/10 text-white/55'}`}>{item.name}</button>)}</div>}
+        <div className="absolute inset-0 z-[220] flex items-end bg-black/55 backdrop-blur-sm" onClick={() => setShowSleepMode(false)}>
+          <div className="w-full max-h-[84%] overflow-y-auto rounded-t-[1.75rem] border-t border-white/30 bg-[#171a2a] px-5 pb-[max(1.5rem,var(--safe-bottom))] pt-5 text-white shadow-[0_-18px_50px_rgba(0,0,0,.45)]" onClick={event => event.stopPropagation()}>
+            <div className="flex items-start justify-between gap-3"><div><div className="text-[10px] font-semibold tracking-[.2em] text-white/70">SLEEP COMPANION</div><h2 className="mt-1 text-xl font-semibold text-white">🌙 陪睡 · 哄睡</h2></div><button type="button" onClick={() => setShowSleepMode(false)} className="rounded-full border border-white/30 bg-white/[.08] px-3 py-1.5 text-xs font-medium text-white">完成</button></div>
+            <p className="mt-3 text-[12px] leading-5 text-white/80">开启后会先让角色轻声陪你说几句，之后保持安静。定时结束控制整通电话；白噪音时长只控制声音，声音结束后电话仍会继续。</p>
+            <div className="mt-5 flex items-start justify-between gap-3"><span className="shrink-0 pt-1 text-sm font-semibold text-white">定时结束</span><div className="flex flex-wrap justify-end gap-1.5">{[0, 30, 60, 120, 480].map(minutes => <button key={minutes} type="button" onClick={() => setCallHangupDurationMinutes(minutes)} className={`rounded-full border px-2.5 py-1.5 text-[11px] font-medium ${callHangupDurationMinutes === minutes ? 'border-fuchsia-300 bg-fuchsia-500/35 text-white' : 'border-white/25 bg-white/[.06] text-white/85'}`}>{minutes === 0 ? '不自动挂断' : minutes < 60 ? `${minutes} 分钟` : `${minutes / 60} 小时`}</button>)}</div></div>
+            <div className="mt-5 border-t border-white/20 pt-4"><div className="flex items-start justify-between gap-3"><span className="shrink-0 text-sm font-semibold text-white">🎵 白噪音陪伴</span><span className="text-right text-[11px] leading-4 text-white/70">在聊天设置里上传和管理</span></div>
+              <div className="mt-3 flex items-start justify-between gap-3"><span className="shrink-0 pt-1 text-xs font-medium text-white/85">白噪音时长</span><div className="flex flex-wrap justify-end gap-1.5">{[0, 30, 60, 120, 480].map(minutes => <button key={minutes} type="button" onClick={() => setSleepNoiseDurationMinutes(minutes)} className={`rounded-full border px-2.5 py-1.5 text-[11px] font-medium ${sleepNoiseDurationMinutes === minutes ? 'border-fuchsia-300 bg-fuchsia-500/35 text-white' : 'border-white/25 bg-white/[.06] text-white/85'}`}>{minutes === 0 ? '一直循环' : minutes < 60 ? `${minutes} 分钟` : `${minutes / 60} 小时`}</button>)}</div></div>
+              <div className="mt-4 flex flex-wrap gap-2">{['none', 'ocean', 'book', 'night', 'market', 'birds'].map(id => { const label = id === 'none' ? '无' : id === 'ocean' ? '海浪' : id === 'book' ? '翻书' : id === 'night' ? '夜晚' : id === 'market' ? '市场' : '鸟叫'; const custom = selectedChar?.callSettings?.customSleepNoises?.find(item => item.id === id); const active = selectedChar?.callSettings?.sleepNoiseId === id || (!selectedChar?.callSettings?.sleepNoiseId && id === 'none'); return <button key={id} type="button" disabled={id !== 'none' && !custom} onClick={() => selectedChar && updateCharacter(selectedChar.id, { callSettings: { ...selectedChar.callSettings, sleepNoiseId: id } })} className={`rounded-full border px-3 py-2 text-xs font-medium ${active ? 'border-fuchsia-300 bg-fuchsia-500/35 text-white' : 'border-white/25 bg-white/[.06] text-white/80'} disabled:opacity-45`}>{custom?.name || label}{id !== 'none' && !custom ? '（待添加）' : ''}</button>; })}</div>
+              {!!selectedChar?.callSettings?.customSleepNoises?.length && <div className="mt-3 space-y-2">{selectedChar.callSettings.customSleepNoises.map(item => <button key={item.id} type="button" onClick={() => updateCharacter(selectedChar.id, { callSettings: { ...selectedChar.callSettings, sleepNoiseId: item.id } })} className={`block w-full rounded-xl border px-3 py-2 text-left text-xs font-medium leading-5 ${selectedChar.callSettings?.sleepNoiseId === item.id ? 'border-fuchsia-300 bg-fuchsia-500/35 text-white' : 'border-white/25 bg-white/[.06] text-white/85'}`}>{item.name}</button>)}</div>}
+              {selectedSleepNoise && <div className={`mt-3 rounded-xl border px-3 py-2 text-[11px] leading-5 ${sleepNoiseState === 'error' ? 'border-rose-300/70 bg-rose-500/15 text-white' : 'border-white/20 bg-black/20 text-white/80'}`}><span className="font-semibold text-white">当前音频：{selectedSleepNoise.name}</span><br />{sleepNoiseState === 'playing' ? '正在循环播放' : sleepNoiseState === 'loading' ? '正在加载音频…' : sleepNoiseState === 'error' ? sleepNoiseError : '点击开始陪睡后播放'}</div>}
+              {sleeping && selectedSleepNoise && <button type="button" onClick={playSelectedSleepNoise} className="mt-3 w-full rounded-xl border border-white/30 bg-white/[.1] py-2.5 text-xs font-semibold text-white active:scale-[.98]">重新播放白噪音</button>}
             </div>
-            <button type="button" onClick={sleeping ? stopSleepMode : startSleepMode} className={`mt-5 w-full rounded-2xl py-3.5 text-sm font-semibold ${sleeping ? 'bg-white/10 text-white' : 'bg-fuchsia-500 text-white shadow-lg shadow-fuchsia-500/20'}`}>{sleeping ? '停止陪睡' : '开始陪睡'}</button>
+            <button type="button" onClick={sleeping ? stopSleepMode : startSleepMode} className={`mt-5 w-full rounded-2xl py-3.5 text-sm font-semibold ${sleeping ? 'border border-white/30 bg-white/[.1] text-white' : 'bg-fuchsia-500 text-white shadow-lg shadow-fuchsia-500/30'}`}>{sleeping ? '停止陪睡' : '开始陪睡'}</button>
           </div>
         </div>
       )}
