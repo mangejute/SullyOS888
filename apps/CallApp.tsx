@@ -848,8 +848,14 @@ const CallApp: React.FC = () => {
     if (sleepNoiseTimerRef.current) clearTimeout(sleepNoiseTimerRef.current);
     callHangupTimerRef.current = null;
     sleepNoiseTimerRef.current = null;
-    sleepAudioRef.current?.pause();
-    if (sleepAudioRef.current) sleepAudioRef.current.currentTime = 0;
+    const previousAudio = sleepAudioRef.current;
+    previousAudio?.pause();
+    if (previousAudio) {
+      previousAudio.currentTime = 0;
+      previousAudio.removeAttribute('src');
+      previousAudio.load();
+      previousAudio.parentElement?.removeChild(previousAudio);
+    }
     sleepAudioRef.current = null;
     setSleepNoiseState('idle');
     setSleepNoiseError('');
@@ -867,11 +873,29 @@ const CallApp: React.FC = () => {
       return false;
     }
 
-    sleepAudioRef.current?.pause();
+    const previousAudio = sleepAudioRef.current;
+    previousAudio?.pause();
+    previousAudio?.parentElement?.removeChild(previousAudio);
     const audio = new Audio();
+    // 移动浏览器对动态创建的音频元素更严格：明确声明内联播放，避免它被
+    // 当成需要跳转到系统播放器的媒体；音频播放仍在用户点击的调用栈中发起。
+    audio.setAttribute('playsinline', 'true');
+    audio.setAttribute('webkit-playsinline', 'true');
+    audio.autoplay = false;
+    // 不使用 display:none：部分 Android WebView 会把完全隐藏的媒体元素静音。
+    Object.assign(audio.style, {
+      position: 'fixed',
+      width: '1px',
+      height: '1px',
+      opacity: '0.01',
+      pointerEvents: 'none',
+      left: '-2px',
+      bottom: '-2px',
+    });
+    document.body.appendChild(audio);
     audio.preload = 'auto';
     audio.loop = true;
-    audio.volume = 0.32;
+    audio.volume = 0.72;
     audio.src = selectedSleepNoiseUrl;
     sleepAudioRef.current = audio;
     setSleepNoiseState('loading');
@@ -898,6 +922,9 @@ const CallApp: React.FC = () => {
     audio.oncanplay = () => {
       if (!playbackStarted && audio.paused) tryPlay();
     };
+    audio.oncanplaythrough = () => {
+      if (!playbackStarted && audio.paused) tryPlay();
+    };
     audio.onplay = markPlaying;
     audio.onerror = explainFailure;
     audio.load();
@@ -922,8 +949,14 @@ const CallApp: React.FC = () => {
     if (sleepNoiseDurationMinutes > 0 && hasNoise) {
       sleepNoiseTimerRef.current = setTimeout(() => {
         sleepNoiseTimerRef.current = null;
-        sleepAudioRef.current?.pause();
-        if (sleepAudioRef.current) sleepAudioRef.current.currentTime = 0;
+        const audio = sleepAudioRef.current;
+        audio?.pause();
+        if (audio) {
+          audio.currentTime = 0;
+          audio.removeAttribute('src');
+          audio.load();
+          audio.parentElement?.removeChild(audio);
+        }
         sleepAudioRef.current = null;
         addToast('白噪音时间到了，通话仍在继续', 'info');
       }, sleepNoiseDurationMinutes * 60_000);
@@ -942,11 +975,17 @@ const CallApp: React.FC = () => {
     try {
       const raw = localStorage.getItem(DIRECT_VIDEO_CALL_INTENT_KEY);
       if (!raw) return;
-      localStorage.removeItem(DIRECT_VIDEO_CALL_INTENT_KEY);
       const intent = JSON.parse(raw) as { charId?: string; at?: number; returnTo?: string };
-      if (!intent.charId || !characters.some(character => character.id === intent.charId)) return;
-      if (intent.at && Date.now() - intent.at > 30_000) return;
+      // 手机端 IndexedDB 角色资料通常比桌面端晚一拍加载。不要在 characters=[]
+      // 时先删掉跳转标记，否则后续资料加载完成也无法自动接通视频。
+      if (!intent.charId || characters.length === 0) return;
       const target = characters.find(character => character.id === intent.charId);
+      if (!target) {
+        localStorage.removeItem(DIRECT_VIDEO_CALL_INTENT_KEY);
+        return;
+      }
+      if (intent.at && Date.now() - intent.at > 30_000) return;
+      localStorage.removeItem(DIRECT_VIDEO_CALL_INTENT_KEY);
       if (target && (!target.companionAvatar?.source || target.companionAvatar.source === 'model') && (target.companionAvatar?.imageRef || target.avatar)) {
         updateCharacter(target.id, { companionAvatar: { ...target.companionAvatar, version: 1, source: 'upload', imageRef: target.companionAvatar?.imageRef || target.avatar } });
       }
@@ -955,7 +994,7 @@ const CallApp: React.FC = () => {
       setCallMode('video');
       setDirectVideoPendingId(intent.charId);
     } catch { /* private WebView or malformed intent */ }
-  }, []);
+  }, [characters]);
   const selectedVisualSource = companionAvatarSource(selectedChar);
   const selectedDateOutfits = useMemo(() => listCompanionDateOutfits(selectedChar), [selectedChar]);
   const selectedDateOutfitId = normalizeCompanionSkinSetId(selectedChar?.companionAvatar?.skinSetId);
@@ -3745,7 +3784,7 @@ ${sentencePlan}`;
         </div>
       )}
       {showSleepMode && (
-        <div className="absolute inset-0 z-[220] flex items-end bg-black/55 backdrop-blur-sm" onClick={() => setShowSleepMode(false)}>
+        <div className="sully-stage-dark absolute inset-0 z-[220] flex items-end bg-black/55 backdrop-blur-sm" onClick={() => setShowSleepMode(false)}>
           <div className="w-full max-h-[84%] overflow-y-auto rounded-t-[1.75rem] border-t border-white/30 bg-[#171a2a] px-5 pb-[max(1.5rem,var(--safe-bottom))] pt-5 text-white shadow-[0_-18px_50px_rgba(0,0,0,.45)]" onClick={event => event.stopPropagation()}>
             <div className="flex items-start justify-between gap-3"><div><div className="text-[10px] font-semibold tracking-[.2em] text-white/70">SLEEP COMPANION</div><h2 className="mt-1 text-xl font-semibold text-white">🌙 陪睡 · 哄睡</h2></div><button type="button" onClick={() => setShowSleepMode(false)} className="rounded-full border border-white/30 bg-white/[.08] px-3 py-1.5 text-xs font-medium text-white">完成</button></div>
             <p className="mt-3 text-[12px] leading-5 text-white/80">开启后会先让角色轻声陪你说几句，之后保持安静。定时结束控制整通电话；白噪音时长只控制声音，声音结束后电话仍会继续。</p>

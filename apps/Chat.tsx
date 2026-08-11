@@ -3270,11 +3270,14 @@ const Chat: React.FC = () => {
                 callCustomSleepNoises={char.callSettings?.customSleepNoises || []}
                 onSelectCallSleepNoise={(id: string) => updateCharacter(char.id, { callSettings: { ...char.callSettings, sleepNoiseId: id } })}
                 onAddCallSleepNoise={(file: File) => { void (async () => {
-                    if (!file.type.startsWith('audio/')) { addToast('请选择音频文件', 'error'); return; }
+                    const extension = file.name.split('.').pop()?.toLowerCase() || '';
+                    const mimeType = file.type || ({ mp3: 'audio/mpeg', m4a: 'audio/mp4', wav: 'audio/wav', ogg: 'audio/ogg', aac: 'audio/aac', flac: 'audio/flac' } as Record<string, string>)[extension] || '';
+                    if (!mimeType.startsWith('audio/')) { addToast('请选择 MP3、M4A、WAV、OGG、AAC 或 FLAC 音频', 'error'); return; }
                     if (file.size > 25 * 1024 * 1024) { addToast('音频请控制在 25 MB 以内', 'error'); return; }
-                    const audioRef = await putImageBlob(file);
+                    const audioBlob = file.type === mimeType ? file : new Blob([file], { type: mimeType });
+                    const audioRef = await putImageBlob(audioBlob);
                     const current = char.callSettings?.customSleepNoises || [];
-                    const noise = { id: `sleep-noise-${Date.now()}`, name: file.name.replace(/\.[^.]+$/, '') || '自定义白噪音', audioRef, mimeType: file.type };
+                    const noise = { id: `sleep-noise-${Date.now()}`, name: file.name.replace(/\.[^.]+$/, '') || '自定义白噪音', audioRef, mimeType };
                     updateCharacter(char.id, { callSettings: { ...char.callSettings, sleepNoiseId: noise.id, customSleepNoises: [...current, noise] } });
                     addToast('白噪音已添加，会保存在这台设备', 'success');
                 })()}}
