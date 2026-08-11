@@ -1486,6 +1486,22 @@ const MessageItem = React.memo(({
     const replyGestureActiveRef = useRef(false);
     const replyReadyRef = useRef(false);
     const [imagePreviewOpen, setImagePreviewOpen] = useState(false);
+    const [loadedImageUrl, setLoadedImageUrl] = useState<string | null>(null);
+
+    // 先把图片完整下载并解码，再交给页面显示，避免浏览器把渐进式图片一截一截地绘制出来。
+    useEffect(() => {
+        let cancelled = false;
+        setLoadedImageUrl(null);
+        if (m.type !== 'image' || !m.content) return () => { cancelled = true; };
+        const image = new Image();
+        image.onload = async () => {
+            try { await image.decode?.(); } catch { /* 某些图片格式不支持 decode，onload 已足够 */ }
+            if (!cancelled) setLoadedImageUrl(m.content);
+        };
+        image.onerror = () => { if (!cancelled) setLoadedImageUrl(null); };
+        image.src = m.content;
+        return () => { cancelled = true; image.onload = null; image.onerror = null; };
+    }, [m.type, m.content]);
 
     const styleConfig = isUser ? activeTheme.user : activeTheme.ai;
     const [showVoiceText, setShowVoiceText] = useState(false);
@@ -3285,10 +3301,13 @@ const MessageItem = React.memo(({
     if (m.type === 'image') {
         const imageGeneration = (m.metadata as any)?.imageGeneration || {};
         const status = imageGeneration.status as 'pending' | 'success' | 'failed' | undefined;
-        const description = imageGeneration.description || imageGeneration.prompt || '';
+        const rawDescription = String(imageGeneration.caption || imageGeneration.description || '').trim();
+        // 生图接口内部提示词可能是英文；用户界面只展示中文说明，避免把内部 prompt 泄露到聊天里。
+        const description = /[\u4e00-\u9fff]/.test(rawDescription) ? rawDescription : '角色生成的照片';
         const wasSafetyBlocked = /安全|safety|policy|moderation|无法用于生成图像/i.test(String(imageGeneration.error || ''));
         const aspectRatio = String(imageGeneration.aspectRatio || '1:1');
         const placeholderRatioClass = aspectRatio === '3:4' ? 'aspect-[3/4]' : aspectRatio === '9:16' ? 'aspect-[9/16]' : aspectRatio === '4:3' ? 'aspect-[4/3]' : aspectRatio === '16:9' ? 'aspect-[16/9]' : 'aspect-square';
+        const imageReady = Boolean(m.content && loadedImageUrl === m.content);
         const downloadImage = () => {
             if (!m.content) return;
             const link = document.createElement('a');
@@ -3298,10 +3317,17 @@ const MessageItem = React.memo(({
         };
         return commonLayout(
             <div className="relative group">
-                {m.content ? (
-                    <button type="button" className="block max-w-[230px] overflow-hidden rounded-2xl text-left active:scale-[0.98]" onClick={() => setImagePreviewOpen(true)}>
-                        <img src={m.content} className="max-h-[320px] max-w-[230px] rounded-2xl object-cover" alt="角色生成的图片" loading="lazy" decoding="async" />
+                {m.content && imageReady ? (
+                    <button type="button" className={`block w-[224px] max-w-[230px] overflow-hidden rounded-2xl text-left active:scale-[0.98] ${placeholderRatioClass}`} onClick={() => setImagePreviewOpen(true)}>
+                        <img src={m.content} className="h-full w-full rounded-2xl object-cover" alt="角色生成的图片" />
                     </button>
+                ) : m.content ? (
+                    <div className={`relative w-[224px] overflow-hidden rounded-2xl bg-white shadow-[0_5px_16px_rgba(15,23,42,0.14)] ${placeholderRatioClass}`}>
+                        <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 bg-slate-100/95 text-slate-500">
+                            <SpinnerGap size={20} weight="bold" className="animate-spin" />
+                            <span className="text-[11px]">正在加载照片…</span>
+                        </div>
+                    </div>
                 ) : status === 'pending' ? (
                     <div className={`relative w-[224px] overflow-hidden rounded-2xl bg-white shadow-[0_5px_16px_rgba(15,23,42,0.14)] ${placeholderRatioClass}`}>
                         <div className="absolute right-3 top-3 z-10 flex h-9 w-9 items-center justify-center rounded-full bg-white/90 text-slate-600 shadow-sm">
@@ -3326,14 +3352,16 @@ const MessageItem = React.memo(({
                     </div>
                 )}
                 {imagePreviewOpen && m.content && (
-                    <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/70 p-4" onClick={() => setImagePreviewOpen(false)}>
-                        <div className="relative flex max-h-full max-w-full flex-col items-center justify-center" onClick={e => e.stopPropagation()}>
-                            <div className="absolute right-0 top-0 z-10 flex translate-y-[-52px] gap-2">
-                                <button type="button" aria-label="下载图片" title="下载图片" className="flex h-10 w-10 items-center justify-center rounded-full bg-white/20 text-white backdrop-blur" onClick={downloadImage}><DownloadSimple size={20} weight="bold" /></button>
-                                <button type="button" aria-label="关闭大图" title="关闭大图" className="flex h-10 w-10 items-center justify-center rounded-full bg-white/20 text-white backdrop-blur" onClick={() => setImagePreviewOpen(false)}><X size={20} weight="bold" /></button>
+                    <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/80 p-4 backdrop-blur-sm" onClick={() => setImagePreviewOpen(false)}>
+                        <div className="relative flex max-h-[92vh] w-full max-w-[560px] flex-col items-center rounded-2xl bg-black/25 px-3 pb-4 pt-14" onClick={e => e.stopPropagation()}>
+                            <div className="absolute right-3 top-3 z-10 flex gap-2">
+                                <button type="button" aria-label="下载图片" title="下载图片" className="flex h-10 w-10 items-center justify-center rounded-full bg-white/15 text-white backdrop-blur" onClick={downloadImage}><DownloadSimple size={20} weight="bold" /></button>
+                                <button type="button" aria-label="关闭大图" title="关闭大图" className="flex h-10 w-10 items-center justify-center rounded-full bg-white/15 text-white backdrop-blur" onClick={() => setImagePreviewOpen(false)}><X size={20} weight="bold" /></button>
                             </div>
-                            <img src={m.content} className="max-h-[78vh] max-w-[92vw] rounded-2xl object-contain" alt="角色生成的大图" />
-                            {description && <div className="mt-4 max-w-[92vw] whitespace-pre-wrap text-center text-sm leading-relaxed text-white">{description}</div>}
+                            <div className={`flex max-h-[70vh] w-full items-center justify-center overflow-hidden rounded-xl ${placeholderRatioClass}`}>
+                                <img src={m.content} className="h-full w-full object-cover" alt="角色生成的大图" />
+                            </div>
+                            <div className="mt-4 w-full max-w-[92vw] whitespace-pre-wrap text-center text-sm leading-relaxed text-white">{description}</div>
                         </div>
                     </div>
                 )}

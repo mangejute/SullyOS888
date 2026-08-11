@@ -2036,12 +2036,12 @@ export async function applyAssistantPostProcessing(
                 content: '',
                 metadata: {
                     ...(mcdInheritMeta || {}),
-                    imageGeneration: { status: 'pending', description: request.description, prompt: request.description },
+                    imageGeneration: { status: 'pending', caption: request.description, description: request.description, prompt: request.description },
                 },
             } as any);
             setMessages(await DB.getRecentMessagesByCharId(char.id, 200));
             const aspectRatio = imageGenerationApi?.aspectRatio || '1:1';
-            await DB.updateMessageMetadata(imageMessageId, prev => ({ ...(prev || {}), imageGeneration: { ...(prev?.imageGeneration || {}), aspectRatio } }));
+            await DB.updateMessageMetadata(imageMessageId, prev => ({ ...(prev || {}), imageGeneration: { ...(prev?.imageGeneration || {}), aspectRatio, caption: request.description } }));
             void startImageGeneration(imageMessageId, { api: imageGenerationApi, character: char, description: request.description, aspectRatio });
         } catch (error) {
             console.error('[image-generation] 保存待生成消息失败', error);
