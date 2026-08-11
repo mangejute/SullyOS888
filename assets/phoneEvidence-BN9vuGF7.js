@@ -1,0 +1,3 @@
+const a=(e,t)=>{if(e==null)return"";const n=typeof e;if(n==="string")return e;if(n==="number"||n==="boolean"||n==="bigint"||n==="symbol"||n==="function")return String(e);if(n==="object"){const o=e;if(t.has(o))return"[循环引用]";t.add(o);let i;if(Array.isArray(e))i=e.map(r=>a(r,t)).filter(Boolean).join(`
+`);else{const r=Object.entries(e);i=r.length?r.map(([c,f])=>`${c}: ${a(f,t)}`).join(`
+`):""}return t.delete(o),i}return String(e)};function l(e,t=""){return a(e,new Set).trim()||t}function s(e){const t=e,n=l(t.value);return{...e,title:l(t.title,"Unknown"),detail:l(t.detail,"..."),value:n||void 0}}export{s as n,l as p};
