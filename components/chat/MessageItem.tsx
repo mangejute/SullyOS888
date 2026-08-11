@@ -2,6 +2,7 @@
 
 
 import React, { useEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { Message, ChatTheme } from '../../types';
 import { phoneFieldToText } from '../../utils/phoneEvidence';
 import { tryParseLifeSimResetCard } from '../../utils/lifeSimChatCard';
@@ -3351,19 +3352,18 @@ const MessageItem = React.memo(({
                         <div className="flex h-full items-center justify-center bg-slate-100 text-xs italic text-slate-400">[图片已丢失]</div>
                     </div>
                 )}
-                {imagePreviewOpen && m.content && (
-                    <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/80 p-4 backdrop-blur-sm" onClick={() => setImagePreviewOpen(false)}>
-                        <div className="relative flex max-h-[92vh] w-full max-w-[560px] flex-col items-center rounded-2xl bg-black/25 px-3 pb-4 pt-14" onClick={e => e.stopPropagation()}>
-                            <div className="absolute right-3 top-3 z-10 flex gap-2">
-                                <button type="button" aria-label="下载图片" title="下载图片" className="flex h-10 w-10 items-center justify-center rounded-full bg-white/15 text-white backdrop-blur" onClick={downloadImage}><DownloadSimple size={20} weight="bold" /></button>
-                                <button type="button" aria-label="关闭大图" title="关闭大图" className="flex h-10 w-10 items-center justify-center rounded-full bg-white/15 text-white backdrop-blur" onClick={() => setImagePreviewOpen(false)}><X size={20} weight="bold" /></button>
-                            </div>
-                            <div className={`flex max-h-[70vh] w-full items-center justify-center overflow-hidden rounded-xl ${placeholderRatioClass}`}>
-                                <img src={m.content} className="h-full w-full object-cover" alt="角色生成的大图" />
-                            </div>
-                            <div className="mt-4 w-full max-w-[92vw] whitespace-pre-wrap text-center text-sm leading-relaxed text-white">{description}</div>
+                {imagePreviewOpen && m.content && typeof document !== 'undefined' && createPortal(
+                    <div className="fixed inset-0 z-[200] flex flex-col items-center justify-center bg-black/70 px-5 py-16 backdrop-blur-xl" onClick={() => setImagePreviewOpen(false)}>
+                        <div className="absolute right-5 z-10 flex gap-3" style={{ top: 'max(16px, env(safe-area-inset-top))' }}>
+                            <button type="button" aria-label="下载图片" title="下载图片" className="flex h-11 w-11 items-center justify-center rounded-full bg-white/20 text-white shadow-sm backdrop-blur-md active:scale-95" onClick={downloadImage}><DownloadSimple size={21} weight="bold" /></button>
+                            <button type="button" aria-label="关闭大图" title="关闭大图" className="flex h-11 w-11 items-center justify-center rounded-full bg-white/20 text-white shadow-sm backdrop-blur-md active:scale-95" onClick={() => setImagePreviewOpen(false)}><X size={22} weight="bold" /></button>
                         </div>
-                    </div>
+                        <div className="flex max-h-full w-full max-w-[520px] flex-col items-center" onClick={e => e.stopPropagation()}>
+                            <img src={m.content} className="max-h-[58vh] max-w-full rounded-[28px] object-contain shadow-[0_18px_60px_rgba(0,0,0,0.35)]" alt="角色生成的大图" />
+                            <div className="mt-5 max-w-[92vw] whitespace-pre-wrap text-center text-[15px] leading-7 text-white drop-shadow-[0_1px_3px_rgba(0,0,0,0.75)]">{description}</div>
+                        </div>
+                    </div>,
+                    document.body,
                 )}
             </div>
         );
