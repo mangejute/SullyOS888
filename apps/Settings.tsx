@@ -35,7 +35,9 @@ import { getBackupReminderState, setBackupReminderIntervalDays, daysSinceLastBac
 import { bucketRetryCount, isAnalyticsConfigured, isAnalyticsEnabled, setAnalyticsEnabled, trackEvent } from '../utils/analytics';
 import { normalizeApiBaseUrl, normalizeApiCredential, normalizeApiModel } from '../utils/apiConfigNormalize';
 import { describeImageWithVisionApi, VISION_API_TEST_IMAGE_DATA_URL, visionApiConfigFromPreset } from '../utils/visionApi';
+import { fetchMiniMaxVoices } from '../utils/minimaxVoice';
 import { getBrowserNotificationPermission, isBackgroundKeepAliveEnabled, isBrowserNotificationsEnabled, requestBrowserNotifications, setBackgroundKeepAlive, setBrowserNotificationsEnabled, showCharacterNotification } from '../utils/browserFeatures';
+import { snapshotLocalStorageMirror } from '../utils/lsMirror';
 
 // hot_news（news.orz.ai）可选热榜平台。key 必须与 API 的 ?platform= 完全一致。
 const HOTNEWS_PLATFORM_OPTIONS: { key: string; label: string }[] = [
@@ -65,12 +67,29 @@ const HOTNEWS_PLATFORM_OPTIONS: { key: string; label: string }[] = [
 // 这里设为 false 只是把设置页里的入口隐藏掉，想恢复改回 true 即可。
 const SHOW_PROACTIVE_PUSH_ACCEL_UI = false;
 const VISION_MODEL_LIST_STORAGE_KEY = 'os_vision_available_models';
+const IMAGE_MODEL_LIST_STORAGE_KEY = 'os_image_generation_models';
+const IMAGE_PRESETS_STORAGE_KEY = 'os_image_generation_presets';
+const OTHER_API_PRESETS_STORAGE_KEY = 'os_other_api_presets';
+
+type ImageApiConfig = NonNullable<APIConfig['imageGenerationApi']>;
+type ImageApiPreset = { id: string; name: string; config: ImageApiConfig };
+type OtherApiPresetConfig = Pick<APIConfig, 'minimaxApiKey' | 'minimaxGroupId' | 'minimaxRegion' | 'aceStepApiKey' | 'ttsProvider' | 'fishAudioApiKey' | 'fishAudioModel' | 'voicePrompts'>;
+type OtherApiPreset = { id: string; name: string; config: OtherApiPresetConfig };
 
 const readStoredVisionModels = (): string[] => {
     try {
         return normalizeModelIds(JSON.parse(localStorage.getItem(VISION_MODEL_LIST_STORAGE_KEY) || '[]'));
     } catch {
         return [];
+    }
+};
+
+const readStoredJson = <T,>(key: string, fallback: T): T => {
+    try {
+        const parsed = JSON.parse(localStorage.getItem(key) || 'null');
+        return parsed === null ? fallback : parsed as T;
+    } catch {
+        return fallback;
     }
 };
 
@@ -460,7 +479,9 @@ const Settings: React.FC = () => {
   const [localImageGenModel, setLocalImageGenModel] = useState(apiConfig.imageGenerationApi?.model || '');
   const [localImageGenPrompt, setLocalImageGenPrompt] = useState(apiConfig.imageGenerationApi?.prompt || '');
   const [localImageGenAspectRatio, setLocalImageGenAspectRatio] = useState<NonNullable<NonNullable<typeof apiConfig.imageGenerationApi>['aspectRatio']>>(apiConfig.imageGenerationApi?.aspectRatio || '1:1');
-  const [availableImageGenModels, setAvailableImageGenModels] = useState<string[]>([]);
+  const [availableImageGenModels, setAvailableImageGenModels] = useState<string[]>(() => readStoredJson<string[]>(IMAGE_MODEL_LIST_STORAGE_KEY, []).filter(Boolean));
+  const [imageGenPresets, setImageGenPresets] = useState<ImageApiPreset[]>(() => readStoredJson<ImageApiPreset[]>(IMAGE_PRESETS_STORAGE_KEY, []));
+  const [otherApiPresets, setOtherApiPresets] = useState<OtherApiPreset[]>(() => readStoredJson<OtherApiPreset[]>(OTHER_API_PRESETS_STORAGE_KEY, []));
   const [availableVisionModels, setAvailableVisionModels] = useState<string[]>(readStoredVisionModels);
   const [selectedVisionPresetId, setSelectedVisionPresetId] = useState<string | null>(null);
   const [visionStatusMsg, setVisionStatusMsg] = useState('');
@@ -468,6 +489,11 @@ const Settings: React.FC = () => {
   const [visionTestResult, setVisionTestResult] = useState<string | null>(null);
   const [testingImageGenApi, setTestingImageGenApi] = useState(false);
   const [imageGenTestResult, setImageGenTestResult] = useState<string | null>(null);
+  const [showImageModelModal, setShowImageModelModal] = useState(false);
+  const [imageModelFilter, setImageModelFilter] = useState('');
+  const [newImagePresetName, setNewImagePresetName] = useState('');
+  const [newOtherPresetName, setNewOtherPresetName] = useState('');
+  const [testingOtherApis, setTestingOtherApis] = useState(false);
   const [localMiniMaxKey, setLocalMiniMaxKey] = useState(apiConfig.minimaxApiKey || '');
   const [localMiniMaxGroupId, setLocalMiniMaxGroupId] = useState(apiConfig.minimaxGroupId || '');
   const [localMiniMaxRegion, setLocalMiniMaxRegion] = useState<'domestic' | 'overseas'>(
@@ -685,6 +711,10 @@ const Settings: React.FC = () => {
   const visionModelPickerView = useMemo(
       () => buildModelPickerView(availableVisionModels, visionModelFilter),
       [visionModelFilter, availableVisionModels],
+  );
+  const imageModelPickerView = useMemo(
+      () => buildModelPickerView(availableImageGenModels, imageModelFilter),
+      [imageModelFilter, availableImageGenModels],
   );
 
   const refreshPpDiag = useCallback(async () => {
@@ -1093,19 +1123,101 @@ const Settings: React.FC = () => {
     }
   };
 
-  const handleSaveImageGenerationApi = () => {
-    const next = {
+  const currentImageApiConfig = (): ImageApiConfig => ({
       baseUrl: normalizeApiBaseUrl(localImageGenUrl),
       apiKey: normalizeApiCredential(localImageGenKey),
       model: normalizeApiModel(localImageGenModel),
       prompt: localImageGenPrompt.trim(),
       aspectRatio: localImageGenAspectRatio,
-    };
+  });
+
+  const loadImageGenerationPreset = (preset: ImageApiPreset) => {
+    setLocalImageGenUrl(preset.config.baseUrl || '');
+    setLocalImageGenKey(preset.config.apiKey || '');
+    setLocalImageGenModel(preset.config.model || '');
+    setLocalImageGenPrompt(preset.config.prompt || '');
+    setLocalImageGenAspectRatio(preset.config.aspectRatio || '1:1');
+    setImageGenTestResult(null);
+    addToast(`已载入生图预设「${preset.name}」，保存后生效`, 'info');
+  };
+
+  const saveImageGenerationPreset = () => {
+    const name = newImagePresetName.trim();
+    const config = currentImageApiConfig();
+    if (!name) { addToast('请输入生图预设名称', 'error'); return; }
+    if (!config.baseUrl || !config.apiKey || !config.model) { addToast('请先填写完整的生图连接、秘钥和模型', 'error'); return; }
+    const next = [...imageGenPresets.filter(item => item.name !== name), { id: `${Date.now()}`, name, config }];
+    setImageGenPresets(next);
+    localStorage.setItem(IMAGE_PRESETS_STORAGE_KEY, JSON.stringify(next));
+    void snapshotLocalStorageMirror();
+    setNewImagePresetName('');
+    addToast('生图预设已保存', 'success');
+  };
+
+  const currentOtherApiConfig = (): OtherApiPresetConfig => ({
+    minimaxApiKey: localMiniMaxKey.trim(), minimaxGroupId: localMiniMaxGroupId.trim(), minimaxRegion: localMiniMaxRegion,
+    aceStepApiKey: localAceStepKey.trim(), ttsProvider: localTtsProvider, fishAudioApiKey: localFishKey.trim(), fishAudioModel: localFishModel.trim(),
+    voicePrompts: { minimax: localVoicePromptMinimax.trim() || undefined, fishaudio: localVoicePromptFish.trim() || undefined, dateVoice: localVoicePromptDate.trim() || undefined },
+  });
+
+  const loadOtherApiPreset = (preset: OtherApiPreset) => {
+    const config = preset.config;
+    setLocalMiniMaxKey(config.minimaxApiKey || ''); setLocalMiniMaxGroupId(config.minimaxGroupId || '');
+    setLocalMiniMaxRegion(config.minimaxRegion === 'overseas' ? 'overseas' : 'domestic');
+    setLocalAceStepKey(config.aceStepApiKey || ''); setLocalTtsProvider(config.ttsProvider === 'fishaudio' ? 'fishaudio' : 'minimax');
+    setLocalFishKey(config.fishAudioApiKey || ''); setLocalFishModel(config.fishAudioModel || 's2.1-pro');
+    setLocalVoicePromptMinimax(config.voicePrompts?.minimax || ''); setLocalVoicePromptFish(config.voicePrompts?.fishaudio || ''); setLocalVoicePromptDate(config.voicePrompts?.dateVoice || '');
+    addToast(`已载入其他 API 预设「${preset.name}」，保存后生效`, 'info');
+  };
+
+  const saveOtherApiPreset = () => {
+    const name = newOtherPresetName.trim();
+    if (!name) { addToast('请输入其他 API 预设名称', 'error'); return; }
+    const next = [...otherApiPresets.filter(item => item.name !== name), { id: `${Date.now()}`, name, config: currentOtherApiConfig() }];
+    setOtherApiPresets(next); localStorage.setItem(OTHER_API_PRESETS_STORAGE_KEY, JSON.stringify(next)); void snapshotLocalStorageMirror(); setNewOtherPresetName('');
+    addToast('其他 API 预设已保存', 'success');
+  };
+
+  const testOtherApis = async () => {
+    const key = localMiniMaxKey.trim() || apiConfig.apiKey.trim();
+    if (!key) { setOtherStatusMsg('请先填写 MiniMax Key'); return; }
+    setTestingOtherApis(true); setOtherStatusMsg('正在测试 MiniMax…');
+    try { await fetchMiniMaxVoices(key, 'system'); setOtherStatusMsg('✅ MiniMax 连接正常'); }
+    catch (error: any) { setOtherStatusMsg(`❌ 测试失败：${error?.message || '无法连接'}`); }
+    finally { setTestingOtherApis(false); }
+  };
+
+  const handleSaveImageGenerationApi = () => {
+    const next = currentImageApiConfig();
     setLocalImageGenUrl(next.baseUrl);
     setLocalImageGenKey(next.apiKey);
     setLocalImageGenModel(next.model);
     updateApiConfig({ imageGenerationApi: next });
     addToast('生图 API 配置已保存', 'success');
+  };
+
+  const fetchImageGenerationModels = async () => {
+    const baseUrl = normalizeApiBaseUrl(localImageGenUrl);
+    const apiKey = normalizeApiCredential(localImageGenKey);
+    if (!baseUrl || !apiKey) { setImageGenTestResult('❌ 请先填写生图连接和秘钥'); return; }
+    setTestingImageGenApi(true);
+    setImageGenTestResult(null);
+    try {
+      const response = await fetch(`${baseUrl}/models`, { method: 'GET', headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' } });
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      const models = extractModelIds(await safeResponseJson(response));
+      if (!models.length) throw new Error('模型列表为空或格式不兼容');
+      setAvailableImageGenModels(models);
+      localStorage.setItem(IMAGE_MODEL_LIST_STORAGE_KEY, JSON.stringify(models));
+      void snapshotLocalStorageMirror();
+      setImageModelFilter('');
+      setShowImageModelModal(true);
+      setImageGenTestResult(`✅ 获取到 ${models.length} 个生图模型`);
+    } catch (error: any) {
+      setImageGenTestResult(`❌ 拉取模型失败：${error?.message || '未知错误'}`);
+    } finally {
+      setTestingImageGenApi(false);
+    }
   };
 
   const handleTestImageGenerationApi = async () => {
@@ -1131,7 +1243,12 @@ const Settings: React.FC = () => {
       const models = Array.isArray(payload?.data)
         ? payload.data.map((item: any) => typeof item === 'string' ? item : item?.id).filter((id: any): id is string => !!id)
         : [];
-      if (models.length) setAvailableImageGenModels([...new Set(models)]);
+      if (models.length) {
+        const nextModels = normalizeModelIds([...new Set(models)]);
+        setAvailableImageGenModels(nextModels);
+        localStorage.setItem(IMAGE_MODEL_LIST_STORAGE_KEY, JSON.stringify(nextModels));
+        void snapshotLocalStorageMirror();
+      }
       setImageGenTestResult(`✅ 连接成功，模型「${model}」可用`);
       trackEvent('测试生图 API', { result: '成功' });
     } catch (error: any) {
@@ -2508,6 +2625,9 @@ const Settings: React.FC = () => {
         >
             <div className="space-y-3">
                 <p className="text-[10px] text-slate-400 leading-relaxed">填写 OpenAI 兼容的生图接口。这里的配置会用于后续角色生图，并与聊天 API 分开保存。</p>
+                {imageGenPresets.length > 0 && <div className="flex gap-2 flex-wrap">
+                    {imageGenPresets.map(preset => <button key={preset.id} type="button" onClick={() => loadImageGenerationPreset(preset)} className="px-3 py-1.5 rounded-lg border border-slate-200 bg-white text-[11px] text-slate-600">{preset.name}</button>)}
+                </div>}
                 <div>
                     <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1.5 block pl-1">连接</label>
                     <input type="text" value={localImageGenUrl} onChange={e => { setLocalImageGenUrl(e.target.value); setImageGenTestResult(null); }} placeholder="https://.../v1" className="w-full bg-white/60 border border-slate-200/60 rounded-xl px-4 py-2.5 text-sm font-mono focus:bg-white transition-all" />
@@ -2517,7 +2637,7 @@ const Settings: React.FC = () => {
                     <input type="password" value={localImageGenKey} onChange={e => { setLocalImageGenKey(e.target.value); setImageGenTestResult(null); }} placeholder="sk-..." className="w-full bg-white/60 border border-slate-200/60 rounded-xl px-4 py-2.5 text-sm font-mono focus:bg-white transition-all" />
                 </div>
                 <div>
-                    <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1.5 block pl-1">模型</label>
+                    <div className="flex items-center justify-between mb-1.5"><label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest pl-1">模型</label><span className="flex items-center gap-2"><button type="button" onClick={() => { void fetchImageGenerationModels(); }} disabled={testingImageGenApi || !localImageGenUrl.trim() || !localImageGenKey.trim()} className="text-[10px] text-pink-600 font-bold disabled:text-slate-300">刷新模型列表</button><button type="button" onClick={() => setShowImageModelModal(true)} disabled={!availableImageGenModels.length} className="text-[10px] text-pink-600 font-bold disabled:text-slate-300">选择模型</button></span></div>
                     <input list="image-generation-models" type="text" value={localImageGenModel} onChange={e => { setLocalImageGenModel(e.target.value); setImageGenTestResult(null); }} placeholder="例如 dall-e-3 / flux" className="w-full bg-white/60 border border-slate-200/60 rounded-xl px-4 py-2.5 text-sm font-mono focus:bg-white transition-all" />
                     <datalist id="image-generation-models">{availableImageGenModels.map(model => <option key={model} value={model} />)}</datalist>
                 </div>
@@ -2539,6 +2659,7 @@ const Settings: React.FC = () => {
                     <button type="button" onClick={handleTestImageGenerationApi} disabled={testingImageGenApi || !localImageGenUrl.trim() || !localImageGenKey.trim() || !localImageGenModel.trim()} className="py-3 rounded-2xl font-bold text-pink-600 border border-pink-200 bg-pink-50 active:scale-95 transition-all disabled:opacity-40">{testingImageGenApi ? '测试中…' : '测试连接'}</button>
                     <button type="button" onClick={handleSaveImageGenerationApi} className="py-3 rounded-2xl font-bold text-white bg-pink-500 shadow-lg shadow-pink-500/20 active:scale-95 transition-all">保存生图 API</button>
                 </div>
+                <div className="flex gap-2"><input value={newImagePresetName} onChange={e => setNewImagePresetName(e.target.value)} placeholder="预设名称" className="min-w-0 flex-1 bg-white/60 border border-slate-200/60 rounded-xl px-3 py-2 text-xs" /><button type="button" onClick={saveImageGenerationPreset} className="shrink-0 rounded-xl border border-pink-200 bg-pink-50 px-3 py-2 text-xs font-bold text-pink-600">保存预设</button></div>
                 {imageGenTestResult && <div className={`text-xs px-3 py-2 rounded-xl leading-relaxed ${imageGenTestResult.startsWith('✅') ? 'bg-emerald-50 text-emerald-700' : 'bg-red-50 text-red-600'}`}>{imageGenTestResult}</div>}
             </div>
         </SettingsSection>
@@ -2582,6 +2703,10 @@ const Settings: React.FC = () => {
                 <p className="text-[11px] text-slate-400 -mt-1 pl-1 leading-relaxed">
                     🎙️ 语音生成支持 <span className="font-semibold text-slate-500">MiniMax</span> 和 <span className="font-semibold text-slate-500">鱼声 Fish</span> 两家——下面两边都可以填，最后在底部「当前语音引擎」里二选一。
                 </p>
+
+                {otherApiPresets.length > 0 && <div className="flex gap-2 flex-wrap">
+                    {otherApiPresets.map(preset => <button key={preset.id} type="button" onClick={() => loadOtherApiPreset(preset)} className="px-3 py-1.5 rounded-lg border border-slate-200 bg-white text-[11px] text-slate-600">{preset.name}</button>)}
+                </div>}
 
                 <div className="group">
                     <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1.5 block pl-1">MiniMax 服务器</label>
@@ -2824,9 +2949,10 @@ const Settings: React.FC = () => {
                     )}
                 </div>
 
-                <button onClick={handleSaveOtherApis} className="w-full py-3 rounded-2xl font-bold text-white shadow-lg shadow-amber-500/20 bg-amber-500 active:scale-95 transition-all mt-2">
+                <div className="flex gap-2 mt-2"><input value={newOtherPresetName} onChange={e => setNewOtherPresetName(e.target.value)} placeholder="其他 API 预设名称" className="min-w-0 flex-1 bg-white/60 border border-slate-200/60 rounded-xl px-3 py-2 text-xs" /><button type="button" onClick={saveOtherApiPreset} className="shrink-0 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-bold text-amber-600">保存预设</button></div>
+                <div className="grid grid-cols-2 gap-2 mt-2"><button type="button" onClick={() => { void testOtherApis(); }} disabled={testingOtherApis} className="w-full py-3 rounded-2xl font-bold text-amber-700 border border-amber-200 bg-amber-50 active:scale-95 transition-all disabled:opacity-50">{testingOtherApis ? '测试中…' : '测试 MiniMax'}</button><button onClick={handleSaveOtherApis} className="w-full py-3 rounded-2xl font-bold text-white shadow-lg shadow-amber-500/20 bg-amber-500 active:scale-95 transition-all">
                     {otherStatusMsg || '保存其他 API'}
-                </button>
+                </button></div>
             </div>
         </SettingsSection>
 
@@ -3650,6 +3776,17 @@ const Settings: React.FC = () => {
                     </div>
                 </div>
             );
+        })()}
+      </Modal>
+
+      <Modal isOpen={showImageModelModal} title="选择生图模型" onClose={() => setShowImageModelModal(false)}>
+        {(() => {
+            const { filtered, commonPrefix } = imageModelPickerView;
+            return <div className="space-y-3 p-1">
+                <div className="flex gap-2"><input value={localImageGenModel} onChange={e => setLocalImageGenModel(e.target.value)} placeholder="手动输入模型名称..." className="min-w-0 flex-1 bg-white/50 border border-slate-200/60 rounded-xl px-4 py-2.5 text-sm font-mono" /><button type="button" onClick={() => setShowImageModelModal(false)} className="px-4 py-2.5 bg-pink-500 text-white text-sm font-bold rounded-xl">确定</button></div>
+                <input value={imageModelFilter} onChange={e => setImageModelFilter(e.target.value)} placeholder={`搜索 ${availableImageGenModels.length} 个模型...`} className="w-full bg-slate-50 border border-slate-200/60 rounded-xl px-4 py-2 text-xs" />
+                <div className="max-h-[40vh] overflow-y-auto no-scrollbar space-y-2">{filtered.length ? filtered.map(model => <button key={model} type="button" onClick={() => { setLocalImageGenModel(model); setShowImageModelModal(false); }} className={`w-full text-left px-4 py-3 rounded-xl text-sm font-mono ${model === localImageGenModel ? 'bg-pink-50 text-pink-600 font-bold' : 'bg-slate-50 text-slate-600'}`}>{commonPrefix && model.startsWith(commonPrefix) ? <><span className="text-slate-400">{commonPrefix}</span>{model.slice(commonPrefix.length)}</> : model}</button>) : <div className="text-center text-slate-400 py-8 text-xs">没有匹配的模型</div>}</div>
+            </div>;
         })()}
       </Modal>
 

@@ -64,7 +64,7 @@ import { Capacitor } from '@capacitor/core';
 import { formatBytes } from '../utils/format';
 import { isEmotionEvalSkipped } from '../utils/devDebug';
 import { toMountedWorldbook } from '../utils/worldbook';
-import { initLocalStorageMirror } from '../utils/lsMirror';
+import { initLocalStorageMirror, snapshotLocalStorageMirror } from '../utils/lsMirror';
 // 备份用：把存在 localStorage 的本机配置随导出一起带走（键名须与 importFullData 对齐）
 import { exportPostOfficeLocal } from '../utils/vrWorld/postOffice';
 import { exportSignalLocal } from '../utils/vrWorld/signal';
@@ -2845,7 +2845,18 @@ export const OSProvider: React.FC<{ children: React.ReactNode }> = ({ children }
         addToast('主题没能保存到本地（存储空间可能已满），重启后可能会还原', 'error');
     }
   };
-  const updateApiConfig = (updates: Partial<APIConfig>) => { const newConfig = normalizeApiConfig({ ...apiConfig, ...updates }); setApiConfig(newConfig); localStorage.setItem('os_api_config', JSON.stringify(newConfig)); };
+  const updateApiConfig = (updates: Partial<APIConfig>) => {
+    const newConfig = normalizeApiConfig({ ...apiConfig, ...updates });
+    setApiConfig(newConfig);
+    try {
+      localStorage.setItem('os_api_config', JSON.stringify(newConfig));
+    } catch (error) {
+      console.warn('[API] 写入 localStorage 失败，将依赖 IndexedDB 镜像保存', error);
+    }
+    // 立即写入 IndexedDB 镜像，不等 5 分钟定时器或 pagehide。
+    // 手机浏览器更新/清理网页数据时可能只丢 localStorage；下次启动会从镜像恢复。
+    void snapshotLocalStorageMirror();
+  };
   const updateRealtimeConfig = (updates: Partial<RealtimeConfig>) => { const newConfig = { ...realtimeConfig, ...updates }; setRealtimeConfig(newConfig); localStorage.setItem('os_realtime_config', JSON.stringify(newConfig)); };
 
   // Cloud Backup functions
