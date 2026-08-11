@@ -10,6 +10,8 @@ import { VALID_INTERJECTION_TAGS, cleanVoiceMarkupForDisplay } from '../../utils
 import { stripFishCuesForDisplay } from '../../utils/fishAudioTts';
 import { formatStatCount } from '../../utils/videoParser';
 import { trackEvent } from '../../utils/analytics';
+import { DB } from '../../utils/db';
+import { cacheGeneratedImage } from '../../utils/imageGeneration';
 import McdCard from './McdCard';
 import HtmlCard from './HtmlCard';
 import LuckinCard from './LuckinCard';
@@ -1488,18 +1490,35 @@ const MessageItem = React.memo(({
     const replyReadyRef = useRef(false);
     const [imagePreviewOpen, setImagePreviewOpen] = useState(false);
     const [loadedImageUrl, setLoadedImageUrl] = useState<string | null>(null);
+    const [imageLoadFailed, setImageLoadFailed] = useState(false);
 
     // 先把图片完整下载并解码，再交给页面显示，避免浏览器把渐进式图片一截一截地绘制出来。
     useEffect(() => {
         let cancelled = false;
         setLoadedImageUrl(null);
+        setImageLoadFailed(false);
         if (m.type !== 'image' || !m.content) return () => { cancelled = true; };
         const image = new Image();
         image.onload = async () => {
             try { await image.decode?.(); } catch { /* 某些图片格式不支持 decode，onload 已足够 */ }
             if (!cancelled) setLoadedImageUrl(m.content);
+
+            // 旧版消息只存了生图服务的临时 URL。只要这次还打开得出来，
+            // 就顺手转成本地 data URL，之后切后台、刷新或链接过期也能保留。
+            const generation = (m.metadata as any)?.imageGeneration;
+            if (generation?.status === 'success' && !/^data:image\//i.test(m.content)) {
+                void cacheGeneratedImage(m.content).then(async (cached) => {
+                    if (cancelled || cached === m.content) return;
+                    await DB.updateMessage(m.id, cached);
+                    await DB.updateMessageMetadata(m.id, prev => ({
+                        ...(prev || {}),
+                        imageGeneration: { ...(prev?.imageGeneration || {}), url: cached, cached: true },
+                    }));
+                    window.dispatchEvent(new CustomEvent('active-msg-progress', { detail: { charId: m.charId } }));
+                }).catch(() => { /* 保留原链接，无法跨域读取时不影响本次显示 */ });
+            }
         };
-        image.onerror = () => { if (!cancelled) setLoadedImageUrl(null); };
+        image.onerror = () => { if (!cancelled) { setLoadedImageUrl(null); setImageLoadFailed(true); } };
         image.src = m.content;
         return () => { cancelled = true; image.onload = null; image.onerror = null; };
     }, [m.type, m.content]);
@@ -3322,6 +3341,14 @@ const MessageItem = React.memo(({
                     <button type="button" className={`block w-[224px] max-w-[230px] overflow-hidden rounded-2xl text-left active:scale-[0.98] ${placeholderRatioClass}`} onClick={() => setImagePreviewOpen(true)}>
                         <img src={m.content} className="h-full w-full rounded-2xl object-cover" alt="角色生成的图片" />
                     </button>
+                ) : m.content && imageLoadFailed ? (
+                    <div className={`relative w-[224px] overflow-hidden rounded-2xl bg-white shadow-[0_5px_16px_rgba(15,23,42,0.14)] ${placeholderRatioClass}`}>
+                        <button type="button" aria-label="重新生成图片" title="图片链接已失效，点击重新生成" className="absolute right-3 top-3 z-10 flex h-9 w-9 items-center justify-center rounded-full bg-white text-slate-600 shadow-sm" onClick={() => onRetryImageGeneration?.(m)}><Camera size={19} weight="bold" /></button>
+                        <div className="flex h-full flex-col justify-end bg-slate-100/90 p-4">
+                            <div className="text-[11px] text-slate-400">照片链接已失效</div>
+                            <div className="mt-1 line-clamp-4 text-sm leading-relaxed text-slate-700">点击右上角重新生成</div>
+                        </div>
+                    </div>
                 ) : m.content ? (
                     <div className={`relative w-[224px] overflow-hidden rounded-2xl bg-white shadow-[0_5px_16px_rgba(15,23,42,0.14)] ${placeholderRatioClass}`}>
                         <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 bg-slate-100/95 text-slate-500">

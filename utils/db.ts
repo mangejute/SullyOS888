@@ -811,12 +811,14 @@ export const DB = {
             if (data) {
                 data.content = content;
                 store.put(data);
-                resolve();
             } else {
                 reject(new Error('Message not found'));
             }
         };
         req.onerror = () => reject(req.error);
+        transaction.oncomplete = () => resolve();
+        transaction.onerror = () => reject(transaction.error);
+        transaction.onabort = () => reject(transaction.error || new Error('Message update aborted'));
     });
   },
 
@@ -832,12 +834,14 @@ export const DB = {
             if (data) {
                 (data as any).metadata = updater((data as any).metadata);
                 store.put(data);
-                resolve();
             } else {
                 reject(new Error('Message not found'));
             }
         };
         req.onerror = () => reject(req.error);
+        transaction.oncomplete = () => resolve();
+        transaction.onerror = () => reject(transaction.error);
+        transaction.onabort = () => reject(transaction.error || new Error('Message metadata update aborted'));
     });
   },
 

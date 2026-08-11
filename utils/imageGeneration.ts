@@ -35,6 +35,112 @@ function responseImageUrl(payload: any): string | undefined {
   return undefined;
 }
 
+function dataUrlToBlob(dataUrl: string): Blob | null {
+  const match = String(dataUrl || '').match(/^data:([^;,]+)?(?:;base64)?,(.*)$/s);
+  if (!match) return null;
+  const mime = match[1] || 'image/jpeg';
+  const body = match[2] || '';
+  try {
+    if (/;base64,/i.test(dataUrl)) {
+      const binary = atob(body);
+      const bytes = new Uint8Array(binary.length);
+      for (let index = 0; index < binary.length; index += 1) bytes[index] = binary.charCodeAt(index);
+      return new Blob([bytes], { type: mime });
+    }
+    return new Blob([decodeURIComponent(body)], { type: mime });
+  } catch {
+    return null;
+  }
+}
+
+async function readImageResponse(response: Response): Promise<{ payload: any; url?: string }> {
+  const payload = await response.json().catch(() => ({}));
+  return { payload, url: responseImageUrl(payload) };
+}
+
+async function cacheImageUrl(url: string): Promise<string> {
+  // data URL 已经是永久的本地内容，不需要再次下载。
+  if (/^data:image\//i.test(url)) return url;
+  try {
+    const response = await fetch(url, { mode: 'cors', cache: 'no-store' });
+    if (!response.ok) throw new Error(`图片下载失败（${response.status}）`);
+    const blob = await response.blob();
+    if (!blob.type.startsWith('image/')) throw new Error('接口返回的不是图片');
+    return await new Promise<string>((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(String(reader.result || url));
+      reader.onerror = () => reject(reader.error || new Error('图片缓存失败'));
+      reader.readAsDataURL(blob);
+    });
+  } catch (error) {
+    // 有些中转站禁止浏览器跨域读取图片。此时保留原 URL，至少在链接有效期内
+    // 可以正常显示；MessageItem 会把失效链接显示为可手动重试，而不是无限转圈。
+    console.warn('[image-generation] 无法把远程图片缓存到本地', error);
+    return url;
+  }
+}
+
+/** 供旧聊天记录在仍可打开时补存为本地图片，避免临时图片链接过期。 */
+export async function cacheGeneratedImage(url: string): Promise<string> {
+  return cacheImageUrl(url);
+}
+
+async function latestCharacter(character: CharacterProfile): Promise<CharacterProfile> {
+  try {
+    const saved = (await DB.getAllCharacters()).find(item => item.id === character.id);
+    return saved || character;
+  } catch {
+    return character;
+  }
+}
+
+/**
+ * Reference images are an image-edit input, not a normal generations option.
+ * OpenAI-compatible services that implement reference images generally accept
+ * repeated `image` parts on /images/edits.  Some lightweight proxies do not
+ * expose that route, so the caller can fall back to their JSON extensions.
+ */
+async function generateWithReferenceImages(args: {
+  api: ImageApi;
+  prompt: string;
+  size: string;
+  aspectRatio: ImageAspectRatio;
+  references: string[];
+}): Promise<{ url?: string; unsupported: boolean; error?: string }> {
+  const form = new FormData();
+  form.append('model', args.api.model);
+  form.append('prompt', args.prompt);
+  form.append('n', '1');
+  form.append('size', args.size);
+  form.append('aspect_ratio', args.aspectRatio);
+  form.append('response_format', 'url');
+
+  let appended = 0;
+  args.references.forEach((reference, index) => {
+    const blob = dataUrlToBlob(reference);
+    if (!blob) return;
+    // Repeated `image` fields are the standard multipart representation for
+    // the array accepted by current OpenAI-compatible image edit endpoints.
+    form.append('image', blob, `character-reference-${index + 1}.jpg`);
+    appended += 1;
+  });
+  if (!appended) return { unsupported: false, error: '参考图格式无效，无法上传给生图接口' };
+
+  try {
+    const response = await fetch(endpoint(args.api.baseUrl, '/images/edits'), {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${args.api.apiKey}` },
+      body: form,
+    });
+    const { payload, url } = await readImageResponse(response);
+    if (response.ok && url) return { url, unsupported: false };
+    if ([404, 405, 415, 501].includes(response.status)) return { unsupported: true };
+    return { unsupported: false, error: payload?.error?.message || payload?.message || `参考图接口请求失败（${response.status}）` };
+  } catch (error: any) {
+    return { unsupported: true, error: error?.message || String(error) };
+  }
+}
+
 export async function generateCharacterImage(args: { api?: ImageApi; character: CharacterProfile; description: string; aspectRatio?: ImageAspectRatio }): Promise<string> {
   const api = args.api;
   if (!api?.baseUrl || !api.apiKey || !api.model) throw new Error('请先在系统设置中填写生图 API、秘钥和模型');
@@ -47,11 +153,22 @@ export async function generateCharacterImage(args: { api?: ImageApi; character: 
     `画面比例：${aspectRatio}。`,
     `本次画面描述：${args.description}`,
   ].filter(Boolean).join('\n');
-  const body: any = { model: api.model, prompt, n: 1, size: ratioSize[aspectRatio], aspect_ratio: aspectRatio, response_format: 'url' };
-  // 不同 OpenAI 兼容服务对参考图字段命名不统一；常见服务会忽略未知字段，
-  // 而支持它们的服务可以直接利用 data URL 保持角色一致性。
+  const size = ratioSize[aspectRatio];
+
+  // 参考图必须作为 multipart 图片上传。把 data URL 放进普通 generations JSON
+  // 并不能让模型看到图片，很多服务会静默忽略 reference_images/images 字段。
+  if (references.length) {
+    const editResult = await generateWithReferenceImages({ api, prompt, size, aspectRatio, references });
+    if (editResult.url) return editResult.url;
+    if (editResult.error && !editResult.unsupported) throw new Error(editResult.error);
+  }
+
+  const body: any = { model: api.model, prompt, n: 1, size, aspect_ratio: aspectRatio, response_format: 'url' };
+  // 兼容仍只提供 generations 路由、但实现了自定义参考图字段的中转服务。
+  // 这些字段不是标准 generations 参数，因此仅作为 /images/edits 不可用时的后备。
   if (references.length) {
     body.reference_images = references;
+    body.input_images = references;
     body.images = references;
   }
   const response = await fetch(endpoint(api.baseUrl, '/images/generations'), {
@@ -68,9 +185,13 @@ export async function generateCharacterImage(args: { api?: ImageApi; character: 
 
 export async function startImageGeneration(messageId: number, args: { api?: ImageApi; character: CharacterProfile; description: string; aspectRatio?: ImageAspectRatio }): Promise<void> {
   try {
-    const url = await generateCharacterImage(args);
+    // 参考图可能刚在设置页保存，React 闭包里的 character 仍是上一帧；
+    // 从 IndexedDB 重读，确保本次请求拿到保存后的最新 4 张图。
+    const character = await latestCharacter(args.character);
+    const remoteUrl = await generateCharacterImage({ ...args, character });
+    const url = await cacheImageUrl(remoteUrl);
     await DB.updateMessage(messageId, url);
-    await DB.updateMessageMetadata(messageId, prev => ({ ...(prev || {}), imageGeneration: { ...(prev?.imageGeneration || {}), status: 'success', url, error: undefined } }));
+    await DB.updateMessageMetadata(messageId, prev => ({ ...(prev || {}), imageGeneration: { ...(prev?.imageGeneration || {}), status: 'success', url, remoteUrl, cached: /^data:image\//i.test(url), error: undefined } }));
   } catch (error: any) {
     const message = error?.message || String(error);
     await DB.updateMessageMetadata(messageId, prev => ({ ...(prev || {}), imageGeneration: { ...(prev?.imageGeneration || {}), status: 'failed', error: message } }));
