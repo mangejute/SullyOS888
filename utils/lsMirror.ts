@@ -27,6 +27,7 @@ import { DB } from './db';
 export const MIRRORED_KEYS: readonly string[] = [
     'os_theme',                          // 外观主题（丢了 = 回初始主题）
     'os_api_config',                     // 全局 API（丢了 = 一切生成静默失效）
+    'os_speech_recognition_config',      // 语音识别独立记录（防旧配置迁移覆盖服务商选择）
     'os_api_presets',
     'os_image_generation_models',
     'os_image_generation_presets',

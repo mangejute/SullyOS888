@@ -1,4 +1,8 @@
-import type { APIConfig, ApiPreset } from '../types';
+import type { APIConfig, ApiPreset, SpeechRecognitionConfig } from '../types';
+
+// 语音识别是后加进总 API 配置的字段。独立保存一份，避免旧版配置迁移或其它 API
+// 保存操作写入旧结构时，把用户已经选择的识别服务悄悄退回浏览器默认值。
+export const SPEECH_RECOGNITION_STORAGE_KEY = 'os_speech_recognition_config';
 
 // Clipboard contents can carry zero-width characters that String.trim() does not
 // remove. They are never valid at the edges of an API URL, token, or model id.
@@ -16,9 +20,43 @@ export const normalizeApiCredential = (value: unknown): string =>
 export const normalizeApiModel = (value: unknown): string =>
   cleanEdgeCharacters(value);
 
+export function normalizeSpeechRecognitionConfig(value: unknown): SpeechRecognitionConfig | undefined {
+  if (!value || typeof value !== 'object') return undefined;
+  const config = value as Partial<SpeechRecognitionConfig>;
+  return {
+    provider: config.provider === 'siliconflow' ? 'siliconflow' : 'browser',
+    baseUrl: normalizeApiBaseUrl(config.baseUrl),
+    apiKey: normalizeApiCredential(config.apiKey),
+    model: normalizeApiModel(config.model),
+    language: cleanEdgeCharacters(config.language || 'zh-CN') || 'zh-CN',
+    cleanEmotionEmoji: config.cleanEmotionEmoji !== false,
+  };
+}
+
+/** Read the separate durable STT record. Invalid / incomplete old data is ignored safely. */
+export function loadStoredSpeechRecognitionConfig(): SpeechRecognitionConfig | undefined {
+  try {
+    const raw = localStorage.getItem(SPEECH_RECOGNITION_STORAGE_KEY);
+    return raw ? normalizeSpeechRecognitionConfig(JSON.parse(raw)) : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/** Keep the STT selection resilient when the surrounding API config gains new fields. */
+export function saveStoredSpeechRecognitionConfig(config: SpeechRecognitionConfig | undefined): void {
+  const normalized = normalizeSpeechRecognitionConfig(config);
+  if (!normalized) return;
+  try {
+    localStorage.setItem(SPEECH_RECOGNITION_STORAGE_KEY, JSON.stringify(normalized));
+  } catch {
+    // The main os_api_config and its IndexedDB mirror remain the fallback.
+  }
+}
+
 export function normalizeApiConfig(config: APIConfig): APIConfig {
   const visionApi = config.visionApi;
-  const speechRecognition = config.speechRecognition;
+  const speechRecognition = normalizeSpeechRecognitionConfig(config.speechRecognition);
   return {
     ...config,
     baseUrl: normalizeApiBaseUrl(config.baseUrl),
@@ -32,16 +70,7 @@ export function normalizeApiConfig(config: APIConfig): APIConfig {
         model: normalizeApiModel(visionApi.model),
       },
     } : {}),
-    ...(speechRecognition ? {
-      speechRecognition: {
-        provider: speechRecognition.provider === 'siliconflow' ? 'siliconflow' : 'browser',
-        baseUrl: normalizeApiBaseUrl(speechRecognition.baseUrl),
-        apiKey: normalizeApiCredential(speechRecognition.apiKey),
-        model: normalizeApiModel(speechRecognition.model),
-        language: cleanEdgeCharacters(speechRecognition.language || 'zh-CN') || 'zh-CN',
-        cleanEmotionEmoji: speechRecognition.cleanEmotionEmoji !== false,
-      },
-    } : {}),
+    ...(speechRecognition ? { speechRecognition } : {}),
   };
 }
 

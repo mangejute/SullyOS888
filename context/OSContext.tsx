@@ -28,7 +28,12 @@ import { buildFetchFailureDetail, classifyFetchFailure, describeReachabilityProb
 import { INSTALLED_APPS, HIDDEN_APP_NAMES } from '../constants';
 import { isAnalyticsRequestUrl, trackEvent, trackDataScaleOnce, trackCurrentAppearanceOnce, trackCurrentCharSettingsOnce, trackCurrentFeaturesOnce } from '../utils/analytics';
 import { collectAppearance, collectCharSettings, collectDataScale, collectFeatureFlagsAsync } from '../utils/analyticsSnapshot';
-import { normalizeApiConfig, normalizeApiPreset } from '../utils/apiConfigNormalize';
+import {
+  loadStoredSpeechRecognitionConfig,
+  normalizeApiConfig,
+  normalizeApiPreset,
+  saveStoredSpeechRecognitionConfig,
+} from '../utils/apiConfigNormalize';
 import { markBackupDone } from '../utils/backupReminder';
 import { normalizeCharacterImpression, normalizeCharacterDefaults } from '../utils/impression';
 import { normalizeModelIds } from '../utils/modelList';
@@ -1341,9 +1346,25 @@ export const OSProvider: React.FC<{ children: React.ReactNode }> = ({ children }
         }
         
         if (savedApi) {
-            const normalizedApi = normalizeApiConfig({ ...defaultApiConfig, ...JSON.parse(savedApi) });
+            const savedSpeechRecognition = loadStoredSpeechRecognitionConfig();
+            const normalizedApi = normalizeApiConfig({
+                ...defaultApiConfig,
+                ...JSON.parse(savedApi),
+                // This separate record intentionally wins: it is written only when the user
+                // saves the recognition settings, whereas old builds may rewrite the general
+                // API object without knowing this field exists.
+                ...(savedSpeechRecognition ? { speechRecognition: savedSpeechRecognition } : {}),
+            });
             setApiConfig(normalizedApi);
             localStorage.setItem('os_api_config', JSON.stringify(normalizedApi));
+            saveStoredSpeechRecognitionConfig(normalizedApi.speechRecognition);
+        } else {
+            const savedSpeechRecognition = loadStoredSpeechRecognitionConfig();
+            if (savedSpeechRecognition) {
+                const normalizedApi = normalizeApiConfig({ ...defaultApiConfig, speechRecognition: savedSpeechRecognition });
+                setApiConfig(normalizedApi);
+                localStorage.setItem('os_api_config', JSON.stringify(normalizedApi));
+            }
         }
         if (savedModels) {
             try { setAvailableModels(normalizeModelIds(JSON.parse(savedModels))); }
@@ -2846,10 +2867,28 @@ export const OSProvider: React.FC<{ children: React.ReactNode }> = ({ children }
     }
   };
   const updateApiConfig = (updates: Partial<APIConfig>) => {
-    const newConfig = normalizeApiConfig({ ...apiConfig, ...updates });
+    // localStorage is the last successfully saved complete config. Reading it here avoids a
+    // stale Settings panel overwriting a newer API subsection while React state is catching up.
+    let storedConfig: Partial<APIConfig> = {};
+    try {
+      const raw = localStorage.getItem('os_api_config');
+      if (raw) storedConfig = JSON.parse(raw) as Partial<APIConfig>;
+    } catch { /* malformed old data falls back to current state */ }
+    const preservedSpeechRecognition = updates.speechRecognition
+      ?? loadStoredSpeechRecognitionConfig()
+      ?? storedConfig.speechRecognition
+      ?? apiConfig.speechRecognition;
+    const newConfig = normalizeApiConfig({
+      ...defaultApiConfig,
+      ...apiConfig,
+      ...storedConfig,
+      ...updates,
+      ...(preservedSpeechRecognition ? { speechRecognition: preservedSpeechRecognition } : {}),
+    });
     setApiConfig(newConfig);
     try {
       localStorage.setItem('os_api_config', JSON.stringify(newConfig));
+      saveStoredSpeechRecognitionConfig(newConfig.speechRecognition);
     } catch (error) {
       console.warn('[API] 写入 localStorage 失败，将依赖 IndexedDB 镜像保存', error);
     }

@@ -1,8 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import {
+  loadStoredSpeechRecognitionConfig,
   normalizeApiBaseUrl,
   normalizeApiConfig,
   normalizeApiCredential,
+  saveStoredSpeechRecognitionConfig,
+  SPEECH_RECOGNITION_STORAGE_KEY,
 } from './apiConfigNormalize';
 
 describe('API config normalization', () => {
@@ -41,6 +44,26 @@ describe('API config normalization', () => {
         apiKey: 'vision-key',
         model: 'vision-model',
       },
+    });
+  });
+
+  it('keeps the selected speech recognition service in its durable record', () => {
+    localStorage.removeItem(SPEECH_RECOGNITION_STORAGE_KEY);
+    saveStoredSpeechRecognitionConfig({
+      provider: 'siliconflow',
+      baseUrl: ' https://api.siliconflow.cn/v1/ ',
+      apiKey: ' sk-stt ',
+      model: ' FunAudioLLM/SenseVoiceSmall ',
+      language: 'zh-CN',
+      cleanEmotionEmoji: true,
+    });
+    expect(loadStoredSpeechRecognitionConfig()).toEqual({
+      provider: 'siliconflow',
+      baseUrl: 'https://api.siliconflow.cn/v1',
+      apiKey: 'sk-stt',
+      model: 'FunAudioLLM/SenseVoiceSmall',
+      language: 'zh-CN',
+      cleanEmotionEmoji: true,
     });
   });
 });
