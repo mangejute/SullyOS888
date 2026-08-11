@@ -1036,12 +1036,12 @@ const ChatModals: React.FC<ChatModalsProps> = ({
             {modalType === 'message-options' && selectedMessage && (() => {
                 const rect = messageActionRect;
                 const viewportWidth = typeof window !== 'undefined' ? window.innerWidth : 390;
-                const popoverWidth = Math.min(360, Math.max(260, viewportWidth - 16));
+                const popoverWidth = Math.min(360, Math.max(220, viewportWidth - 16));
                 const left = rect ? Math.max(8, Math.min(rect.left, viewportWidth - popoverWidth - 8)) : 8;
                 const placeBelow = !rect || rect.top < 170;
                 const top = rect ? (placeBelow ? rect.bottom + 8 : rect.top - 8) : 80;
-                const actionButton = (label: string, onClick: () => void, tone = 'bg-[#f2f2f7] text-[#1c1c1e]') => (
-                    <button type="button" onClick={onClick} className={`shrink-0 rounded-xl px-3 py-2 text-[12px] font-semibold active:scale-[0.97] transition-transform ${tone}`}>
+                const actionButton = (label: string, onClick: () => void) => (
+                    <button type="button" onClick={onClick} className="shrink-0 rounded-xl bg-[#f2f2f7] px-3 py-2 text-[12px] font-semibold text-[#1c1c1e] active:bg-[#e5e5ea] active:scale-[0.97] transition-transform">
                         {label}
                     </button>
                 );
@@ -1051,19 +1051,19 @@ const ChatModals: React.FC<ChatModalsProps> = ({
                         onPointerDown={() => { setModalType('none'); onCloseMessageActions?.(); }}
                     >
                         <div
-                            className="fixed rounded-2xl border border-black/[0.08] bg-white/95 p-2 shadow-[0_10px_35px_rgba(0,0,0,0.18)] backdrop-blur-md"
-                            style={{ top, left, width: popoverWidth, transform: placeBelow ? 'none' : 'translateY(-100%)' }}
+                            className="fixed w-fit max-w-[calc(100vw-16px)] rounded-2xl border border-black/[0.08] bg-white/70 p-2 shadow-[0_10px_35px_rgba(0,0,0,0.16)] backdrop-blur-md"
+                            style={{ top, left, width: 'max-content', maxWidth: `calc(100vw - 16px)`, transform: placeBelow ? 'none' : 'translateY(-100%)' }}
                             onPointerDown={e => e.stopPropagation()}
                         >
-                            <div className="flex flex-wrap gap-1.5">
+                            <div className="flex max-w-full flex-nowrap gap-1.5 overflow-x-auto no-scrollbar">
                                 {actionButton('多选', () => { onEnterSelectionMode(); onCloseMessageActions?.(); })}
                                 {actionButton('引用', () => { onReplyMessage(); onCloseMessageActions?.(); })}
-                                {selectedMessage.role === 'assistant' && onRerollMessage && actionButton('重回', onRerollMessage, 'bg-[#e8f2ff] text-[#147ef5]')}
+                                {selectedMessage.role === 'assistant' && onRerollMessage && actionButton('重回', onRerollMessage)}
                                 {selectedMessage.type === 'text' && actionButton('编辑', onEditMessageStart)}
                                 {selectedMessage.type === 'text' && actionButton('复制', () => { onCopyMessage(); onCloseMessageActions?.(); })}
-                                {voiceAvailable && selectedMessage.role === 'assistant' && selectedMessage.type === 'text' && onGenerateVoice && actionButton('转语音', () => { onGenerateVoice(); onCloseMessageActions?.(); }, 'bg-[#eaf8ef] text-[#218739]')}
-                                {voiceDownloadable && onDownloadVoice && actionButton('下载语音', () => { onDownloadVoice(); onCloseMessageActions?.(); }, 'bg-[#eef7ff] text-[#147ef5]')}
-                                {actionButton('删除', () => { onDeleteMessage(); onCloseMessageActions?.(); }, 'bg-[#fff0f0] text-[#ff3b30]')}
+                                {voiceAvailable && selectedMessage.role === 'assistant' && selectedMessage.type === 'text' && onGenerateVoice && actionButton('转语音', () => { onGenerateVoice(); onCloseMessageActions?.(); })}
+                                {voiceDownloadable && onDownloadVoice && actionButton('下载语音', () => { onDownloadVoice(); onCloseMessageActions?.(); })}
+                                {actionButton('删除', () => { onDeleteMessage(); onCloseMessageActions?.(); })}
                             </div>
                         </div>
                     </div>
