@@ -168,6 +168,7 @@ const Chat: React.FC = () => {
     const [settingsHideSysLogs, setSettingsHideSysLogs] = useState(false);
     const [settingsReplyMinCount, setSettingsReplyMinCount] = useState(1);
     const [settingsReplyMaxCount, setSettingsReplyMaxCount] = useState(6);
+    const [settingsEmojiReplyProbability, setSettingsEmojiReplyProbability] = useState(40);
     const [settingsHtmlModeCustomPrompt, setSettingsHtmlModeCustomPrompt] = useState('');
     const [preserveContext, setPreserveContext] = useState(true);
     const [isVectorizing, setIsVectorizing] = useState(false);
@@ -182,6 +183,7 @@ const Chat: React.FC = () => {
         waterlineAlreadyAhead: boolean;
     } | null>(null);
     const [selectedMessage, setSelectedMessage] = useState<Message | null>(null);
+    const [messageActionRect, setMessageActionRect] = useState<{ top: number; left: number; right: number; bottom: number } | null>(null);
     const [selectedEmoji, setSelectedEmoji] = useState<Emoji | null>(null);
     const [selectedCategory, setSelectedCategory] = useState<EmojiCategory | null>(null); // For deletion modal
     const [editContent, setEditContent] = useState('');
@@ -946,6 +948,7 @@ const Chat: React.FC = () => {
         setSettingsHideSysLogs(char.hideSystemLogs || false);
         setSettingsReplyMinCount(Math.max(1, Math.min(20, Math.floor(char.replyMessageMinCount ?? 1))));
         setSettingsReplyMaxCount(Math.max(1, Math.min(20, Math.floor(char.replyMessageMaxCount ?? 6))));
+        setSettingsEmojiReplyProbability(Math.max(0, Math.min(100, Math.floor(char.emojiReplyProbability ?? 40))));
         setSettingsHtmlModeCustomPrompt((char as any).htmlModeCustomPrompt || '');
     }, [modalType, char?.id]);
 
@@ -1392,19 +1395,22 @@ const Chat: React.FC = () => {
         void triggerAI(latestMessages, undefined, () => setInstantSendingActive(false), { manualNudge: true });
     };
 
-    const handleReroll = async () => {
+    const handleReroll = async (targetMessage?: Message) => {
         if (isTyping || messages.length === 0) return;
 
-        const lastMsg = messages[messages.length - 1];
-        if (lastMsg.role !== 'assistant') return;
+        // 未指定目标时兼容“最新一轮重回”；指定历史 assistant 消息时，
+        // 从该轮开始回溯并删除后续对话，让 AI 在同一上下文节点重新接着聊。
+        const target = targetMessage || messages[messages.length - 1];
+        if (target.role !== 'assistant') return;
+        const targetIndex = messages.findIndex(m => m.id === target.id);
+        if (targetIndex < 0) return;
 
-        const toDeleteIds: number[] = [];
-        let index = messages.length - 1;
-        while (index >= 0 && messages[index].role === 'assistant') {
-            toDeleteIds.push(messages[index].id);
-            index--;
-        }
-
+        let roundStart = targetIndex;
+        while (roundStart > 0 && messages[roundStart - 1].role === 'assistant') roundStart--;
+        let userIndex = roundStart - 1;
+        while (userIndex >= 0 && messages[userIndex].role !== 'user') userIndex--;
+        const historyEnd = userIndex >= 0 ? userIndex + 1 : roundStart;
+        const toDeleteIds = messages.slice(historyEnd).map(m => m.id);
         if (toDeleteIds.length === 0) return;
 
         await DB.deleteMessages(toDeleteIds);
@@ -1412,13 +1418,13 @@ const Chat: React.FC = () => {
         // 重 roll 也删了消息：正常路径下这轮生成结束会再打脏一次，这里先打是兜住
         // 「触发失败没走到生成收尾」的路径，云端 fire_pack 不能停在删除前。
         markAmsgStateDirty({ char, userProfile, groups, realtimeConfig });
-        const newHistory = messages.slice(0, index + 1);
+        const newHistory = messages.slice(0, historyEnd);
         setMessages(newHistory);
         addToast('回溯对话中...', 'info');
         trackEvent('重新生成回复');
 
         // 重 roll：不注入上一轮残留的情绪 buff 与意识流（innerState），两边独立重新生成。
-        triggerAI(newHistory, undefined, undefined, { skipEmotionInjection: true });
+        void triggerAI(newHistory, undefined, undefined, { skipEmotionInjection: true });
     };
 
     const handleImageSelect = async (file: File) => {
@@ -1853,28 +1859,26 @@ const Chat: React.FC = () => {
         if (!targetChar || isScheduleGenerating) return;
         setIsScheduleGenerating(true);
         try {
-            // 用户主动点「重新生成」时，联动家园先观测一段真实事件，再以最新生活状态重建日程。
-            // 已经演到当前现实段则保留原剧情，只重新生成日程，避免同一段被重复推进。
+            // 日程与家园共享一把真实时间的钟：每次准备生成/重生成日程前，先让落后现实的家园
+            // 观测推进到当前时段。runWorldEpisode 自带 caught-up 判断，已追上时不会重复调用 API。
             let linkedWorldId: string | undefined;
             let observedBeats: import('../types').WorldCharBeat[] | undefined;
-            if (forceRegenerate) {
-                const linkedWorld = await getLinkedWorldForCharacter(targetChar.id);
-                if (linkedWorld) {
-                    linkedWorldId = linkedWorld.id;
-                    const observed = await runWorldEpisode({
-                        world: linkedWorld,
-                        characters,
-                        apiConfig,
-                        userProfile,
-                        groups,
-                        realtimeConfig,
-                        memoryPalaceConfig,
-                        trigger: 'observe',
-                    });
-                    if (observed.ok && observed.episode) {
-                        observedBeats = observed.episode.beats;
-                        await reloadMessages(visibleCountRef.current);
-                    }
+            const linkedWorld = await getLinkedWorldForCharacter(targetChar.id);
+            if (linkedWorld) {
+                linkedWorldId = linkedWorld.id;
+                const observed = await runWorldEpisode({
+                    world: linkedWorld,
+                    characters,
+                    apiConfig,
+                    userProfile,
+                    groups,
+                    realtimeConfig,
+                    memoryPalaceConfig,
+                    trigger: 'observe',
+                });
+                if (observed.ok && observed.episode) {
+                    observedBeats = observed.episode.beats;
+                    await reloadMessages(visibleCountRef.current);
                 }
             }
             const result = await generateDailyScheduleForChar(targetChar, userProfile, apiConfig, forceRegenerate);
@@ -1886,7 +1890,7 @@ const Chat: React.FC = () => {
                     if (refreshedWorld) {
                         await Promise.all(observedBeats.map(beat => syncWorldBeatToSchedule(refreshedWorld, beat)));
                     }
-                    addToast('家园已观测更新，日程已按最新事件重生成', 'success');
+                    if (forceRegenerate) addToast('家园已观测更新，日程已按最新事件重生成', 'success');
                 }
                 // 跨天后台重新生成也要刷云端：不刷的话角色到点照着昨天的作息表说话
                 markAmsgStateDirty({ char: targetChar, userProfile, groups, realtimeConfig });
@@ -2113,6 +2117,7 @@ const Chat: React.FC = () => {
             hideSystemLogs: settingsHideSysLogs,
             replyMessageMinCount: Math.max(1, Math.min(settingsReplyMaxCount, settingsReplyMinCount)),
             replyMessageMaxCount: Math.max(settingsReplyMinCount, Math.min(20, settingsReplyMaxCount)),
+            emojiReplyProbability: Math.max(0, Math.min(100, Math.floor(settingsEmojiReplyProbability))),
             htmlModeCustomPrompt: settingsHtmlModeCustomPrompt,
         } as any);
         setModalType('none');
@@ -2678,6 +2683,9 @@ const Chat: React.FC = () => {
     // Memoized callbacks for MessageItem to avoid busting React.memo
     const handleMessageLongPress = useCallback((msg: Message) => {
         setSelectedMessage(msg);
+        const node = document.getElementById(`chat-msg-${msg.id}`);
+        const rect = node?.getBoundingClientRect();
+        if (rect) setMessageActionRect({ top: rect.top, left: rect.left, right: rect.right, bottom: rect.bottom });
         setModalType('message-options');
     }, []);
 
@@ -3205,6 +3213,7 @@ const Chat: React.FC = () => {
                 settingsHideSysLogs={settingsHideSysLogs} setSettingsHideSysLogs={setSettingsHideSysLogs}
                 settingsReplyMinCount={settingsReplyMinCount} setSettingsReplyMinCount={setSettingsReplyMinCount}
                 settingsReplyMaxCount={settingsReplyMaxCount} setSettingsReplyMaxCount={setSettingsReplyMaxCount}
+                settingsEmojiReplyProbability={settingsEmojiReplyProbability} setSettingsEmojiReplyProbability={setSettingsEmojiReplyProbability}
                 preserveContext={preserveContext} setPreserveContext={setPreserveContext}
                 editContent={editContent} setEditContent={setEditContent}
                 archivePrompts={archivePrompts} selectedPromptId={selectedPromptId} setSelectedPromptId={(id: string) => {
@@ -3214,6 +3223,7 @@ const Chat: React.FC = () => {
                 }}
                 editingPrompt={editingPrompt} setEditingPrompt={setEditingPrompt} isSummarizing={isSummarizing} archiveProgress={archiveProgress}
                 selectedMessage={selectedMessage} selectedEmoji={selectedEmoji} activeCharacter={char} messages={messages}
+                messageActionRect={messageActionRect} onCloseMessageActions={() => { setModalType('none'); setSelectedMessage(null); setMessageActionRect(null); }}
                 allHistoryMessages={allHistoryMessages}
                 contextRangeSnapshot={historyContextRange}
                 
@@ -3229,6 +3239,7 @@ const Chat: React.FC = () => {
                 onCreatePrompt={createNewPrompt} onEditPrompt={editSelectedPrompt} onSavePrompt={handleSavePrompt} onDeletePrompt={handleDeletePrompt}
                 onSetHistoryStart={handleSetHistoryStart} onRestoreAdaptiveContext={restoreAdaptiveContext} onJumpToMessageInChat={handleJumpToMessageInChat} onEnterSelectionMode={handleEnterSelectionMode}
                 onReplyMessage={handleReplyMessage} onEditMessageStart={() => { if (selectedMessage) { setEditContent(selectedMessage.content); setModalType('edit-message'); } }}
+                onRerollMessage={() => { const target = selectedMessage; setModalType('none'); setSelectedMessage(null); setMessageActionRect(null); void handleReroll(target || undefined); }}
                 onConfirmEditMessage={confirmEditMessage} onDeleteMessage={handleDeleteMessage} onCopyMessage={handleCopyMessage} onDeleteEmoji={handleDeleteEmoji} onDeleteCategory={handleDeleteCategory}
                 allCharacters={characters} onSaveCategoryVisibility={handleSaveCategoryVisibility}
                 translationEnabled={translationEnabled}

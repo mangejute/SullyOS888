@@ -2506,6 +2506,8 @@ export interface CharacterProfile {
   /** 单次聊天回复的气泡数量范围（每个角色单独设置）。 */
   replyMessageMinCount?: number;
   replyMessageMaxCount?: number;
+  /** 每轮角色发送表情包的概率（0-100，默认 40）。 */
+  emojiReplyProbability?: number;
   contextLimit?: number;
   /**
    * AI 原文读取范围策略：
