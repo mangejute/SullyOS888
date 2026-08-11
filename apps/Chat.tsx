@@ -1372,14 +1372,24 @@ const Chat: React.FC = () => {
     // 顶栏 ⚡ 手动触发。instant 模式下给"上一条 assistant 之后的所有 user 消息"打上"准备中"
     // 三个点（从写入 DB 到 SSE POST 入队之间），由 onInstantPosted 清除 ——
     // 与 autoTriggerOnSend 自动路径的指示器行为一致。本地模式无此指示器，直接 triggerAI。
-    const handleManualTrigger = () => {
+    const handleManualTrigger = async () => {
         // 同上：上一轮还在跑时 triggerAI 会静默 reject，提前挡掉避免指示灯卡死。
         if (isTyping) return;
-        if (!isInstantConfigReady()) { triggerAI(messages, undefined, undefined, { manualNudge: true }); return; }
+        // 图片/卡片刚落库时 React state 还可能没来得及刷新；从数据库重读，保证点击发送时
+        // 角色一定能收到刚发送的图片，而不是拿到上一帧旧聊天列表。
+        let latestMessages = messages;
+        if (char) {
+            try {
+                latestMessages = await DB.getRecentMessagesByCharId(char.id, 200);
+            } catch (error) {
+                console.warn('[chat] 手动触发前读取最新消息失败，使用当前列表', error);
+            }
+        }
+        if (!isInstantConfigReady()) { void triggerAI(latestMessages, undefined, undefined, { manualNudge: true }); return; }
         // instantSendingActive 驱动 header "发送中…" 徽章 (拼接+发送窗口). 消息上的三个小圆点
         // 另走纯前端判定 (isTyping && 最后一条消息), 见渲染处.
         setInstantSendingActive(true);
-        triggerAI(messages, undefined, () => setInstantSendingActive(false), { manualNudge: true });
+        void triggerAI(latestMessages, undefined, () => setInstantSendingActive(false), { manualNudge: true });
     };
 
     const handleReroll = async () => {
@@ -2899,7 +2909,7 @@ const Chat: React.FC = () => {
     // 小雨手机：点输入栏发送 = 发给 AI 并请求回复；键盘回车仍只保存并发送消息。
     const handleSendCallback = useCallback(() => {
         if (!input.trim()) {
-            handleManualTrigger();
+            void handleManualTrigger();
             return;
         }
         handleSendText(undefined, undefined, undefined, true);
