@@ -1298,6 +1298,10 @@ export interface VRCardMeta {
     coReadChapter?: string;
     /** 共读完成后的本章感悟，用于聊天卡片与后续上下文。 */
     coReadReflection?: string;
+    /** 用户主动在阅读器保存的阅读进度卡片。 */
+    readingProgress?: boolean;
+    /** 进度卡片对应的篇/部与章节。 */
+    progressChapter?: string;
     // --- 听歌房专用 ---
     /** 本次评/听的当前歌（名 - 歌手） */
     songLabel?: string;

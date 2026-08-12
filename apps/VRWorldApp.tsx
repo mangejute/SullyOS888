@@ -3234,6 +3234,47 @@ const ReaderModal: React.FC<{
         writeUserBm(novel.id, idx);
         setCoReadMessage(`已保存：${chapterLabel(chapterForSeg(chapters, idx))}`);
     };
+    const shareReadingProgress = async () => {
+        if (peek) return;
+        const chapter = chapterForSeg(chapters, currentSeg);
+        const chapterName = chapterLabel(chapter);
+        saveProgress(currentSeg);
+        if (!selectedChar) {
+            setCoReadMessage(`已保存：${chapterName}`);
+            return;
+        }
+        try {
+            // 这是用户主动点下的「保存」，所以每次点击都留下一张真实聊天卡片。
+            // 关闭阅读器和翻页自动书签不走这里，避免把聊天记录刷满。
+            await DB.saveMessage({
+                charId: selectedChar.id,
+                role: 'user',
+                type: 'vr_card',
+                content: `我保存了《${novel.title}》的阅读进度：${chapterName}。我现在读到这里了，请记住。`,
+                metadata: {
+                    vrCard: true,
+                    room: 'library',
+                    activity: `保存了《${novel.title}》的阅读进度`,
+                    novelId: novel.id,
+                    novelTitle: novel.title,
+                    segRange: [chapter?.startSeg || currentSeg, currentSeg],
+                    readingProgress: true,
+                    progressChapter: chapterName,
+                },
+            } as any);
+            const memoryId = `vr_reading_progress_${novel.id}`;
+            const date = new Date().toLocaleDateString('en-CA');
+            const summary = `${userProfile?.name || '用户'}正在阅读《${novel.title}》${novel.author ? `（作者：${novel.author}）` : ''}，目前保存的进度是${chapterName}。这是用户主动告诉你要记住的阅读进度。`;
+            await updateCharacter(selectedChar.id, {
+                vrState: { ...(selectedChar.vrState || {}), novelBookmarks: { ...(selectedChar.vrState?.novelBookmarks || {}), [novel.id]: currentSeg } },
+                memories: [...(selectedChar.memories || []).filter(memory => memory.id !== memoryId), { id: memoryId, date, summary, mood: '阅读进度' }],
+            });
+            setCoReadMessage(`已保存并发给${selectedChar.name}：${chapterName}`);
+        } catch {
+            // 本地书签已经写入，聊天卡片失败时明确提示，不让用户误以为角色已记住。
+            setCoReadMessage(`进度已保存，但发送给${selectedChar.name}失败，请再点一次保存`);
+        }
+    };
     const jumpToSegment = (idx: number) => {
         const target = Math.min(Math.max(0, idx), Math.max(0, total - 1));
         const targetPage = findReaderPage(readerPages, { segIdx: target, offset: 0 });
@@ -3421,7 +3462,7 @@ const ReaderModal: React.FC<{
             {doodleMode && <canvas ref={doodleCanvasRef} className="absolute inset-0 z-[2]" style={{ touchAction: 'none', cursor: doodleTool === 'eraser' ? 'cell' : 'crosshair' }} onPointerDown={startDoodle} onPointerMove={moveDoodle} onPointerUp={endDoodle} onPointerCancel={endDoodle} />}
         </div>
         <div className="relative shrink-0" style={{ background: theme.paper, borderTop: `1px solid ${theme.accent}22`, paddingBottom: vrBottomPad('0.5rem') }}>
-            <div className="flex items-center gap-2 px-4 pt-2"><div className="relative min-w-0 max-w-[30%]"><select value={readerCharId} onChange={e => { setReaderCharId(e.target.value); setCoReadState('idle'); }} className="w-full appearance-none bg-transparent py-1 pr-4 text-[11px] font-semibold outline-none truncate" style={{ color: theme.accent }} aria-label="选择共读角色">{characters.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}</select><CaretDown size={12} weight="bold" className="pointer-events-none absolute right-0 top-1/2 -translate-y-1/2" style={{ color: theme.accent }} /></div><button onClick={() => setShowAudio(v => !v)} className="text-[11px] font-semibold whitespace-nowrap" style={{ color: theme.accent }}><SpeakerHigh size={14} className="inline mr-1" />音效</button><button onClick={() => saveProgress()} className="text-[11px] font-semibold whitespace-nowrap" style={{ color: theme.accent }}><BookmarkSimple size={14} className="inline mr-1" />保存</button><button onClick={readTogether} disabled={coReadState === 'loading'} className="ml-auto text-[11px] font-semibold disabled:opacity-45 whitespace-nowrap" style={{ color: theme.accent }}>{coReadState === 'loading' ? <CircleNotch size={14} className="inline mr-1 animate-spin" /> : <BookOpen size={14} className="inline mr-1" />}{coReadState === 'done' ? '已读完' : '一起读本章'}</button></div>
+            <div className="flex items-center gap-2 px-4 pt-2"><div className="relative min-w-0 max-w-[30%]"><select value={readerCharId} onChange={e => { setReaderCharId(e.target.value); setCoReadState('idle'); }} className="w-full appearance-none bg-transparent py-1 pr-4 text-[11px] font-semibold outline-none truncate" style={{ color: theme.accent }} aria-label="选择共读角色">{characters.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}</select><CaretDown size={12} weight="bold" className="pointer-events-none absolute right-0 top-1/2 -translate-y-1/2" style={{ color: theme.accent }} /></div><button onClick={() => setShowAudio(v => !v)} className="text-[11px] font-semibold whitespace-nowrap" style={{ color: theme.accent }}><SpeakerHigh size={14} className="inline mr-1" />音效</button><button onClick={() => { void shareReadingProgress(); }} className="text-[11px] font-semibold whitespace-nowrap" style={{ color: theme.accent }}><BookmarkSimple size={14} className="inline mr-1" />保存</button><button onClick={readTogether} disabled={coReadState === 'loading'} className="ml-auto text-[11px] font-semibold disabled:opacity-45 whitespace-nowrap" style={{ color: theme.accent }}>{coReadState === 'loading' ? <CircleNotch size={14} className="inline mr-1 animate-spin" /> : <BookOpen size={14} className="inline mr-1" />}{coReadState === 'done' ? '已读完' : '一起读本章'}</button></div>
             <div className="flex items-center justify-between px-5 py-2"><button disabled={page === 0} onClick={() => setPage(p => Math.max(0, p - 1))} className="text-[12px] disabled:opacity-30 font-semibold" style={{ color: theme.accent }}>‹ 上一页</button><span className="text-[10px]" style={{ color: theme.sub }}>{page + 1} / {totalPages}</span><button disabled={page >= totalPages - 1} onClick={() => setPage(p => Math.min(totalPages - 1, p + 1))} className="text-[12px] disabled:opacity-30 font-semibold" style={{ color: theme.accent }}>下一页 ›</button></div>
             {coReadMessage && <div className="px-4 pb-1 text-center text-[10px]" style={{ color: coReadState === 'error' ? '#bd554f' : theme.sub }}>{coReadMessage}</div>}
             {showAudio && <div className="mx-4 mb-2 rounded-lg p-2.5 space-y-2" style={{ background: theme.bg, border: `1px solid ${theme.accent}33` }}>

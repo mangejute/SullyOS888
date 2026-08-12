@@ -2488,6 +2488,7 @@ const MessageItem = React.memo(({
         const excerpts: string[] = Array.isArray(md.annotationExcerpts) ? md.annotationExcerpts : [];
         const coReadChapter: string = typeof md.coReadChapter === 'string' ? md.coReadChapter : '';
         const coReadReflection: string = typeof md.coReadReflection === 'string' ? md.coReadReflection : '';
+        const progressChapter: string = typeof md.progressChapter === 'string' ? md.progressChapter : '';
         const timeStr = new Date(m.timestamp).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' });
         const card = (
             <div className="w-64">
@@ -2511,6 +2512,12 @@ const MessageItem = React.memo(({
                                 ? activity
                                 : <><span className="font-bold text-amber-200">{charName || 'Ta'}</span> {activity}</>}
                         </p>
+                        {md.readingProgress && (
+                            <div className="mt-2.5 rounded-lg border border-indigo-200/20 bg-white/5 px-2.5 py-2">
+                                <div className="text-[9px] font-bold tracking-[0.14em] text-indigo-200/80">阅读进度已保存</div>
+                                <div className="mt-1 text-[11px] leading-[1.5] text-indigo-50/95">《{md.novelTitle || '这本书'}》{progressChapter || '正文'}</div>
+                            </div>
+                        )}
                         {coReadReflection && (
                             <div className="mt-2.5 rounded-lg border border-amber-200/20 bg-white/5 px-2.5 py-2">
                                 <div className="mb-1 text-[9px] font-bold tracking-[0.14em] text-amber-200/80">{coReadChapter ? `${coReadChapter} · 本章感悟` : '本章感悟'}</div>
