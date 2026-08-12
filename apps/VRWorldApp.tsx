@@ -2711,9 +2711,36 @@ const writeReaderPrefs = (id: string, value: ReaderPrefs) => {
 
 /** 老书没有目录时，尽可能从已保存正文的标题行重新识别章节；无法还原的 EPUB 才退回阅读位置。 */
 const resolvedChapters = (novel: VRWorldNovel): VRNovelChapter[] => {
+    const partRe = /^第[\d零〇一二三四五六七八九十百千万两]+[卷部篇册集](?:\s|$)/;
+    const numericRe = /^\d{1,3}$/;
+    const namedChapterRe = /^(?:第[\d零〇一二三四五六七八九十百千万两]+[章节回](?:\s|$)|(?:序章|楔子|后记|番外)(?:\s|$)|(?:chapter|part|volume)\s+[\divxlcdm]+(?:\s|$))/i;
+    // 已导入书如果正文确实含有“篇 + 01 / 第X章”标题，就用正文把旧目录修复为真实章节。
+    // 这专门兼容早期版本把一个 EPUB spine 误写成一条目录的存档，不需要用户重新导入。
+    const recovered: VRNovelChapter[] = [];
+    let recoveredPart: string | undefined;
+    novel.segments.forEach((segment, index) => {
+        const lines = segment.text.split(/\r?\n/).map(line => line.trim()).filter(Boolean).slice(0, 5);
+        const part = lines.find(line => line.length <= 100 && partRe.test(line));
+        if (part) recoveredPart = part;
+        const headingIndex = lines.findIndex(line => line.length <= 100 && (numericRe.test(line) || namedChapterRe.test(line)));
+        if (headingIndex < 0) return;
+        const heading = lines[headingIndex];
+        const possibleName = lines[headingIndex + 1];
+        const hasName = possibleName && possibleName.length <= 100 && !numericRe.test(possibleName) && !namedChapterRe.test(possibleName) && !partRe.test(possibleName);
+        const title = numericRe.test(heading) ? `第${heading.padStart(2, '0')}章${hasName ? ` ${possibleName}` : ''}` : heading;
+        const last = recovered[recovered.length - 1];
+        if (last) last.endSeg = index;
+        recovered.push({ id: `recovered_${index}`, index: recovered.length, title, partTitle: recoveredPart, startSeg: index, endSeg: novel.segments.length });
+    });
+    const usableRecovered = recovered.filter(chapter => chapter.endSeg > chapter.startSeg);
+    if (usableRecovered.length > 1) return usableRecovered;
+    // EPUB 导入时已经按原书 spine / 目录写入了章节范围。不能再从正文里的 "01"、"02"
+    // 二次猜目录，否则会覆盖掉“第几篇 / 第几部”的上下文，目录和共读都会不知道读到哪里。
+    if (novel.chapters && novel.chapters.length > 1) {
+        return novel.chapters.filter(chapter => chapter.endSeg > chapter.startSeg);
+    }
     const inferred: VRNovelChapter[] = [];
     let partTitle: string | undefined;
-    const partRe = /^第[\d零〇一二三四五六七八九十百千万两]+[卷部篇册集](?:\s|$)/;
     const chapterRe = /^(?:第[\d零〇一二三四五六七八九十百千万两]+[章节回](?:\s|$)|(?:序章|楔子|后记|番外)(?:\s|$)|(?:chapter|part|volume)\s+[\divxlcdm]+(?:\s|$)|\d{1,3})$/i;
     novel.segments.forEach((segment, index) => {
         const lines = segment.text.split(/\r?\n/).map(line => line.trim()).filter(Boolean).slice(0, 4);
@@ -2723,7 +2750,7 @@ const resolvedChapters = (novel: VRWorldNovel): VRNovelChapter[] => {
         if (!heading) return;
         const previous = inferred[inferred.length - 1];
         if (previous) previous.endSeg = index;
-        inferred.push({ id: `inferred_${index}`, index: inferred.length, title: heading, partTitle, startSeg: index, endSeg: novel.segments.length });
+        inferred.push({ id: `inferred_${index}`, index: inferred.length, title: readableChapterTitle(heading), partTitle, startSeg: index, endSeg: novel.segments.length });
     });
     if (inferred.length > 1) return inferred.filter(chapter => chapter.endSeg > chapter.startSeg);
     if (novel.chapters?.length) return novel.chapters.filter(c => c.endSeg > c.startSeg);
@@ -2735,7 +2762,9 @@ const resolvedChapters = (novel: VRWorldNovel): VRNovelChapter[] => {
 };
 const chapterForSeg = (chapters: VRNovelChapter[], segIdx: number) =>
     chapters.find(c => segIdx >= c.startSeg && segIdx < c.endSeg) || chapters[chapters.length - 1];
-const chapterLabel = (chapter: VRNovelChapter | undefined) => chapter ? `${chapter.partTitle ? `${chapter.partTitle} · ` : ''}${chapter.title}` : '正文';
+// 有些 EPUB 的子目录只写 "01"；界面与角色上下文都补全成可辨认的“第01章”。
+const readableChapterTitle = (title: string) => /^\d{1,3}$/.test(title.trim()) ? `第${title.trim().padStart(2, '0')}章` : title.trim();
+const chapterLabel = (chapter: VRNovelChapter | undefined) => chapter ? `${chapter.partTitle ? `${chapter.partTitle} · ` : ''}${readableChapterTitle(chapter.title)}` : '正文';
 
 type ReaderPosition = { segIdx: number; offset: number };
 type ReaderPage = { items: Array<{ segIdx: number; offset: number; text: string }> };
@@ -2794,6 +2823,83 @@ const buildReaderPages = (segments: VRWorldNovel['segments'], capacity: number, 
     return pages;
 };
 
+type ReaderMeasureLayout = { width: number; height: number; fontSize: number; lineHeight: number; fontFamily: string };
+
+/**
+ * 真正按浏览器排版高度分页，而不是猜测“每页多少字”。每次只在离屏纸面中放入候选文本，
+ * 由浏览器给出真实 scrollHeight；末段再二分到最后一个能放下的字符。
+ * 这样宽度、字体、行距或设备高度变化后，都能重新得到各自刚好填满的页。
+ */
+const measureReaderPages = async (
+    segments: VRWorldNovel['segments'], chapterStarts: Set<number>, layout: ReaderMeasureLayout,
+    cancelled: () => boolean,
+): Promise<ReaderPage[]> => {
+    if (typeof document === 'undefined' || layout.width < 40 || layout.height < 40) return [];
+    const probe = document.createElement('div');
+    Object.assign(probe.style, {
+        position: 'fixed', left: '-100000px', top: '0', width: `${layout.width}px`, height: `${layout.height}px`,
+        overflow: 'hidden', visibility: 'hidden', pointerEvents: 'none', contain: 'layout style paint', boxSizing: 'border-box',
+    });
+    document.body.appendChild(probe);
+    const makeBlock = (item: ReaderPage['items'][number]) => {
+        const block = document.createElement('div');
+        block.style.marginBottom = '20px';
+        const paragraph = document.createElement('p');
+        Object.assign(paragraph.style, {
+            margin: '0', whiteSpace: 'pre-wrap', color: '#111827', fontSize: `${layout.fontSize}px`,
+            lineHeight: String(layout.lineHeight), fontFamily: layout.fontFamily, textIndent: '2em',
+        });
+        paragraph.textContent = item.text;
+        block.appendChild(paragraph);
+        return block;
+    };
+    const fits = (items: ReaderPage['items']) => {
+        probe.replaceChildren();
+        items.forEach(item => probe.appendChild(makeBlock(item)));
+        return probe.scrollHeight <= probe.clientHeight + 0.5;
+    };
+    const pages: ReaderPage[] = [];
+    let items: ReaderPage['items'] = [];
+    const pushPage = () => { if (items.length) pages.push({ items }); items = []; };
+    try {
+        for (let segmentIndex = 0; segmentIndex < segments.length; segmentIndex += 1) {
+            if (cancelled()) return [];
+            const segment = segments[segmentIndex];
+            if (chapterStarts.has(segment.idx) && items.length) pushPage();
+            let offset = 0;
+            const source = segment.text;
+            while (offset < source.length) {
+                if (cancelled()) return [];
+                const rest = source.slice(offset);
+                const whole = { segIdx: segment.idx, offset, text: rest };
+                if (fits([...items, whole])) { items.push(whole); offset = source.length; continue; }
+                let low = 0;
+                let high = rest.length;
+                // 二分找出当前这页可容纳的最后一个字符，中文、英文混排都交给浏览器测量。
+                while (low < high) {
+                    const middle = Math.ceil((low + high) / 2);
+                    if (fits([...items, { segIdx: segment.idx, offset, text: rest.slice(0, middle) }])) low = middle;
+                    else high = middle - 1;
+                }
+                if (low === 0) {
+                    if (items.length) { pushPage(); continue; }
+                    // 极端大字号至少放一个字符，确保不会卡在同一位置。
+                    low = 1;
+                }
+                items.push({ segIdx: segment.idx, offset, text: rest.slice(0, low) });
+                offset += low;
+                if (offset < source.length) pushPage();
+            }
+            // 大书分批让出主线程，导入百万字 EPUB 时界面仍可响应。
+            if (segmentIndex % 24 === 23) await new Promise<void>(resolve => setTimeout(resolve, 0));
+        }
+        pushPage();
+        return pages;
+    } finally {
+        probe.remove();
+    }
+};
+
 const parseChapterAnnotations = (source: string, allowed: Map<number, string>): Array<{ segIdx: number; quote: string; content: string }> => {
     const cleaned = source.replace(/<think>[\s\S]*?<\/think>/gi, '').replace(/```json|```/gi, '').trim();
     const match = cleaned.match(/\{[\s\S]*\}/);
@@ -2844,10 +2950,10 @@ const ReaderModal: React.FC<{
 }> = ({ novel, characters, apiConfig, userProfile, updateCharacter, onClose, initialSeg, peek }) => {
     // 所有阅读都只用同一套翻页，不再让正文滚到被底栏遮住。
     const total = novel.segments.length;
-    const [pageCapacity, setPageCapacity] = useState(360);
     const chapters = useMemo(() => resolvedChapters(novel), [novel]);
     const chapterStarts = useMemo(() => new Set(chapters.map(chapter => chapter.startSeg)), [chapters]);
-    const readerPages = useMemo(() => buildReaderPages(novel.segments, pageCapacity, chapterStarts), [novel.segments, pageCapacity, chapterStarts]);
+    // 初始页仅用于让阅读器立即可见；随后会被真实像素测量后的分页替换。
+    const [readerPages, setReaderPages] = useState<ReaderPage[]>(() => buildReaderPages(novel.segments, 360, chapterStarts));
     const initialBm = useMemo(() => Math.min(Math.max(0, initialSeg != null ? initialSeg : readUserBm(novel.id)), Math.max(0, total - 1)), [novel.id, total, initialSeg]);
     const [annotations, setAnnotations] = useState<VRNovelAnnotation[]>([]);
     const [themeId, setThemeId] = useState(() => localStorage.getItem(READER_THEME_KEY) || 'paper');
@@ -2869,8 +2975,12 @@ const ReaderModal: React.FC<{
     const [doodleTool, setDoodleTool] = useState<'pen' | 'eraser'>('pen');
     const [doodleWidth, setDoodleWidth] = useState(3);
     const [doodleRevision, setDoodleRevision] = useState(0);
-    const scrollRef = useRef<HTMLDivElement>(null);
     const paginationAnchorRef = useRef<ReaderPosition | null>(null);
+    const readerPagesRef = useRef(readerPages);
+    const pageRef = useRef(page);
+    const paginationRunRef = useRef(0);
+    readerPagesRef.current = readerPages;
+    pageRef.current = page;
     const doodleAreaRef = useRef<HTMLDivElement>(null);
     const doodleCanvasRef = useRef<HTMLCanvasElement>(null);
     const doodlesByViewRef = useRef<Map<string, ReaderDoodleStroke[]>>(new Map());
@@ -2893,8 +3003,6 @@ const ReaderModal: React.FC<{
     const isChapterLastPage = !currentChapter || !readerPages[page + 1] || !readerPages[page + 1].items.some(item => item.segIdx < currentChapter.endSeg);
     const totalPages = Math.max(1, readerPages.length);
     const renderSegs = (readerPages[page]?.items || []).map(item => ({ idx: item.segIdx, text: item.text }));
-    const nextPageStart = readerPages[page + 1]?.items[0]?.segIdx;
-    const canFillCurrentPage = nextPageStart != null && !chapterStarts.has(nextPageStart);
     const readerFont = prefs.fontFamily === 'sans' ? `'Noto Sans SC','Microsoft YaHei',sans-serif` : prefs.fontFamily === 'system' ? 'system-ui,sans-serif' : `'Noto Serif SC','Songti SC','Noto Serif','Georgia',serif`;
     // 涂鸦是会话内的临时纸张：翻页后可翻回看，退出阅读器即随组件卸载清空。
     const doodleViewKey = `page:${page}`;
@@ -2902,21 +3010,35 @@ const ReaderModal: React.FC<{
     useLayoutEffect(() => {
         const area = doodleAreaRef.current;
         if (!area) return;
-        const recalculate = () => {
-            const { width, height } = area.getBoundingClientRect();
-            if (!width || !height) return;
-            const charsPerLine = Math.max(8, Math.floor((width - 40) / Math.max(12, fontSize * 1.02)));
-            const visibleLines = Math.max(3, Math.floor((height - 36) / Math.max(18, fontSize * (prefs.lineHeight || 1.9))));
-            // 首行缩进、段距与批注按钮预留 12%，让每页既尽量填满也不溢出。
-            const next = Math.max(100, Math.floor(charsPerLine * visibleLines * 0.88));
-            setPageCapacity(current => current === next ? current : next);
+        let debounce: ReturnType<typeof setTimeout> | undefined;
+        const repaginate = () => {
+            const rect = area.getBoundingClientRect();
+            const width = Math.max(0, Math.floor(rect.width - 40)); // 正文左右各 20px
+            const height = Math.max(0, Math.floor(rect.height - 32)); // 正文上下各 16px
+            if (width < 40 || height < 40) return;
+            const run = ++paginationRunRef.current;
+            const visible = readerPagesRef.current[pageRef.current]?.items[0];
+            void measureReaderPages(novel.segments, chapterStarts, {
+                width, height, fontSize, lineHeight: prefs.lineHeight || 1.9, fontFamily: readerFont,
+            }, () => run !== paginationRunRef.current).then(pages => {
+                if (run !== paginationRunRef.current || !pages.length) return;
+                if (visible) paginationAnchorRef.current = { segIdx: visible.segIdx, offset: visible.offset };
+                setReaderPages(pages);
+            });
         };
-        recalculate();
-        if (typeof ResizeObserver === 'undefined') return;
-        const observer = new ResizeObserver(recalculate);
+        repaginate();
+        if (typeof ResizeObserver === 'undefined') return () => { paginationRunRef.current += 1; };
+        const observer = new ResizeObserver(() => {
+            if (debounce) clearTimeout(debounce);
+            debounce = setTimeout(repaginate, 90);
+        });
         observer.observe(area);
-        return () => observer.disconnect();
-    }, [fontSize, prefs.lineHeight, doodleMode, showAudio, showCtl]);
+        return () => {
+            paginationRunRef.current += 1;
+            if (debounce) clearTimeout(debounce);
+            observer.disconnect();
+        };
+    }, [novel.id, novel.segments, chapterStarts, fontSize, prefs.lineHeight, readerFont]);
 
     useEffect(() => {
         const anchor = paginationAnchorRef.current;
@@ -2928,23 +3050,6 @@ const ReaderModal: React.FC<{
         setPage(current => Math.min(current, Math.max(0, readerPages.length - 1)));
     }, [readerPages]);
 
-    // 估算容量只是起点：以实际排版后的高度为准，溢出缩小，正文未读完却留白时扩大。
-    useLayoutEffect(() => {
-        const content = scrollRef.current;
-        if (!content || !content.clientHeight) return;
-        const ratio = content.scrollHeight / content.clientHeight;
-        if (ratio > 1.001 && pageCapacity > 100) {
-            paginationAnchorRef.current = { segIdx: currentSeg, offset: readerPages[page]?.items[0]?.offset || 0 };
-            const overflow = content.scrollHeight - content.clientHeight;
-            setPageCapacity(current => Math.max(100, current - Math.max(12, Math.ceil(overflow / Math.max(1, fontSize) * 8))));
-            return;
-        }
-        // 章节末页不能混入下一章，所以那种留白是正常的；同章正文则继续往当前页装。
-        if (ratio < 0.88 && canFillCurrentPage) {
-            paginationAnchorRef.current = { segIdx: currentSeg, offset: readerPages[page]?.items[0]?.offset || 0 };
-            setPageCapacity(current => current + Math.max(24, Math.round(current * Math.min(0.22, (0.94 - ratio) * 0.75))));
-        }
-    }, [page, pageCapacity, currentSeg, canFillCurrentPage, fontSize, prefs.lineHeight, renderSegs.length, chapterReflection?.content, showAudio, doodleMode]);
 
     const renderDoodles = useCallback(() => {
         const canvas = doodleCanvasRef.current;
@@ -3171,7 +3276,7 @@ const ReaderModal: React.FC<{
             <span className="absolute right-4 -bottom-4 text-[9px]" style={{ color: theme.sub }}>退出阅读后自动清除</span>
         </div>}
         <div ref={doodleAreaRef} className="relative flex-1 min-h-0">
-            <div ref={scrollRef} className="relative h-full overflow-hidden px-5 py-4" style={{ background: backgroundUrl ? 'transparent' : theme.bg, touchAction: doodleMode ? 'none' : 'pan-x' }}>
+            <div className="relative h-full overflow-hidden px-5 py-4" style={{ background: backgroundUrl ? 'transparent' : theme.bg, touchAction: doodleMode ? 'none' : 'pan-x' }}>
                 {renderSegs.map(seg => <SegBlock key={seg.idx} seg={seg} anns={annBySeg.get(seg.idx) || []} theme={theme} fontSize={fontSize} lineHeight={prefs.lineHeight || 1.9} fontFamily={readerFont} nameOf={nameOf} onOpenAnnotation={setSelectedAnnotation} highlight={peek && seg.idx === initialSeg} />)}
                 {chapterReflection && isChapterLastPage && <div className="mt-6 border-t pt-4" style={{ borderColor: `${theme.accent}33`, color: theme.text }}><div className="mb-2 text-[11px] font-bold" style={{ color: theme.accent }}>{chapterReflection.authorName} 的本章感悟</div><p className="whitespace-pre-wrap text-[13px] leading-7">{stripLeakedAttrs(chapterReflection.content)}</p></div>}
             </div>
