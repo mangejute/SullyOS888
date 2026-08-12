@@ -310,3 +310,13 @@ export function useBlobRefAudioUrl(value: string | undefined | null, mimeType?: 
 
     return url;
 }
+
+/** 读取本地音频 Blob，供播放器在 Android Edge 的 object URL 失败时即时降级。 */
+export async function getBlobRefAudioDataUrl(value: string | undefined | null, mimeType?: string): Promise<string | undefined> {
+    if (!value) return undefined;
+    if (!isBlobRef(value)) return value;
+    const blob = await getBlobForRef(value);
+    if (!blob) return undefined;
+    const typedBlob = mimeType && blob.type !== mimeType ? new Blob([blob], { type: mimeType }) : blob;
+    return blobToDataUrl(typedBlob);
+}

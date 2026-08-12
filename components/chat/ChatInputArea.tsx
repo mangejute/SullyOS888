@@ -35,7 +35,8 @@ interface ChatInputAreaProps {
     /** 提供时整体替换内置 actions 双页网格——群聊传自己的功能格。不传 = 原行为 */
     actionsContent?: React.ReactNode;
     onPanelAction: (type: string, payload?: any) => void;
-    onImageSelect: (file: File) => void | Promise<void>;
+    /** 多选图片会先全部写入聊天记录，仅在最后一张完成后触发一次角色回复。 */
+    onImageSelect: (file: File, triggerReply?: boolean) => void | Promise<void>;
     isSummarizing: boolean;
     // Categories Support
     categories?: EmojiCategory[];
@@ -148,8 +149,10 @@ const ChatInputArea: React.FC<ChatInputAreaProps> = ({
         const files = Array.from(e.target.files || []);
         // 先清空 input，方便用户随后再次选择同一张图。
         e.target.value = '';
-        for (const file of files) {
-            await onImageSelect(file);
+        for (let index = 0; index < files.length; index += 1) {
+            // 多选图片必须先全部落到记录中，角色才能一次看见这一组图片。
+            // 只由最后一张触发回复，避免前一张已开始回复后把后续图片阻断。
+            await onImageSelect(files[index], index === files.length - 1);
         }
     };
 

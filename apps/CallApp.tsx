@@ -73,7 +73,7 @@ import {
   type AvatarTouchHit,
   type AvatarTouchRecord,
 } from '../utils/avatarTouch';
-import { dataUrlToBlob, deleteBlobRef, isBlobRef, putImageBlob, useBlobRefAudioUrl, useBlobRefUrl } from '../utils/blobRef';
+import { dataUrlToBlob, deleteBlobRef, getBlobRefAudioDataUrl, isBlobRef, putImageBlob, useBlobRefAudioUrl, useBlobRefUrl } from '../utils/blobRef';
 import { CALL_LIGHT_THEME_CSS } from '../components/call/callLightTheme';
 import AvatarTouchFeedback, { type AvatarTouchEffect } from '../components/call/AvatarTouchFeedback';
 import { isBuiltinSullyLive2D, setBuiltinSullyLive2DQuality, type BuiltinSullyLive2DQuality } from '../utils/builtinSullyLive2D';
@@ -858,6 +858,34 @@ const CallApp: React.FC = () => {
   const selectedSleepAudioUrl = selectedSleepNoise && 'audioUrl' in selectedSleepNoise
     ? selectedSleepNoise.audioUrl
     : selectedSleepNoiseUrl;
+  const playSleepAudioElement = (audio: HTMLAudioElement) => {
+    audio.play().then(() => {
+      setSleepNoiseState('playing');
+      setSleepNoiseError('');
+    }).catch(async () => {
+      // Android Edge 有时能从 IndexedDB 读 Blob，却拒绝把 blob: URL 交给媒体解码器。
+      // 这时仅为正在播放的这一首转 data URL，再试一次，不要求用户重新上传。
+      const custom = selectedSleepNoise && 'audioRef' in selectedSleepNoise ? selectedSleepNoise : undefined;
+      if (!custom?.audioRef || audio.dataset.sleepFallback === 'data-url') {
+        setSleepNoiseState('error');
+        setSleepNoiseError('浏览器没有读取到这条音频，请先点一次播放键；仍失败可切换另一条音频。');
+        return;
+      }
+      try {
+        const fallback = await getBlobRefAudioDataUrl(custom.audioRef, custom.mimeType);
+        if (!fallback) throw new Error('audio missing');
+        audio.dataset.sleepFallback = 'data-url';
+        audio.src = fallback;
+        audio.load();
+        await audio.play();
+        setSleepNoiseState('playing');
+        setSleepNoiseError('');
+      } catch {
+        setSleepNoiseState('error');
+        setSleepNoiseError('这条本地音频读取失败，不需要重传，切换另一条后再试。');
+      }
+    });
+  };
   const stopSleepMode = () => {
     if (callHangupTimerRef.current) clearTimeout(callHangupTimerRef.current);
     if (sleepNoiseTimerRef.current) clearTimeout(sleepNoiseTimerRef.current);
@@ -3813,7 +3841,7 @@ ${sentencePlan}`;
                   onPause={() => { if (sleeping) setSleepNoiseState('idle'); }}
                   onError={() => { setSleepNoiseState('error'); setSleepNoiseError('这条音频无法在当前浏览器播放，请换一个内置音频或重新上传。'); }}
                 />
-                <button type="button" onClick={playSelectedSleepNoise} className="mt-2 w-full rounded-xl border border-white/30 bg-white/[.1] py-2.5 text-xs font-semibold text-white active:scale-[.98]">播放白噪音</button>
+                <button type="button" onClick={() => { const audio = sleepAudioRef.current; if (audio) playSleepAudioElement(audio); }} className="mt-2 w-full rounded-xl border border-white/30 bg-white/[.1] py-2.5 text-xs font-semibold text-white active:scale-[.98]">播放白噪音</button>
               </div>}
               {selectedSleepAudioUrl && <p className="mt-2 text-[10px] leading-4 text-white/55">Edge 手机上如果自动播放被拦截，请直接点上方播放器的播放键；点一次即可持续循环。</p>}
               {sleeping && selectedSleepNoise && <button type="button" onClick={playSelectedSleepNoise} className="mt-3 w-full rounded-xl border border-white/30 bg-white/[.1] py-2.5 text-xs font-semibold text-white active:scale-[.98]">重新播放白噪音</button>}
