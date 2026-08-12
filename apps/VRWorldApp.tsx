@@ -2833,7 +2833,7 @@ const ReaderModal: React.FC<{
     const [showToc, setShowToc] = useState(false);
     const [showAudio, setShowAudio] = useState(false);
     const [selectedAnnotation, setSelectedAnnotation] = useState<VRNovelAnnotation | null>(null);
-    const [page, setPage] = useState(() => Math.max(0, readerPages.findIndex(item => item.segIdx >= initialBm)));
+    const [page, setPage] = useState(() => Math.max(0, readerPages.findIndex(readerPage => readerPage.items.some(item => item.segIdx >= initialBm))));
     const [readerCharId, setReaderCharId] = useState(() => characters[0]?.id || '');
     const [coReadState, setCoReadState] = useState<'idle' | 'loading' | 'done' | 'error'>('idle');
     const [coReadMessage, setCoReadMessage] = useState('');
@@ -2890,6 +2890,14 @@ const ReaderModal: React.FC<{
     }, [fontSize, prefs.lineHeight, doodleMode, showAudio, showCtl]);
 
     useEffect(() => setPage(current => Math.min(current, Math.max(0, readerPages.length - 1))), [readerPages.length]);
+
+    // 估算容量只是起点：以实际排版后的滚动高度为准，最后一行一旦被底栏挤住就自动收一点。
+    useLayoutEffect(() => {
+        const content = scrollRef.current;
+        if (!content || content.scrollHeight <= content.clientHeight + 1 || pageCapacity <= 100) return;
+        const overflow = content.scrollHeight - content.clientHeight;
+        setPageCapacity(current => Math.max(100, current - Math.max(12, Math.ceil(overflow / Math.max(1, fontSize) * 8))));
+    }, [page, pageCapacity, fontSize, prefs.lineHeight, renderSegs.length, showAudio, doodleMode]);
 
     const renderDoodles = useCallback(() => {
         const canvas = doodleCanvasRef.current;
@@ -2963,7 +2971,9 @@ const ReaderModal: React.FC<{
     };
     const jumpToSegment = (idx: number) => {
         const target = Math.min(Math.max(0, idx), Math.max(0, total - 1));
-        setPage(Math.max(0, readerPages.findIndex(item => item.segIdx >= target)));
+        const targetPage = readerPages.findIndex(readerPage => readerPage.items.some(item => item.segIdx >= target));
+        // 章节起点若正好在旧书的最后一个不完整段，跳到最接近的末页，而不是错误回到首页。
+        setPage(targetPage >= 0 ? targetPage : Math.max(0, readerPages.length - 1));
         setShowToc(false);
         if (!peek) writeUserBm(novel.id, target);
     };
