@@ -3865,7 +3865,8 @@ export const OSProvider: React.FC<{ children: React.ReactNode }> = ({ children }
                       if (key.startsWith('vr_user_bm_')
                           || key.startsWith('vr_reader_prefs_')
                           || key === 'vr_reader_theme'
-                          || key === 'vr_reader_font') {
+                          || key === 'vr_reader_font'
+                          || key === 'vr_reader_style_presets') {
                           const value = localStorage.getItem(key);
                           if (value !== null) readerLocal[key] = value;
                       }
@@ -4733,7 +4734,8 @@ export const OSProvider: React.FC<{ children: React.ReactNode }> = ({ children }
                   const isReaderKey = key.startsWith('vr_user_bm_')
                       || key.startsWith('vr_reader_prefs_')
                       || key === 'vr_reader_theme'
-                      || key === 'vr_reader_font';
+                      || key === 'vr_reader_font'
+                      || key === 'vr_reader_style_presets';
                   if (isReaderKey && typeof value === 'string') {
                       safeSetLocalStorage(key, value);
                   }

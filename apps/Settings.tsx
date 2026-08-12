@@ -579,6 +579,7 @@ const Settings: React.FC = () => {
   const [visionModelFilter, setVisionModelFilter] = useState('');
   const [showExportModal, setShowExportModal] = useState(false); // Used for completion now
   const [showResetConfirm, setShowResetConfirm] = useState(false);
+  const [isTrimmingChatCache, setIsTrimmingChatCache] = useState(false);
   const [showPresetModal, setShowPresetModal] = useState(false);
   const [showApiCallLog, setShowApiCallLog] = useState(false);
   const [showRealtimeModal, setShowRealtimeModal] = useState(false);
@@ -1616,6 +1617,44 @@ const Settings: React.FC = () => {
       }
   };
 
+  // 只清各角色单聊中最新 1000 条以前的记录。保留最新上下文、角色档案/记忆、
+  // 群聊和书库；同时删掉这些旧消息产生过的本地语音缓存，避免只删文字不腾空间。
+  const handleTrimOldChatCache = async () => {
+      if (isTrimmingChatCache) return;
+      setIsTrimmingChatCache(true);
+      try {
+          const counts = await Promise.all(characters.map(async character => ({
+              character,
+              count: await DB.countPrivateMessagesByCharId(character.id),
+          })));
+          const candidates = counts.filter(item => item.count > 1000);
+          const total = candidates.reduce((sum, item) => sum + item.count - 1000, 0);
+          if (!candidates.length) {
+              addToast('每个角色的私聊都没有超过 1000 条，无需清理', 'success');
+              return;
+          }
+          const details = candidates.slice(0, 12).map(item => `• ${item.character.name}：保留最新 1000 条，删除 ${item.count - 1000} 条旧消息`).join('\n');
+          const more = candidates.length > 12 ? `\n• 另外 ${candidates.length - 12} 个角色也会按同样规则清理` : '';
+          const confirmed = window.confirm(`将清理 ${total} 条较早的私聊记录：\n\n${details}${more}\n\n会同时删除这些消息里的图片、表情、文字和已缓存语音；角色记忆、最新 1000 条、群聊、书库和备份文件不会删除。\n\n此操作不可撤销。建议先导出完整备份后再继续。`);
+          if (!confirmed) return;
+          const secondConfirmed = window.confirm('再确认一次：现在开始永久清理旧私聊记录吗？');
+          if (!secondConfirmed) return;
+          let deleted = 0;
+          for (const item of candidates) {
+              const result = await DB.trimPrivateMessages(item.character.id, 1000);
+              deleted += result.deletedCount;
+          }
+          trackEvent('清理旧聊天缓存', { result: 'success' });
+          addToast(`清理完成：删除 ${deleted} 条旧私聊记录，已保留每个角色最新 1000 条`, 'success');
+      } catch (error) {
+          console.error('[Settings] 清理旧聊天缓存失败', error);
+          trackEvent('清理旧聊天缓存', { result: 'failed' });
+          addToast('清理中断，未完成的角色不会受影响；请稍后重试', 'error');
+      } finally {
+          setIsTrimmingChatCache(false);
+      }
+  };
+
   const handleExport = async (mode: 'text_only' | 'media_only' | 'full') => {
       trackEvent('导出本地备份', { scope: mode });
       try {
@@ -2339,6 +2378,13 @@ const Settings: React.FC = () => {
             </button>
             <p className="text-[10px] text-slate-400 px-1 mb-4 leading-relaxed">
                 清理已删除角色遗留的「幽灵表情包」：专属分类的角色没了之后，单聊表情面板看不到它、群聊面板却还冒出来。先扫描列出结果，确认后才会删除。
+            </p>
+
+            <button onClick={handleTrimOldChatCache} disabled={isTrimmingChatCache} className="w-full py-3 mb-2 bg-orange-50 border border-orange-100 text-orange-600 rounded-xl text-xs font-bold flex items-center justify-center gap-2 active:scale-95 transition-all disabled:opacity-50">
+                {isTrimmingChatCache ? '正在清理旧聊天…' : '清理超过 1000 条的旧私聊'}
+            </button>
+            <p className="text-[10px] text-slate-400 px-1 mb-4 leading-relaxed">
+                每个角色只保留最新 1000 条私聊，删除更早的文字、图片、表情和缓存语音来缩小后续备份。不会清理角色记忆、群聊、书库或最新 1000 条；点击后会先列出并要求两次确认。
             </p>
 
             <button onClick={() => setShowResetConfirm(true)} className="w-full py-3 bg-red-50 border border-red-100 text-red-500 rounded-xl text-xs font-bold flex items-center justify-center gap-2">

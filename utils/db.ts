@@ -627,6 +627,24 @@ export const DB = {
     });
   },
 
+  /** 私聊消息数。与 countMessagesByCharId 不同：不把带同一 charId 的群聊镜像算进来。 */
+  countPrivateMessagesByCharId: async (charId: string): Promise<number> => {
+    const db = await openDB();
+    return new Promise((resolve, reject) => {
+      const transaction = db.transaction(STORE_MESSAGES, 'readonly');
+      const index = transaction.objectStore(STORE_MESSAGES).index('charId');
+      let count = 0;
+      const request = index.openCursor(IDBKeyRange.only(charId));
+      request.onsuccess = () => {
+        const cursor = request.result;
+        if (!cursor) { resolve(count); return; }
+        if (!(cursor.value as Message).groupId) count += 1;
+        cursor.continue();
+      };
+      request.onerror = () => reject(request.error);
+    });
+  },
+
   // Performance: Load only the most recent N messages for a character
   getRecentMessagesByCharId: async (charId: string, limit: number, includeProcessed: boolean = false): Promise<Message[]> => {
     const db = await openDB();
@@ -862,6 +880,45 @@ export const DB = {
       return new Promise((resolve) => {
           transaction.oncomplete = () => resolve();
       });
+  },
+
+  /**
+   * 清理一个角色较早的私聊记录，同时删除这些消息对应的已缓存语音。
+   * 倒序游标只保留最近 keep 条，不会先把包含图片的大量历史整段读进内存；群聊、
+   * 角色记忆、书库和其它应用数据均不涉及。该操作不可撤销，调用方必须先让用户确认。
+   */
+  trimPrivateMessages: async (charId: string, keep: number = 1000): Promise<{ deletedCount: number; keptCount: number }> => {
+    const db = await openDB();
+    const retain = Math.max(0, Math.floor(keep));
+    return new Promise((resolve, reject) => {
+      const transaction = db.transaction([STORE_MESSAGES, STORE_ASSETS], 'readwrite');
+      const messageStore = transaction.objectStore(STORE_MESSAGES);
+      const assetStore = transaction.objectStore(STORE_ASSETS);
+      const index = messageStore.index('charId');
+      let keptCount = 0;
+      let deletedCount = 0;
+      const request = index.openCursor(IDBKeyRange.only(charId), 'prev');
+      request.onsuccess = () => {
+        const cursor = request.result;
+        if (!cursor) return;
+        const message = cursor.value as Message;
+        // 同一角色名可能也出现在群聊里；这里只处理私聊，不动群聊历史。
+        if (!message.groupId) {
+          if (keptCount < retain) {
+            keptCount += 1;
+          } else {
+            cursor.delete();
+            assetStore.delete(`voice_msg_${message.id}`);
+            deletedCount += 1;
+          }
+        }
+        cursor.continue();
+      };
+      request.onerror = () => reject(request.error);
+      transaction.oncomplete = () => resolve({ deletedCount, keptCount });
+      transaction.onerror = () => reject(transaction.error);
+      transaction.onabort = () => reject(transaction.error || new Error('trimPrivateMessages aborted'));
+    });
   },
 
   clearMessages: async (charId: string): Promise<void> => {

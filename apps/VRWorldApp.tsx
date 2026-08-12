@@ -2687,6 +2687,7 @@ const READER_THEMES: ReaderTheme[] = [
 const FONT_SIZES = [13, 15, 17, 20];
 const READER_THEME_KEY = 'vr_reader_theme';
 const READER_FONT_KEY = 'vr_reader_font';
+const READER_STYLE_PRESETS_KEY = 'vr_reader_style_presets';
 // 用户书签（段索引，per-novel，独立于角色书签）
 const userBmKey = (id: string) => `vr_user_bm_${id}`;
 const readUserBm = (id: string): number => {
@@ -2700,10 +2701,20 @@ const writeUserBm = (id: string, idx: number) => {
 type ReaderPrefs = {
     fontFamily?: 'serif' | 'sans' | 'system';
     lineHeight?: number;
+    fontWeight?: 'normal' | 'bold';
     backgroundRef?: string;
     annotationGuide?: string;
     voiceSpeed?: number;
     sleepMinutes?: number;
+};
+type ReaderStylePreset = {
+    id: string;
+    name: string;
+    themeId: string;
+    fontSize: number;
+    fontFamily: NonNullable<ReaderPrefs['fontFamily']>;
+    lineHeight: number;
+    fontWeight: NonNullable<ReaderPrefs['fontWeight']>;
 };
 type ReaderDoodlePoint = { x: number; y: number };
 type ReaderDoodleStroke = { tool: 'pen' | 'eraser'; width: number; points: ReaderDoodlePoint[] };
@@ -2713,6 +2724,19 @@ const readReaderPrefs = (id: string): ReaderPrefs => {
 };
 const writeReaderPrefs = (id: string, value: ReaderPrefs) => {
     try { localStorage.setItem(readerPrefsKey(id), JSON.stringify(value)); } catch { /* ignore */ }
+};
+const readReaderStylePresets = (): ReaderStylePreset[] => {
+    try {
+        const raw = JSON.parse(localStorage.getItem(READER_STYLE_PRESETS_KEY) || '[]');
+        if (!Array.isArray(raw)) return [];
+        return raw.filter((item): item is ReaderStylePreset => item && typeof item.id === 'string' && typeof item.name === 'string'
+            && typeof item.themeId === 'string' && Number.isFinite(item.fontSize)
+            && ['serif', 'sans', 'system'].includes(item.fontFamily)
+            && Number.isFinite(item.lineHeight) && ['normal', 'bold'].includes(item.fontWeight));
+    } catch { return []; }
+};
+const writeReaderStylePresets = (presets: ReaderStylePreset[]) => {
+    try { localStorage.setItem(READER_STYLE_PRESETS_KEY, JSON.stringify(presets)); } catch { /* ignore */ }
 };
 
 /** 老书没有目录时，尽可能从已保存正文的标题行重新识别章节；无法还原的 EPUB 才退回阅读位置。 */
@@ -2838,7 +2862,7 @@ const buildReaderPages = (segments: VRWorldNovel['segments'], capacity: number, 
     return pages;
 };
 
-type ReaderMeasureLayout = { width: number; height: number; fontSize: number; lineHeight: number; fontFamily: string };
+type ReaderMeasureLayout = { width: number; height: number; fontSize: number; lineHeight: number; fontFamily: string; fontWeight: number };
 
 /**
  * 真正按浏览器排版高度分页，而不是猜测“每页多少字”。每次只在离屏纸面中放入候选文本，
@@ -2877,7 +2901,7 @@ const measureReaderPages = async (
         const paragraph = document.createElement('p');
         Object.assign(paragraph.style, {
             margin: '0', whiteSpace: 'pre-wrap', color: '#111827', fontSize: `${layout.fontSize}px`,
-            lineHeight: String(layout.lineHeight), fontFamily: layout.fontFamily, textIndent: '2em',
+            lineHeight: String(layout.lineHeight), fontFamily: layout.fontFamily, fontWeight: String(layout.fontWeight), textIndent: '2em',
         });
         paragraph.textContent = item.text;
         block.appendChild(paragraph);
@@ -2948,7 +2972,8 @@ const readerCacheId = (novelId: string) => `reader-pages:${novelId}`;
 const readerPageCacheMemory = new Map<string, ReaderPageCacheRecord>();
 const readerSourceStamp = (novel: VRWorldNovel) => `${novel.updatedAt}:${novel.totalChars}:${novel.segments.length}`;
 const readerLayoutSignature = (layout: ReaderMeasureLayout) => [
-    Math.round(layout.width), Math.round(layout.height), layout.fontSize, layout.lineHeight.toFixed(2), layout.fontFamily,
+    // 改过可用高度和末行安全距离后，旧缓存不能继续复用，否则会把旧版的裁切风险带回来。
+    'reader-page-v2', Math.round(layout.width), Math.round(layout.height), layout.fontSize, layout.lineHeight.toFixed(2), layout.fontFamily, layout.fontWeight,
 ].join('|');
 const compactReaderPages = (pages: ReaderPage[]): ReaderPageCacheEntry['pages'] => pages.map(page => ({
     chapter: page.chapter,
@@ -3008,9 +3033,9 @@ const parseChapterAnnotations = (source: string, allowed: Map<number, string>): 
 // 批注必须锁定角色实际挑中的短句：波浪线与按钮都紧跟原文，避免批注漂到段落后面。
 const SegBlock: React.FC<{
     seg: { idx: number; text: string }; anns: VRNovelAnnotation[];
-    theme: ReaderTheme; fontSize: number; lineHeight: number; fontFamily: string; nameOf: (id: string) => string | undefined;
+    theme: ReaderTheme; fontSize: number; lineHeight: number; fontFamily: string; fontWeight: number; nameOf: (id: string) => string | undefined;
     onOpenAnnotation: (annotation: VRNovelAnnotation) => void; highlight?: boolean;
-}> = ({ seg, anns, theme, fontSize, lineHeight, fontFamily, nameOf, onOpenAnnotation, highlight }) => {
+}> = ({ seg, anns, theme, fontSize, lineHeight, fontFamily, fontWeight, nameOf, onOpenAnnotation, highlight }) => {
     const marks = anns
         .map(annotation => ({ annotation, start: annotation.quote ? seg.text.indexOf(annotation.quote) : -1 }))
         .filter(item => item.start >= 0)
@@ -3029,7 +3054,7 @@ const SegBlock: React.FC<{
     // 新批注有 quote 时，只在包含该短句的分页显示；旧存档没有 quote 才退回段落末尾按钮。
     const legacy = anns.filter(annotation => !annotation.quote && !marks.some(mark => mark.annotation.id === annotation.id));
     return <div data-seg={seg.idx} className="mb-5 rounded-lg transition-colors" style={highlight ? { background: `${theme.accent}1f`, boxShadow: `0 0 0 2px ${theme.accent}66`, padding: '8px 10px', margin: '0 -10px 20px' } : undefined}>
-        <p className="whitespace-pre-wrap" style={{ color: theme.text, fontSize, lineHeight, fontFamily, textIndent: '2em' }}>{parts}</p>
+        <p className="whitespace-pre-wrap" style={{ color: theme.text, fontSize, lineHeight, fontFamily, fontWeight, textIndent: '2em' }}>{parts}</p>
         {legacy.length > 0 && <div className="mt-2 flex flex-wrap gap-1.5">{legacy.map(annotation => <button key={annotation.id} onClick={() => onOpenAnnotation(annotation)} className="inline-flex items-center gap-1 rounded-full px-2 py-1 text-[10px] font-semibold" style={{ color: theme.accent, background: theme.annBg, border: `1px solid ${theme.accent}33` }}><Note size={12} weight="fill" /> {nameOf(annotation.authorId) || annotation.authorName} 的批注</button>)}</div>}
     </div>;
 };
@@ -3051,6 +3076,7 @@ const ReaderModal: React.FC<{
     const [themeId, setThemeId] = useState(() => localStorage.getItem(READER_THEME_KEY) || 'paper');
     const [fontSize, setFontSize] = useState(() => Number(localStorage.getItem(READER_FONT_KEY)) || 15);
     const [prefs, setPrefs] = useState<ReaderPrefs>(() => readReaderPrefs(novel.id));
+    const [stylePresets, setStylePresets] = useState<ReaderStylePreset[]>(readReaderStylePresets);
     const [showCtl, setShowCtl] = useState(false);
     const [showToc, setShowToc] = useState(false);
     const [showAudio, setShowAudio] = useState(false);
@@ -3100,6 +3126,7 @@ const ReaderModal: React.FC<{
     // 首次打开时先用轻量分页，真实像素分页随后异步替换；两种状态下章节首页都必须有正式标题。
     const pageHeading = readerPages[page]?.chapter || (currentSeg === currentChapter?.startSeg ? currentChapter : undefined);
     const readerFont = prefs.fontFamily === 'sans' ? `'Noto Sans SC','Microsoft YaHei',sans-serif` : prefs.fontFamily === 'system' ? 'system-ui,sans-serif' : `'Noto Serif SC','Songti SC','Noto Serif','Georgia',serif`;
+    const readerFontWeight = prefs.fontWeight === 'bold' ? 700 : 400;
     // 涂鸦是会话内的临时纸张：翻页后可翻回看，退出阅读器即随组件卸载清空。
     const doodleViewKey = `page:${page}`;
 
@@ -3110,13 +3137,16 @@ const ReaderModal: React.FC<{
         const repaginate = () => {
             const rect = area.getBoundingClientRect();
             const width = Math.max(0, Math.floor(rect.width - 40)); // 正文左右各 20px
-            // 涂鸦工具条会占走一段纵向空间。实测一些墨水屏 WebView 的 flex 回流会晚一帧，
-            // 这里再留出一行安全余量，保证末行永远不会贴在底部翻页栏下面。
-            const height = Math.max(0, Math.floor(rect.height - 32 - (doodleMode ? 28 : 0))); // 正文上下各 16px + 涂鸦安全余量
+            // 正文区域已经在 flex 中扣除了顶栏、底栏与涂鸦条。这里再从实际高度预留正文
+            // padding（上 16 / 下 16）和一行字的安全余量；墨水屏 WebView 的行盒偶尔会比
+            // 测量值晚一帧，不能把最后一行卡在翻页栏下方。
+            const safetyLine = Math.ceil(fontSize * (prefs.lineHeight || 1.9)) + 8;
+            const contentPadding = 16 + (doodleMode ? 44 : 16);
+            const height = Math.max(0, Math.floor(rect.height - contentPadding - safetyLine));
             if (width < 40 || height < 40) return;
             const run = ++paginationRunRef.current;
             const visible = readerPagesRef.current[pageRef.current]?.items[0];
-            const layout = { width, height, fontSize, lineHeight: prefs.lineHeight || 1.9, fontFamily: readerFont };
+            const layout = { width, height, fontSize, lineHeight: prefs.lineHeight || 1.9, fontFamily: readerFont, fontWeight: readerFontWeight };
             const signature = readerLayoutSignature(layout);
             const cacheId = readerCacheId(novel.id);
             // 应用启动时已预热过的记录可同步使用，避免先渲染临时分页后再闪跳。
@@ -3155,7 +3185,7 @@ const ReaderModal: React.FC<{
             if (debounce) clearTimeout(debounce);
             observer.disconnect();
         };
-    }, [novel.id, novel.segments, chapterHeadings, fontSize, prefs.lineHeight, readerFont, doodleMode]);
+    }, [novel.id, novel.segments, chapterHeadings, fontSize, prefs.lineHeight, readerFont, readerFontWeight, doodleMode]);
 
     useEffect(() => {
         const anchor = paginationAnchorRef.current;
@@ -3287,6 +3317,26 @@ const ReaderModal: React.FC<{
     const savePrefs = (patch: Partial<ReaderPrefs>) => setPrefs(prev => {
         const next = { ...prev, ...patch }; writeReaderPrefs(novel.id, next); return next;
     });
+    const saveStylePreset = () => {
+        const name = window.prompt('给这套阅读样式起个名字', `阅读样式 ${stylePresets.length + 1}`)?.trim();
+        if (!name) return;
+        const preset: ReaderStylePreset = {
+            id: `reader-style-${Date.now()}`, name: name.slice(0, 30), themeId, fontSize,
+            fontFamily: prefs.fontFamily || 'serif', lineHeight: prefs.lineHeight || 1.9,
+            fontWeight: prefs.fontWeight || 'normal',
+        };
+        const next = [...stylePresets, preset].slice(-12);
+        setStylePresets(next); writeReaderStylePresets(next);
+    };
+    const applyStylePreset = (preset: ReaderStylePreset) => {
+        setThemeId(preset.themeId);
+        setFontSize(preset.fontSize);
+        savePrefs({ fontFamily: preset.fontFamily, lineHeight: preset.lineHeight, fontWeight: preset.fontWeight });
+    };
+    const removeStylePreset = (id: string) => {
+        const next = stylePresets.filter(preset => preset.id !== id);
+        setStylePresets(next); writeReaderStylePresets(next);
+    };
     const saveProgress = (idx = currentSeg) => {
         if (peek) return;
         writeUserBm(novel.id, idx);
@@ -3496,7 +3546,9 @@ const ReaderModal: React.FC<{
             <div className="flex items-center gap-2"><Palette size={14} style={{ color: theme.sub }} /><div className="flex gap-1 flex-1">{READER_THEMES.map(t => <button key={t.id} onClick={() => setThemeId(t.id)} className="flex-1 h-7 rounded-lg text-[9px] font-bold" style={{ background: t.paper, color: t.text, border: themeId === t.id ? `2px solid ${t.accent}` : `1px solid ${t.accent}33` }}>{t.name}</button>)}</div></div>
             <div className="flex items-center gap-2"><TextAa size={14} style={{ color: theme.sub }} /><div className="flex gap-1.5">{FONT_SIZES.map(fs => <button key={fs} onClick={() => setFontSize(fs)} className="w-8 h-7 rounded-lg font-bold" style={{ background: fontSize === fs ? theme.accent : 'transparent', color: fontSize === fs ? theme.paper : theme.sub, border: `1px solid ${theme.accent}44`, fontSize: Math.min(fs, 15) }}>A</button>)}</div><select value={prefs.fontFamily || 'serif'} onChange={e => savePrefs({ fontFamily: e.target.value as ReaderPrefs['fontFamily'] })} className="ml-auto rounded-lg px-2 py-1 text-[10px]" style={{ color: theme.text, background: theme.bg, border: `1px solid ${theme.accent}44` }}><option value="serif">衬线字体</option><option value="sans">无衬线</option><option value="system">系统字体</option></select></div>
             <div className="flex items-center gap-2 text-[10px]" style={{ color: theme.sub }}>行距 <input type="range" min="1.5" max="2.5" step="0.1" value={prefs.lineHeight || 1.9} onChange={e => savePrefs({ lineHeight: Number(e.target.value) })} className="flex-1" /><span>{(prefs.lineHeight || 1.9).toFixed(1)}</span></div>
-            <div className="text-[10px]" style={{ color: theme.sub }}>阅读方式：左右翻页。正文和涂鸦共用相同分页，不会漏掉底部内容。</div>
+            <div className="flex items-center justify-between text-[10px]" style={{ color: theme.sub }}><span>字体加粗</span><button onClick={() => savePrefs({ fontWeight: prefs.fontWeight === 'bold' ? 'normal' : 'bold' })} className="rounded-lg px-3 py-1 font-bold" style={{ color: prefs.fontWeight === 'bold' ? theme.paper : theme.text, background: prefs.fontWeight === 'bold' ? theme.accent : theme.bg, border: `1px solid ${theme.accent}44` }}>{prefs.fontWeight === 'bold' ? '已加粗' : '普通'}</button></div>
+            <div className="rounded-lg p-2 space-y-2" style={{ background: theme.bg, border: `1px solid ${theme.accent}22` }}><div className="flex items-center justify-between"><span className="text-[10px] font-semibold" style={{ color: theme.sub }}>我的阅读样式</span><button onClick={saveStylePreset} className="rounded px-2 py-1 text-[10px] font-semibold" style={{ color: theme.paper, background: theme.accent }}>保存当前样式</button></div>{stylePresets.length > 0 ? <div className="flex flex-wrap gap-1">{stylePresets.map(preset => <span key={preset.id} className="inline-flex items-center overflow-hidden rounded-md" style={{ border: `1px solid ${theme.accent}33` }}><button onClick={() => applyStylePreset(preset)} className="px-2 py-1 text-[10px]" style={{ color: theme.text }}>{preset.name}</button><button onClick={() => removeStylePreset(preset.id)} className="px-1.5 py-1 text-[10px]" style={{ color: theme.sub }} aria-label={`删除 ${preset.name}`}>×</button></span>)}</div> : <div className="text-[10px]" style={{ color: theme.sub }}>保存后可在别的设备导入备份后直接选择。</div>}</div>
+            <div className="text-[10px]" style={{ color: theme.sub }}>阅读方式：左右翻页。正文和涂鸦共用相同分页，分页会为墨水屏底栏预留一整行安全空间。</div>
             <label className="flex items-center gap-2 text-[10px] cursor-pointer" style={{ color: theme.sub }}><UploadSimple size={14} /> 自定义背景<input type="file" accept="image/*" className="hidden" onChange={async e => { const file = e.target.files?.[0]; if (file) savePrefs({ backgroundRef: await putImageBlob(file) }); }} /></label>
             {prefs.backgroundRef && <button onClick={() => savePrefs({ backgroundRef: undefined })} className="text-[10px]" style={{ color: theme.accent }}>恢复纯色背景</button>}
             <textarea value={prefs.annotationGuide || ''} onChange={e => savePrefs({ annotationGuide: e.target.value })} placeholder="专属批注引导词：例如更关注人物关系、伏笔和情绪变化" className="w-full rounded-lg p-2 text-[10px] outline-none" rows={2} style={{ color: theme.text, background: theme.bg, border: `1px solid ${theme.accent}33` }} />
@@ -3514,7 +3566,7 @@ const ReaderModal: React.FC<{
                     {pageHeading.partTitle && pageHeading.partTitle.trim() !== readableChapterTitle(pageHeading.title) && <div className="mb-1.5 text-[11px]" style={{ color: theme.sub }}>{pageHeading.partTitle}</div>}
                     <div className="text-[20px] font-bold leading-snug" style={{ color: theme.text }}>{readableChapterTitle(pageHeading.title)}</div>
                 </div>}
-                {renderSegs.map(seg => <SegBlock key={seg.idx} seg={seg} anns={annBySeg.get(seg.idx) || []} theme={theme} fontSize={fontSize} lineHeight={prefs.lineHeight || 1.9} fontFamily={readerFont} nameOf={nameOf} onOpenAnnotation={setSelectedAnnotation} highlight={peek && seg.idx === initialSeg} />)}
+                {renderSegs.map(seg => <SegBlock key={seg.idx} seg={seg} anns={annBySeg.get(seg.idx) || []} theme={theme} fontSize={fontSize} lineHeight={prefs.lineHeight || 1.9} fontFamily={readerFont} fontWeight={readerFontWeight} nameOf={nameOf} onOpenAnnotation={setSelectedAnnotation} highlight={peek && seg.idx === initialSeg} />)}
                 {chapterReflection && isChapterLastPage && <div className="mt-6 border-t pt-4" style={{ borderColor: `${theme.accent}33`, color: theme.text }}><div className="mb-2 text-[11px] font-bold" style={{ color: theme.accent }}>{chapterReflection.authorName} 的本章感悟</div><p className="whitespace-pre-wrap text-[13px] leading-7">{stripLeakedAttrs(chapterReflection.content)}</p></div>}
             </div>
             {doodleMode && <canvas ref={doodleCanvasRef} className="absolute inset-0 z-[2]" style={{ touchAction: 'none', cursor: doodleTool === 'eraser' ? 'cell' : 'crosshair' }} onPointerDown={startDoodle} onPointerMove={moveDoodle} onPointerUp={endDoodle} onPointerCancel={endDoodle} />}
