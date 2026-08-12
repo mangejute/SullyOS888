@@ -1234,6 +1234,8 @@ export interface VRNovelAnnotation {
     authorName: string;
     /** 批注/吐槽正文 */
     content: string;
+    /** 角色实际批注的原文短句。新批注用它定位波浪线，旧存档没有该字段仍可正常查看。 */
+    quote?: string;
     /** 若是"吐槽别人的吐槽"，指向被吐槽的批注 id */
     targetAnnotationId?: string;
     createdAt: number;
