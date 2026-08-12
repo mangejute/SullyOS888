@@ -3066,7 +3066,6 @@ const ReaderModal: React.FC<{
     const [doodleMode, setDoodleMode] = useState(false);
     const [doodleTool, setDoodleTool] = useState<'pen' | 'eraser'>('pen');
     const [doodleWidth, setDoodleWidth] = useState(3);
-    const [doodleRevision, setDoodleRevision] = useState(0);
     const paginationAnchorRef = useRef<ReaderPosition | null>(null);
     const readerPagesRef = useRef(readerPages);
     const pageRef = useRef(page);
@@ -3077,6 +3076,9 @@ const ReaderModal: React.FC<{
     const doodleCanvasRef = useRef<HTMLCanvasElement>(null);
     const doodlesByViewRef = useRef<Map<string, ReaderDoodleStroke[]>>(new Map());
     const activeDoodleRef = useRef<ReaderDoodleStroke | null>(null);
+    const doodleLastDrawPointRef = useRef<ReaderDoodlePoint | null>(null);
+    const doodleQueuedPointRef = useRef<ReaderDoodlePoint | null>(null);
+    const doodleDrawTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
     const audioRef = useRef<HTMLAudioElement>(null);
     const noiseAudioRef = useRef<HTMLAudioElement>(null);
     const speechCancelled = useRef(false);
@@ -3108,7 +3110,9 @@ const ReaderModal: React.FC<{
         const repaginate = () => {
             const rect = area.getBoundingClientRect();
             const width = Math.max(0, Math.floor(rect.width - 40)); // 正文左右各 20px
-            const height = Math.max(0, Math.floor(rect.height - 32)); // 正文上下各 16px
+            // 涂鸦工具条会占走一段纵向空间。实测一些墨水屏 WebView 的 flex 回流会晚一帧，
+            // 这里再留出一行安全余量，保证末行永远不会贴在底部翻页栏下面。
+            const height = Math.max(0, Math.floor(rect.height - 32 - (doodleMode ? 28 : 0))); // 正文上下各 16px + 涂鸦安全余量
             if (width < 40 || height < 40) return;
             const run = ++paginationRunRef.current;
             const visible = readerPagesRef.current[pageRef.current]?.items[0];
@@ -3151,7 +3155,7 @@ const ReaderModal: React.FC<{
             if (debounce) clearTimeout(debounce);
             observer.disconnect();
         };
-    }, [novel.id, novel.segments, chapterHeadings, fontSize, prefs.lineHeight, readerFont]);
+    }, [novel.id, novel.segments, chapterHeadings, fontSize, prefs.lineHeight, readerFont, doodleMode]);
 
     useEffect(() => {
         const anchor = paginationAnchorRef.current;
@@ -3164,21 +3168,31 @@ const ReaderModal: React.FC<{
     }, [readerPages]);
 
 
-    const renderDoodles = useCallback(() => {
+    const prepareDoodleCanvas = useCallback(() => {
         const canvas = doodleCanvasRef.current;
         const area = doodleAreaRef.current;
-        if (!canvas || !area) return;
+        if (!canvas || !area) return null;
         const rect = area.getBoundingClientRect();
-        const ratio = window.devicePixelRatio || 1;
+        // 涂鸦不需要照片级像素密度。上限 1.5 可显著降低墨水屏的局部刷新压力，
+        // 但手写线条依然足够清晰。
+        const ratio = Math.min(window.devicePixelRatio || 1, 1.5);
         const width = Math.max(1, Math.round(rect.width));
         const height = Math.max(1, Math.round(rect.height));
-        if (canvas.width !== width * ratio || canvas.height !== height * ratio) {
-            canvas.width = width * ratio; canvas.height = height * ratio;
+        const pixelWidth = Math.round(width * ratio);
+        const pixelHeight = Math.round(height * ratio);
+        if (canvas.width !== pixelWidth || canvas.height !== pixelHeight) {
+            canvas.width = pixelWidth; canvas.height = pixelHeight;
             canvas.style.width = `${width}px`; canvas.style.height = `${height}px`;
         }
         const ctx = canvas.getContext('2d');
-        if (!ctx) return;
+        if (!ctx) return null;
         ctx.setTransform(ratio, 0, 0, ratio, 0, 0);
+        return { ctx, width, height };
+    }, []);
+    const renderDoodles = useCallback(() => {
+        const prepared = prepareDoodleCanvas();
+        if (!prepared) return;
+        const { ctx, width, height } = prepared;
         ctx.clearRect(0, 0, width, height);
         for (const stroke of doodlesByViewRef.current.get(doodleViewKey) || []) {
             if (!stroke.points.length) continue;
@@ -3192,7 +3206,38 @@ const ReaderModal: React.FC<{
             if (stroke.points.length === 1) ctx.lineTo(stroke.points[0].x + 0.1, stroke.points[0].y + 0.1);
             ctx.stroke(); ctx.restore();
         }
-    }, [doodleViewKey, theme.text]);
+    }, [doodleViewKey, prepareDoodleCanvas, theme.text]);
+    const drawDoodlePoint = useCallback((stroke: ReaderDoodleStroke, point: ReaderDoodlePoint) => {
+        const prepared = prepareDoodleCanvas();
+        if (!prepared) return;
+        const { ctx } = prepared;
+        const width = stroke.tool === 'eraser' ? 22 : stroke.width;
+        ctx.save();
+        ctx.globalCompositeOperation = stroke.tool === 'eraser' ? 'destination-out' : 'source-over';
+        ctx.fillStyle = theme.text;
+        ctx.beginPath(); ctx.arc(point.x, point.y, Math.max(0.5, width / 2), 0, Math.PI * 2); ctx.fill(); ctx.restore();
+    }, [prepareDoodleCanvas, theme.text]);
+    const drawDoodleSegment = useCallback((stroke: ReaderDoodleStroke, from: ReaderDoodlePoint, to: ReaderDoodlePoint) => {
+        const prepared = prepareDoodleCanvas();
+        if (!prepared) return;
+        const { ctx } = prepared;
+        ctx.save();
+        ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+        ctx.globalCompositeOperation = stroke.tool === 'eraser' ? 'destination-out' : 'source-over';
+        ctx.strokeStyle = theme.text;
+        ctx.lineWidth = stroke.tool === 'eraser' ? 22 : stroke.width;
+        ctx.beginPath(); ctx.moveTo(from.x, from.y); ctx.lineTo(to.x, to.y); ctx.stroke(); ctx.restore();
+    }, [prepareDoodleCanvas, theme.text]);
+    const flushDoodleSegment = useCallback(() => {
+        doodleDrawTimerRef.current = null;
+        const active = activeDoodleRef.current;
+        const point = doodleQueuedPointRef.current;
+        const from = doodleLastDrawPointRef.current;
+        if (!active || !point || !from) return;
+        drawDoodleSegment(active, from, point);
+        doodleLastDrawPointRef.current = point;
+        doodleQueuedPointRef.current = null;
+    }, [drawDoodleSegment]);
     const doodlePoint = (event: React.PointerEvent<HTMLCanvasElement>): ReaderDoodlePoint => {
         const rect = event.currentTarget.getBoundingClientRect();
         return { x: event.clientX - rect.left, y: event.clientY - rect.top };
@@ -3201,29 +3246,42 @@ const ReaderModal: React.FC<{
         if (!doodleMode) return;
         event.preventDefault();
         event.currentTarget.setPointerCapture(event.pointerId);
-        activeDoodleRef.current = { tool: doodleTool, width: doodleWidth, points: [doodlePoint(event)] };
+        const stroke = { tool: doodleTool, width: doodleWidth, points: [doodlePoint(event)] };
+        activeDoodleRef.current = stroke;
+        doodleLastDrawPointRef.current = stroke.points[0];
+        doodleQueuedPointRef.current = null;
+        drawDoodlePoint(stroke, stroke.points[0]);
     };
     const moveDoodle = (event: React.PointerEvent<HTMLCanvasElement>) => {
         const active = activeDoodleRef.current;
         if (!active) return;
-        event.preventDefault(); active.points.push(doodlePoint(event));
-        const strokes = doodlesByViewRef.current.get(doodleViewKey) || [];
-        doodlesByViewRef.current.set(doodleViewKey, [...strokes, active]);
-        // 临时放入列表重画后再去掉，既保证每一笔实时呈现，也不累积同一笔的重复项。
-        renderDoodles(); doodlesByViewRef.current.set(doodleViewKey, strokes);
+        event.preventDefault();
+        const point = doodlePoint(event);
+        active.points.push(point);
+        doodleQueuedPointRef.current = point;
+        // 只画刚刚划出的这一小段，不再每次移动都清空并重画整页所有笔迹。
+        // 约 30fps 的合帧对笔迹仍连续，却能让墨水屏避免高频全页刷新。
+        if (!doodleDrawTimerRef.current) doodleDrawTimerRef.current = setTimeout(flushDoodleSegment, 32);
     };
     const endDoodle = (event: React.PointerEvent<HTMLCanvasElement>) => {
         const active = activeDoodleRef.current;
         if (!active) return;
         event.preventDefault();
+        if (doodleDrawTimerRef.current) { clearTimeout(doodleDrawTimerRef.current); doodleDrawTimerRef.current = null; }
+        flushDoodleSegment();
         const strokes = doodlesByViewRef.current.get(doodleViewKey) || [];
         doodlesByViewRef.current.set(doodleViewKey, [...strokes, active]);
-        activeDoodleRef.current = null; setDoodleRevision(v => v + 1);
+        activeDoodleRef.current = null;
+        doodleLastDrawPointRef.current = null;
+        doodleQueuedPointRef.current = null;
     };
     const clearCurrentDoodle = () => {
         doodlesByViewRef.current.delete(doodleViewKey);
         activeDoodleRef.current = null;
-        setDoodleRevision(v => v + 1);
+        if (doodleDrawTimerRef.current) { clearTimeout(doodleDrawTimerRef.current); doodleDrawTimerRef.current = null; }
+        doodleLastDrawPointRef.current = null;
+        doodleQueuedPointRef.current = null;
+        renderDoodles();
     };
 
     const savePrefs = (patch: Partial<ReaderPrefs>) => setPrefs(prev => {
@@ -3295,9 +3353,9 @@ const ReaderModal: React.FC<{
         const observer = new ResizeObserver(() => renderDoodles());
         observer.observe(area);
         return () => observer.disconnect();
-    }, [doodleMode, doodleRevision, renderDoodles]);
+    }, [doodleMode, renderDoodles]);
     useEffect(() => { if (!peek) writeUserBm(novel.id, readerPages[page]?.items[0]?.segIdx || 0); }, [page, novel.id, peek, readerPages]);
-    useEffect(() => () => { window.speechSynthesis?.cancel(); audioRef.current?.pause(); noiseAudioRef.current?.pause(); charReadUrls.current.forEach(u => URL.revokeObjectURL(u)); if (sleepTimerRef.current) clearTimeout(sleepTimerRef.current); }, []);
+    useEffect(() => () => { window.speechSynthesis?.cancel(); audioRef.current?.pause(); noiseAudioRef.current?.pause(); charReadUrls.current.forEach(u => URL.revokeObjectURL(u)); if (sleepTimerRef.current) clearTimeout(sleepTimerRef.current); if (doodleDrawTimerRef.current) clearTimeout(doodleDrawTimerRef.current); }, []);
 
     const chapterText = () => novel.segments.slice(currentChapter?.startSeg || 0, currentChapter?.endSeg || total).map(s => s.text).join('\n\n');
     const stopReading = () => { speechCancelled.current = true; window.speechSynthesis?.cancel(); audioRef.current?.pause(); setReadingState('idle'); };
@@ -3451,7 +3509,7 @@ const ReaderModal: React.FC<{
             <span className="absolute right-4 -bottom-4 text-[9px]" style={{ color: theme.sub }}>退出阅读后自动清除</span>
         </div>}
         <div ref={doodleAreaRef} className="relative flex-1 min-h-0">
-            <div className="relative h-full overflow-hidden px-5 py-4" style={{ background: backgroundUrl ? 'transparent' : theme.bg, touchAction: doodleMode ? 'none' : 'pan-x' }}>
+            <div className="relative h-full overflow-hidden px-5 pt-4" style={{ background: backgroundUrl ? 'transparent' : theme.bg, touchAction: doodleMode ? 'none' : 'pan-x', paddingBottom: doodleMode ? 44 : 16, boxSizing: 'border-box' }}>
                 {pageHeading && <div className="mb-6 mt-0.5" style={{ fontFamily: readerFont }}>
                     {pageHeading.partTitle && pageHeading.partTitle.trim() !== readableChapterTitle(pageHeading.title) && <div className="mb-1.5 text-[11px]" style={{ color: theme.sub }}>{pageHeading.partTitle}</div>}
                     <div className="text-[20px] font-bold leading-snug" style={{ color: theme.text }}>{readableChapterTitle(pageHeading.title)}</div>
