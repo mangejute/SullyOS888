@@ -1294,6 +1294,10 @@ export interface VRCardMeta {
     annotationExcerpts?: string[];
     /** 带段落锚点的批注引用（用于从动态点回原文跳转） */
     annotationRefs?: { segIdx: number; text: string }[];
+    /** 用户主动和角色共读完成的章节（与普通角色自主书库动态区分）。 */
+    coReadChapter?: string;
+    /** 共读完成后的本章感悟，用于聊天卡片与后续上下文。 */
+    coReadReflection?: string;
     // --- 听歌房专用 ---
     /** 本次评/听的当前歌（名 - 歌手） */
     songLabel?: string;

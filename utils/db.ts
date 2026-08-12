@@ -27,7 +27,8 @@ const DB_NAME = 'AetherOS_Data';
 // v69：见面·剧情条目与糯米机原生预设。正文继续复用 messages 表，避免再造会话存储。
 // v70：剧场面具箱（原创人物面具）；角色面具仍只存 characterId，不复制神经链接资料。
 // v71：提示词历史，保留每轮实际发送给 AI 的聊天与日程提示词。
-const DB_VERSION = 71;
+// v72：阅读器按屏幕实际排版的本机缓存；不参与备份，避免把各设备的版式带来带去。
+const DB_VERSION = 72;
 
 const STORE_CHARACTERS = 'characters';
 const STORE_CHAR_GROUPS = 'character_groups'; // 角色分组定义（角色通过 groupId 指向；与群聊 groups 无关）
@@ -75,6 +76,7 @@ const STORE_VR_PLAYS = 'vr_plays';                // 剧院·历史舞台剧（�
 const STORE_VR_PRESETS = 'vr_presets';            // 剧院·用户自定义写作风格预设（key 为主键）
 const STORE_VR_LETTERS = 'vr_letters';            // 邮局信件（本地存档 + 待寄出/待回复队列）
 const STORE_VR_SETTINGS = 'vr_settings';          // 彼方设置单例：独立 API（id='api'）+ 调用记录（id='apilog'）
+const STORE_READER_PAGE_CACHE = 'reader_page_cache'; // 阅读器本机分页缓存（书 + 屏幕 + 字体）
 const STORE_API_CALL_LOG = 'api_call_log';        // 全局 API 调用记录单例（id='log'，保留近 5 天）
 const STORE_WORLDS = 'worlds';                    // 家园·世界定义（成员/NPC/居住/关系/模式）
 const STORE_WORLD_EPISODES = 'world_episodes';    // 家园·演绎历史（每轮一条，index worldId）
@@ -305,6 +307,7 @@ export const openDB = (): Promise<IDBDatabase> => {
           ltStore.createIndex('box', 'box', { unique: false });
       }
       createStore(STORE_VR_SETTINGS, { keyPath: 'id' });
+      createStore(STORE_READER_PAGE_CACHE, { keyPath: 'id' });
       createStore(STORE_API_CALL_LOG, { keyPath: 'id' });
 
       // v63: 家园（同世界观多角色大世界）
@@ -2474,6 +2477,25 @@ export const DB = {
       const db = await openDB();
       const tx = db.transaction(STORE_VR_SETTINGS, 'readwrite');
       tx.objectStore(STORE_VR_SETTINGS).put({ id: 'apilog', entries: [] });
+  },
+
+  // --- 阅读器本机分页缓存（不导出）---
+  getReaderPageCache: async (id: string): Promise<any | null> => {
+      const db = await openDB();
+      if (!db.objectStoreNames.contains(STORE_READER_PAGE_CACHE)) return null;
+      return new Promise((resolve) => {
+          const tx = db.transaction(STORE_READER_PAGE_CACHE, 'readonly');
+          const req = tx.objectStore(STORE_READER_PAGE_CACHE).get(id);
+          req.onsuccess = () => resolve(req.result ?? null);
+          req.onerror = () => resolve(null);
+      });
+  },
+
+  saveReaderPageCache: async (record: any): Promise<void> => {
+      const db = await openDB();
+      if (!db.objectStoreNames.contains(STORE_READER_PAGE_CACHE)) return;
+      const tx = db.transaction(STORE_READER_PAGE_CACHE, 'readwrite');
+      tx.objectStore(STORE_READER_PAGE_CACHE).put(record);
   },
 
   // --- 全局 API 调用记录（api_call_log 单例 store，id='log'）---

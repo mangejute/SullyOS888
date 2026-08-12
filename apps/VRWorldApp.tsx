@@ -162,7 +162,13 @@ const VRWorldApp: React.FC = () => {
         } catch { /* ignore */ }
     }, []);
 
-    const loadNovels = useCallback(async () => setNovels(await DB.getVRNovels()), []);
+    const loadNovels = useCallback(async () => {
+        const loaded = await DB.getVRNovels();
+        setNovels(loaded);
+        // 阅读器打开前就把本机已经算好的分页拿进内存。这样同一设备再次进书时，
+        // 不必先显示临时分页、等待 IndexedDB 回来后再跳一次。
+        void primeReaderPageCache(loaded);
+    }, []);
     const loadFeed = useCallback(async () => {
         const items: FeedItem[] = [];
         for (const c of characters) {
@@ -2928,6 +2934,63 @@ const measureReaderPages = async (
     }
 };
 
+type ReaderPageCacheEntry = {
+    signature: string;
+    sourceStamp: string;
+    layout: ReaderMeasureLayout;
+    pages: Array<{ items: Array<[number, number, number]>; chapter?: ReaderPage['chapter'] }>;
+    updatedAt: number;
+};
+type ReaderPageCacheRecord = { id: string; entries: ReaderPageCacheEntry[] };
+const readerCacheId = (novelId: string) => `reader-pages:${novelId}`;
+// IndexedDB 负责跨次打开保存；这里的 Map 负责应用已经打开后的同步命中。
+// 同一本书首次在新尺寸设备上仍需要测量一次，之后会立刻复用对应设备的版式。
+const readerPageCacheMemory = new Map<string, ReaderPageCacheRecord>();
+const readerSourceStamp = (novel: VRWorldNovel) => `${novel.updatedAt}:${novel.totalChars}:${novel.segments.length}`;
+const readerLayoutSignature = (layout: ReaderMeasureLayout) => [
+    Math.round(layout.width), Math.round(layout.height), layout.fontSize, layout.lineHeight.toFixed(2), layout.fontFamily,
+].join('|');
+const compactReaderPages = (pages: ReaderPage[]): ReaderPageCacheEntry['pages'] => pages.map(page => ({
+    chapter: page.chapter,
+    items: page.items.map(item => [item.segIdx, item.offset, item.text.length]),
+}));
+const restoreReaderPages = (pages: ReaderPageCacheEntry['pages'], segments: VRWorldNovel['segments']): ReaderPage[] => pages
+    .map(page => ({
+        chapter: page.chapter,
+        items: page.items.map(([segIdx, offset, length]) => {
+            const source = segments[segIdx]?.text;
+            return source == null ? null : { segIdx, offset, text: source.slice(offset, offset + length) };
+        }).filter((item): item is ReaderPage['items'][number] => item !== null),
+    }))
+    .filter(page => page.items.length > 0);
+
+const storeReaderPageCache = async (novel: VRWorldNovel, layout: ReaderMeasureLayout, pages: ReaderPage[]) => {
+    const id = readerCacheId(novel.id);
+    const record = readerPageCacheMemory.get(id) || await DB.getReaderPageCache(id) as ReaderPageCacheRecord | null;
+    const signature = readerLayoutSignature(layout);
+    const next: ReaderPageCacheEntry = { signature, sourceStamp: readerSourceStamp(novel), layout, pages: compactReaderPages(pages), updatedAt: Date.now() };
+    // 同一本书保留最近 4 套设备/字体版式即可，防止频繁调字体或换设备无限占空间。
+    const entries = [next, ...(record?.entries || []).filter(entry => entry.signature !== signature)]
+        .sort((a, b) => b.updatedAt - a.updatedAt)
+        .slice(0, 4);
+    const saved = { id, entries };
+    readerPageCacheMemory.set(id, saved);
+    await DB.saveReaderPageCache(saved);
+};
+
+const primeReaderPageCache = async (novels: VRWorldNovel[]) => {
+    await Promise.all(novels.map(async novel => {
+        const id = readerCacheId(novel.id);
+        if (readerPageCacheMemory.has(id)) return;
+        try {
+            const record = await DB.getReaderPageCache(id) as ReaderPageCacheRecord | null;
+            if (record?.entries?.length) readerPageCacheMemory.set(id, record);
+        } catch { /* 缓存不可用时阅读器仍会按原逻辑测量分页 */ }
+    }));
+};
+
+const readerFontForPrefs = (prefs: ReaderPrefs) => prefs.fontFamily === 'sans' ? `'Noto Sans SC','Microsoft YaHei',sans-serif` : prefs.fontFamily === 'system' ? 'system-ui,sans-serif' : `'Noto Serif SC','Songti SC','Noto Serif','Georgia',serif`;
+
 const parseChapterAnnotations = (source: string, allowed: Map<number, string>): Array<{ segIdx: number; quote: string; content: string }> => {
     const cleaned = source.replace(/<think>[\s\S]*?<\/think>/gi, '').replace(/```json|```/gi, '').trim();
     const match = cleaned.match(/\{[\s\S]*\}/);
@@ -3049,12 +3112,31 @@ const ReaderModal: React.FC<{
             if (width < 40 || height < 40) return;
             const run = ++paginationRunRef.current;
             const visible = readerPagesRef.current[pageRef.current]?.items[0];
-            void measureReaderPages(novel.segments, chapterHeadings, {
-                width, height, fontSize, lineHeight: prefs.lineHeight || 1.9, fontFamily: readerFont,
-            }, () => run !== paginationRunRef.current).then(pages => {
-                if (run !== paginationRunRef.current || !pages.length) return;
-                if (visible) paginationAnchorRef.current = { segIdx: visible.segIdx, offset: visible.offset };
-                setReaderPages(pages);
+            const layout = { width, height, fontSize, lineHeight: prefs.lineHeight || 1.9, fontFamily: readerFont };
+            const signature = readerLayoutSignature(layout);
+            const cacheId = readerCacheId(novel.id);
+            // 应用启动时已预热过的记录可同步使用，避免先渲染临时分页后再闪跳。
+            const useRecord = (record: ReaderPageCacheRecord | null) => {
+                if (run !== paginationRunRef.current) return;
+                const cached = record?.entries?.find(entry => entry.signature === signature && entry.sourceStamp === readerSourceStamp(novel));
+                const restored = cached ? restoreReaderPages(cached.pages, novel.segments) : [];
+                if (restored.length) {
+                    if (visible) paginationAnchorRef.current = { segIdx: visible.segIdx, offset: visible.offset };
+                    setReaderPages(restored);
+                    return;
+                }
+                void measureReaderPages(novel.segments, chapterHeadings, layout, () => run !== paginationRunRef.current).then(pages => {
+                    if (run !== paginationRunRef.current || !pages.length) return;
+                    if (visible) paginationAnchorRef.current = { segIdx: visible.segIdx, offset: visible.offset };
+                    setReaderPages(pages);
+                    void storeReaderPageCache(novel, layout, pages);
+                });
+            };
+            const inMemory = readerPageCacheMemory.get(cacheId);
+            if (inMemory) useRecord(inMemory);
+            else void DB.getReaderPageCache(cacheId).then((record: ReaderPageCacheRecord | null) => {
+                if (record?.entries?.length) readerPageCacheMemory.set(cacheId, record);
+                useRecord(record);
             });
         };
         repaginate();
@@ -3273,7 +3355,28 @@ const ReaderModal: React.FC<{
             }
             if (!created.length) throw new Error('没有可保存的批注');
             setAnnotations(prev => [...prev, ...created]);
-            await updateCharacter(selectedChar.id, { vrState: { ...(selectedChar.vrState || {}), novelBookmarks: { ...(selectedChar.vrState?.novelBookmarks || {}), [novel.id]: currentChapter.endSeg } } });
+            const chapterName = chapterLabel(currentChapter);
+            const reflectionForRecord = reflectionText || '这章已经读完，角色把当时的想法留在了书页里。';
+            const memoryId = `vr_coread_${novel.id}_${currentChapter.id}`;
+            const date = new Date().toLocaleDateString('en-CA');
+            const memorySummary = `和${userProfile?.name || '用户'}一起读完《${novel.title}》${chapterName}。当时的阅读感悟：${reflectionForRecord.slice(0, 360)}`;
+            // 共读不是一次性 UI 行为：同时落聊天卡片与角色长期记忆，之后正常聊天也能回忆起这本书和这一章。
+            await DB.saveMessage({
+                charId: selectedChar.id,
+                role: 'assistant',
+                type: 'vr_card',
+                content: `「彼方 · 图书馆」和${userProfile?.name || '你'}一起读完《${novel.title}》${chapterName}。\n本章感悟：${reflectionForRecord}`,
+                metadata: {
+                    vrCard: true, room: 'library', activity: `和${userProfile?.name || '你'}一起读完《${novel.title}》${chapterName}`,
+                    novelId: novel.id, novelTitle: novel.title, segRange: [currentChapter.startSeg, currentChapter.endSeg],
+                    annotationExcerpts: created.filter(annotation => annotation.type !== 'reflection').slice(0, 5).map(annotation => annotation.content.slice(0, 90)),
+                    coReadChapter: chapterName, coReadReflection: reflectionForRecord,
+                },
+            } as any);
+            await updateCharacter(selectedChar.id, {
+                vrState: { ...(selectedChar.vrState || {}), novelBookmarks: { ...(selectedChar.vrState?.novelBookmarks || {}), [novel.id]: currentChapter.endSeg } },
+                memories: [...(selectedChar.memories || []).filter(memory => memory.id !== memoryId), { id: memoryId, date, summary: memorySummary, mood: '共读' }],
+            });
             setCoReadState('done'); setCoReadMessage(`${selectedChar.name} 已读完本章，留下 ${created.length} 条批注`);
         } catch (error) { setCoReadState('error'); setCoReadMessage(error instanceof Error ? `共读失败：${error.message}` : '共读失败，请稍后再试'); }
     };

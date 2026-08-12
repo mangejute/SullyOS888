@@ -2486,6 +2486,8 @@ const MessageItem = React.memo(({
         const roomInfo = { name: roomNameMap[md.room] || '彼方' };
         const activity: string = md.activity || '在彼方度过了一段时间。';
         const excerpts: string[] = Array.isArray(md.annotationExcerpts) ? md.annotationExcerpts : [];
+        const coReadChapter: string = typeof md.coReadChapter === 'string' ? md.coReadChapter : '';
+        const coReadReflection: string = typeof md.coReadReflection === 'string' ? md.coReadReflection : '';
         const timeStr = new Date(m.timestamp).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' });
         const card = (
             <div className="w-64">
@@ -2509,6 +2511,12 @@ const MessageItem = React.memo(({
                                 ? activity
                                 : <><span className="font-bold text-amber-200">{charName || 'Ta'}</span> {activity}</>}
                         </p>
+                        {coReadReflection && (
+                            <div className="mt-2.5 rounded-lg border border-amber-200/20 bg-white/5 px-2.5 py-2">
+                                <div className="mb-1 text-[9px] font-bold tracking-[0.14em] text-amber-200/80">{coReadChapter ? `${coReadChapter} · 本章感悟` : '本章感悟'}</div>
+                                <p className="max-h-28 overflow-y-auto whitespace-pre-wrap text-[11px] leading-[1.55] text-indigo-100/90 no-scrollbar">{coReadReflection}</p>
+                            </div>
+                        )}
                         {excerpts.length > 0 && (
                             <div className="mt-2 space-y-1">
                                 {excerpts.map((ex, i) => (
