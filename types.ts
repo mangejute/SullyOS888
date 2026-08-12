@@ -297,6 +297,8 @@ export interface APIConfig {
   xiaomiTtsBaseUrl?: string;
   xiaomiTtsModel?: string;
   xiaomiTtsVoice?: string;
+  /** 书库小米朗读专用音色；不影响角色聊天/通话的小米音色。 */
+  readerXiaomiTtsVoice?: string;
   // 用户自定义「语音表演指南」——注入到角色 system prompt、教模型怎么写出有情绪的语音台词。
   // minimax / fishaudio：聊天 + 电话共用，按 TTS 服务商分别存（两家标记体系不同，不能共用一份）；
   //   留空 → 用内置默认（minimaxTts.VOICE_ACTING_GUIDE / fishAudioTts.FISH_VOICE_ACTING_GUIDE）。

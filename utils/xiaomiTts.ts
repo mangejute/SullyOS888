@@ -58,21 +58,22 @@ const synthesizeXiaomiText = async (text: string, config: APIConfig, voiceOverri
   const cacheKey = hashTtsParams({ kind: 'xiaomi-mimo-tts', spoken, model: options.model, voice: options.voice, baseUrl: options.baseUrl });
   const cached = await getCachedTts(cacheKey);
   if (cached) return { url: URL.createObjectURL(cached), blob: cached };
-  const workerUrl = `${getProxyWorkerUrl()}/xiaomi-tts`;
-  // 公共 Worker 的旧版 CORS 白名单不接受自定义地址请求头。官方默认地址无需传该头，
-  // 可避免手机浏览器在预检阶段直接报 Failed to fetch。
+  // 小米官方接口已正确开放浏览器 CORS。默认直连，避免公共 Worker 的旧 /xiaomi-tts
+  // 路由误把 POST 当成 GET 而返回 405；自定义兼容地址仍可经用户自己的 Worker 转发。
+  const isOfficial = options.baseUrl === DEFAULT_BASE_URL;
+  const requestUrl = isOfficial ? `${options.baseUrl}/chat/completions` : `${getProxyWorkerUrl()}/xiaomi-tts`;
   const headers: Record<string, string> = { 'Content-Type': 'application/json', Authorization: `Bearer ${options.key}` };
-  if (options.baseUrl !== DEFAULT_BASE_URL) headers['X-Xiaomi-TTS-Base-Url'] = options.baseUrl;
+  if (!isOfficial) headers['X-Xiaomi-TTS-Base-Url'] = options.baseUrl;
   let response: Response;
   try {
-    response = await fetch(workerUrl, {
+    response = await fetch(requestUrl, {
       method: 'POST',
       headers,
       body: JSON.stringify({ model: options.model, messages: [{ role: 'assistant', content: spoken }], audio: { format: 'mp3', voice: options.voice }, stream: false }),
     });
   } catch (error: any) {
     const reason = error?.message || '网络请求被浏览器拦截';
-    throw new Error(`无法连接小米 TTS 中转：${reason}。默认官方地址已无需额外请求头；若使用自定义地址，请确认你的 Worker 已更新并允许 X-Xiaomi-TTS-Base-Url。`);
+    throw new Error(`无法连接小米 MiMo TTS：${reason}${isOfficial ? '。请检查网络是否能访问 api.xiaomimimo.com。' : '。自定义地址需要已更新的 Worker 并允许 X-Xiaomi-TTS-Base-Url。'}`);
   }
   if (!response.ok) {
     const detail = await response.text().catch(() => '');
@@ -100,6 +101,11 @@ const synthesizeXiaomiText = async (text: string, config: APIConfig, voiceOverri
 
 export async function synthesizeSpeechXiaomiDetailed(text: string, char: CharacterProfile, apiConfig: APIConfig): Promise<TtsResult> {
   return synthesizeXiaomiText(text, apiConfig, char.voiceProfile?.xiaomiVoice);
+}
+
+/** 书库等场景的内置小米音色朗读，不读取角色档案中的音色。 */
+export async function synthesizeSpeechXiaomiWithVoiceDetailed(text: string, apiConfig: APIConfig, voice: string): Promise<TtsResult> {
+  return synthesizeXiaomiText(text, apiConfig, voice);
 }
 
 export async function testXiaomiTtsConnection(apiConfig: APIConfig): Promise<void> {

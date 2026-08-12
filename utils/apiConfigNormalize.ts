@@ -10,7 +10,7 @@ export const MINIMAX_CONFIG_STORAGE_KEY = 'os_minimax_config_v1';
 export const OTHER_API_CONFIG_STORAGE_KEY = 'os_other_api_config_v2';
 
 const OTHER_API_KEYS = [
-  'minimaxApiKey', 'minimaxGroupId', 'minimaxRegion', 'aceStepApiKey', 'ttsProvider',
+  'minimaxApiKey', 'minimaxGroupId', 'minimaxRegion', 'aceStepApiKey', 'ttsProvider', 'readerTtsProvider', 'readerXiaomiTtsVoice',
   'fishAudioApiKey', 'fishAudioModel', 'qwenTtsApiKey', 'qwenTtsWorkspaceId', 'qwenTtsRegion',
   'qwenTtsModel', 'qwenTtsVoice', 'qwenTtsAudioFormat', 'qwenTtsEndpoint',
   'xiaomiTtsApiKey', 'xiaomiTtsBaseUrl', 'xiaomiTtsModel', 'xiaomiTtsVoice', 'voicePrompts',

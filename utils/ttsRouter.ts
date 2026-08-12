@@ -11,7 +11,7 @@ import {
 } from './minimaxTts';
 import { synthesizeSpeechFishDetailed } from './fishAudioTts';
 import { synthesizeSpeechQwenDetailed } from './qwenTts';
-import { synthesizeSpeechXiaomiDetailed } from './xiaomiTts';
+import { synthesizeSpeechXiaomiDetailed, synthesizeSpeechXiaomiWithVoiceDetailed } from './xiaomiTts';
 import { resolveTtsProvider } from './ttsProvider';
 
 export type { TtsResult };
@@ -45,6 +45,15 @@ export async function synthesizeSpeechWithProviderDetailed(
   options?: SynthOptions,
 ): Promise<TtsResult> {
   return synthesizeSpeechDetailed(text, char, { ...apiConfig, ttsProvider: provider }, options);
+}
+
+/** 指定小米内置音色合成，供书库独立朗读设置使用。 */
+export async function synthesizeSpeechXiaomiReaderDetailed(
+  text: string,
+  apiConfig: APIConfig,
+  voice: string,
+): Promise<TtsResult> {
+  return synthesizeSpeechXiaomiWithVoiceDetailed(text, apiConfig, voice);
 }
 
 export async function synthesizeSpeech(

@@ -23,7 +23,8 @@ import { Signal, getMyAuthorship, setSignalWhisper, hasSignalNoticeAck, ackSigna
 import type { SignalPoem, SignalBooklet } from '../types';
 import { getVRApi, setVRApi, getVRApiLog, clearVRApiLog, type VRApiCall } from '../utils/vrWorld/vrApi';
 import { safeResponseJson } from '../utils/safeApi';
-import { synthesizeSpeechWithProviderDetailed, characterHasVoiceForProvider } from '../utils/ttsRouter';
+import { synthesizeSpeechWithProviderDetailed, synthesizeSpeechXiaomiReaderDetailed, characterHasVoiceForProvider } from '../utils/ttsRouter';
+import { XIAOMI_TTS_VOICES } from '../utils/xiaomiTts';
 import { safeFetchJson } from '../utils/safeApi';
 import { getBlobRefAudioDataUrl, useBlobRefAudioUrl, useBlobRefUrl, putImageBlob } from '../utils/blobRef';
 
@@ -3087,6 +3088,7 @@ const ReaderModal: React.FC<{
     const [coReadMessage, setCoReadMessage] = useState('');
     // 书库朗读独立于聊天/视频的全局语音引擎，避免互相改设置。
     const [readMode, setReadMode] = useState<'system' | 'minimax' | 'xiaomi'>(() => apiConfig.readerTtsProvider === 'xiaomi' ? 'xiaomi' : apiConfig.readerTtsProvider === 'minimax' ? 'minimax' : 'system');
+    const [readerXiaomiVoice, setReaderXiaomiVoice] = useState(() => apiConfig.readerXiaomiTtsVoice || apiConfig.xiaomiTtsVoice || '冰糖');
     const [readingState, setReadingState] = useState<'idle' | 'reading' | 'paused'>('idle');
     const [noiseRef, setNoiseRef] = useState(() => (readReaderPrefs(novel.id) as ReaderPrefs & { noise?: { name: string; audioRef: string; mimeType?: string } }).noise);
     const [noisePlaying, setNoisePlaying] = useState(false);
@@ -3423,7 +3425,7 @@ const ReaderModal: React.FC<{
         }; next();
     };
     const startCharacterReading = async (provider: 'minimax' | 'xiaomi') => {
-        if (!selectedChar || !characterHasVoiceForProvider(selectedChar, apiConfig, provider)) { setCoReadMessage(provider === 'minimax' ? '先在角色语音里配置 MiniMax 音色' : '先在系统设置中配置小米 MiMo API Key'); return; }
+        if (provider === 'minimax' && (!selectedChar || !characterHasVoiceForProvider(selectedChar, apiConfig, provider))) { setCoReadMessage('先在角色语音里配置 MiniMax 音色'); return; }
         if (provider === 'xiaomi' && !apiConfig.xiaomiTtsApiKey?.trim()) { setCoReadMessage('先在系统设置中配置小米 MiMo API Key'); return; }
         if (provider === 'minimax' && !(apiConfig.minimaxApiKey || apiConfig.apiKey)?.trim()) { setCoReadMessage('先在系统设置中配置 MiniMax API Key'); return; }
         stopReading(); speechCancelled.current = false; charReadIndex.current = 0; setReadingState('reading');
@@ -3431,7 +3433,10 @@ const ReaderModal: React.FC<{
         const next = async () => {
             if (speechCancelled.current || charReadIndex.current >= list.length) { setReadingState('idle'); return; }
             try {
-                const result = await synthesizeSpeechWithProviderDetailed(list[charReadIndex.current++].text, selectedChar, apiConfig, provider);
+                const text = list[charReadIndex.current++].text;
+                const result = provider === 'xiaomi'
+                    ? await synthesizeSpeechXiaomiReaderDetailed(text, apiConfig, readerXiaomiVoice)
+                    : await synthesizeSpeechWithProviderDetailed(text, selectedChar!, apiConfig, provider);
                 if (speechCancelled.current || !audioRef.current) return;
                 charReadUrls.current.push(result.url); audioRef.current.src = result.url; audioRef.current.playbackRate = prefs.voiceSpeed || 1;
                 audioRef.current.onended = () => { void next(); }; await audioRef.current.play();
@@ -3580,7 +3585,8 @@ const ReaderModal: React.FC<{
             {coReadMessage && <div className="px-4 pb-1 text-center text-[10px]" style={{ color: coReadState === 'error' ? '#bd554f' : theme.sub }}>{coReadMessage}</div>}
             {showAudio && <div className="mx-4 mb-2 rounded-lg p-2.5 space-y-2" style={{ background: theme.bg, border: `1px solid ${theme.accent}33` }}>
                 <div className="flex gap-1.5"><button onClick={() => { setReadMode('system'); updateApiConfig({ readerTtsProvider: 'system' }); }} className="flex-1 rounded-lg py-1.5 text-[10px] font-semibold" style={{ color: readMode === 'system' ? theme.paper : theme.text, background: readMode === 'system' ? theme.accent : 'transparent' }}>系统朗读</button><button onClick={() => { setReadMode('minimax'); updateApiConfig({ readerTtsProvider: 'minimax' }); }} className="flex-1 rounded-lg py-1.5 text-[10px] font-semibold" style={{ color: readMode === 'minimax' ? theme.paper : theme.text, background: readMode === 'minimax' ? theme.accent : 'transparent' }}>MiniMax</button><button onClick={() => { setReadMode('xiaomi'); updateApiConfig({ readerTtsProvider: 'xiaomi' }); }} className="flex-1 rounded-lg py-1.5 text-[10px] font-semibold" style={{ color: readMode === 'xiaomi' ? theme.paper : theme.text, background: readMode === 'xiaomi' ? theme.accent : 'transparent' }}>小米</button></div>
-                {readMode !== 'system' && <select value={readerCharId} onChange={e => setReaderCharId(e.target.value)} className="w-full rounded-lg px-2 py-1.5 text-[10px]" style={{ color: theme.text, background: theme.paper, border: `1px solid ${theme.accent}33` }}>{characters.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}</select>}
+                {readMode === 'minimax' && <select value={readerCharId} onChange={e => setReaderCharId(e.target.value)} className="w-full rounded-lg px-2 py-1.5 text-[10px]" style={{ color: theme.text, background: theme.paper, border: `1px solid ${theme.accent}33` }}>{characters.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}</select>}
+                {readMode === 'xiaomi' && <select value={readerXiaomiVoice} onChange={e => { setReaderXiaomiVoice(e.target.value); updateApiConfig({ readerXiaomiTtsVoice: e.target.value }); }} className="w-full rounded-lg px-2 py-1.5 text-[10px]" style={{ color: theme.text, background: theme.paper, border: `1px solid ${theme.accent}33` }} aria-label="选择小米朗读音色">{XIAOMI_TTS_VOICES.map(voice => <option key={voice.id} value={voice.id}>{voice.name} · {voice.description}</option>)}</select>}
                 <div className="flex items-center gap-2 text-[10px]" style={{ color: theme.sub }}>语速 {[0.8, 1, 1.2, 1.5].map(speed => <button key={speed} onClick={() => savePrefs({ voiceSpeed: speed })} className="rounded px-1.5 py-1" style={{ color: (prefs.voiceSpeed || 1) === speed ? theme.paper : theme.text, background: (prefs.voiceSpeed || 1) === speed ? theme.accent : theme.paper }}>{speed}x</button>)}<button onClick={readingState === 'reading' ? stopReading : () => readMode === 'system' ? startSystemReading() : void startCharacterReading(readMode)} className="ml-auto rounded px-2 py-1 font-semibold" style={{ color: theme.paper, background: theme.accent }}>{readingState === 'reading' ? '停止' : '朗读本章'}</button></div>
                 <div className="flex items-center gap-2 text-[10px]" style={{ color: theme.sub }}><label className="cursor-pointer"><UploadSimple size={13} className="inline mr-1" />上传白噪音<input type="file" accept="audio/*" className="hidden" onChange={e => void uploadNoise(e.target.files?.[0])} /></label>{noiseRef && <button onClick={() => void toggleNoise()} className="ml-auto rounded px-2 py-1" style={{ color: theme.paper, background: theme.accent }}>{noisePlaying ? '暂停白噪音' : `播放 ${noiseRef.name}`}</button>}</div>
                 <div className="flex items-center gap-1 text-[10px]" style={{ color: theme.sub }}>睡眠定时 {[0, 30, 60, 120, 480].map(min => <button key={min} onClick={() => setSleepMinutes(min)} className="rounded px-1.5 py-1" style={{ color: (prefs.sleepMinutes || 0) === min ? theme.paper : theme.text, background: (prefs.sleepMinutes || 0) === min ? theme.accent : theme.paper }}>{min === 0 ? '关闭' : min < 60 ? `${min}分` : `${min / 60}时`}</button>)}</div>

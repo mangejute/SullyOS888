@@ -77,7 +77,7 @@ const OTHER_API_PRESETS_STORAGE_KEY = 'os_other_api_presets';
 
 type ImageApiConfig = NonNullable<APIConfig['imageGenerationApi']>;
 type ImageApiPreset = { id: string; name: string; config: ImageApiConfig };
-type OtherApiPresetConfig = Pick<APIConfig, 'minimaxApiKey' | 'minimaxGroupId' | 'minimaxRegion' | 'aceStepApiKey' | 'ttsProvider' | 'readerTtsProvider' | 'fishAudioApiKey' | 'fishAudioModel' | 'qwenTtsApiKey' | 'qwenTtsWorkspaceId' | 'qwenTtsRegion' | 'qwenTtsModel' | 'qwenTtsVoice' | 'qwenTtsAudioFormat' | 'qwenTtsEndpoint' | 'xiaomiTtsApiKey' | 'xiaomiTtsBaseUrl' | 'xiaomiTtsModel' | 'xiaomiTtsVoice' | 'voicePrompts'>;
+type OtherApiPresetConfig = Pick<APIConfig, 'minimaxApiKey' | 'minimaxGroupId' | 'minimaxRegion' | 'aceStepApiKey' | 'ttsProvider' | 'readerTtsProvider' | 'readerXiaomiTtsVoice' | 'fishAudioApiKey' | 'fishAudioModel' | 'qwenTtsApiKey' | 'qwenTtsWorkspaceId' | 'qwenTtsRegion' | 'qwenTtsModel' | 'qwenTtsVoice' | 'qwenTtsAudioFormat' | 'qwenTtsEndpoint' | 'xiaomiTtsApiKey' | 'xiaomiTtsBaseUrl' | 'xiaomiTtsModel' | 'xiaomiTtsVoice' | 'voicePrompts'>;
 type OtherApiPreset = { id: string; name: string; config: OtherApiPresetConfig };
 
 const readStoredVisionModels = (): string[] => {
@@ -519,6 +519,7 @@ const Settings: React.FC = () => {
     apiConfig.ttsProvider === 'fishaudio' ? 'fishaudio' : apiConfig.ttsProvider === 'qwen' ? 'qwen' : apiConfig.ttsProvider === 'xiaomi' ? 'xiaomi' : 'minimax'
   );
   const [localReaderTtsProvider, setLocalReaderTtsProvider] = useState<'system' | 'minimax' | 'xiaomi'>(apiConfig.readerTtsProvider === 'xiaomi' ? 'xiaomi' : apiConfig.readerTtsProvider === 'minimax' ? 'minimax' : 'system');
+  const [localReaderXiaomiVoice, setLocalReaderXiaomiVoice] = useState(apiConfig.readerXiaomiTtsVoice || apiConfig.xiaomiTtsVoice || '冰糖');
   const [localFishKey, setLocalFishKey] = useState(apiConfig.fishAudioApiKey || '');
   const [localFishModel, setLocalFishModel] = useState(apiConfig.fishAudioModel || 's2.1-pro');
   const [localQwenKey, setLocalQwenKey] = useState(apiConfig.qwenTtsApiKey || '');
@@ -967,6 +968,7 @@ const Settings: React.FC = () => {
       setLocalFishModel(apiConfig.fishAudioModel || 's2.1-pro');
       setLocalTtsProvider(apiConfig.ttsProvider === 'fishaudio' ? 'fishaudio' : apiConfig.ttsProvider === 'qwen' ? 'qwen' : apiConfig.ttsProvider === 'xiaomi' ? 'xiaomi' : 'minimax');
       setLocalReaderTtsProvider(apiConfig.readerTtsProvider === 'xiaomi' ? 'xiaomi' : apiConfig.readerTtsProvider === 'minimax' ? 'minimax' : 'system');
+      setLocalReaderXiaomiVoice(apiConfig.readerXiaomiTtsVoice || apiConfig.xiaomiTtsVoice || '冰糖');
       setLocalQwenKey(apiConfig.qwenTtsApiKey || '');
       setLocalQwenWorkspace(apiConfig.qwenTtsWorkspaceId || '');
       setLocalQwenRegion(apiConfig.qwenTtsRegion === 'singapore' ? 'singapore' : 'beijing');
@@ -1227,7 +1229,7 @@ const Settings: React.FC = () => {
 
   const currentOtherApiConfig = (): OtherApiPresetConfig => ({
     minimaxApiKey: localMiniMaxKey.trim(), minimaxGroupId: localMiniMaxGroupId.trim(), minimaxRegion: localMiniMaxRegion,
-    aceStepApiKey: localAceStepKey.trim(), ttsProvider: localTtsProvider, readerTtsProvider: localReaderTtsProvider, fishAudioApiKey: localFishKey.trim(), fishAudioModel: localFishModel.trim(),
+    aceStepApiKey: localAceStepKey.trim(), ttsProvider: localTtsProvider, readerTtsProvider: localReaderTtsProvider, readerXiaomiTtsVoice: localReaderXiaomiVoice.trim(), fishAudioApiKey: localFishKey.trim(), fishAudioModel: localFishModel.trim(),
     qwenTtsApiKey: localQwenKey.trim(), qwenTtsWorkspaceId: localQwenWorkspace.trim(), qwenTtsRegion: localQwenRegion,
     qwenTtsModel: localQwenModel.trim(), qwenTtsVoice: localQwenVoice.trim(), qwenTtsAudioFormat: localQwenFormat, qwenTtsEndpoint: localQwenEndpoint.trim(),
     xiaomiTtsApiKey: localXiaomiKey.trim(), xiaomiTtsBaseUrl: localXiaomiBaseUrl.trim(), xiaomiTtsModel: localXiaomiModel.trim(), xiaomiTtsVoice: localXiaomiVoice.trim(),
@@ -1238,7 +1240,7 @@ const Settings: React.FC = () => {
     const config = preset.config;
     setLocalMiniMaxKey(config.minimaxApiKey || ''); setLocalMiniMaxGroupId(config.minimaxGroupId || '');
     setLocalMiniMaxRegion(config.minimaxRegion === 'overseas' ? 'overseas' : 'domestic');
-    setLocalAceStepKey(config.aceStepApiKey || ''); setLocalTtsProvider(config.ttsProvider === 'fishaudio' ? 'fishaudio' : config.ttsProvider === 'qwen' ? 'qwen' : config.ttsProvider === 'xiaomi' ? 'xiaomi' : 'minimax'); setLocalReaderTtsProvider(config.readerTtsProvider === 'xiaomi' ? 'xiaomi' : config.readerTtsProvider === 'minimax' ? 'minimax' : 'system');
+    setLocalAceStepKey(config.aceStepApiKey || ''); setLocalTtsProvider(config.ttsProvider === 'fishaudio' ? 'fishaudio' : config.ttsProvider === 'qwen' ? 'qwen' : config.ttsProvider === 'xiaomi' ? 'xiaomi' : 'minimax'); setLocalReaderTtsProvider(config.readerTtsProvider === 'xiaomi' ? 'xiaomi' : config.readerTtsProvider === 'minimax' ? 'minimax' : 'system'); setLocalReaderXiaomiVoice(config.readerXiaomiTtsVoice || config.xiaomiTtsVoice || '冰糖');
     setLocalFishKey(config.fishAudioApiKey || ''); setLocalFishModel(config.fishAudioModel || 's2.1-pro');
     setLocalQwenKey(config.qwenTtsApiKey || ''); setLocalQwenWorkspace(config.qwenTtsWorkspaceId || ''); setLocalQwenRegion(config.qwenTtsRegion === 'singapore' ? 'singapore' : 'beijing');
     setLocalQwenModel(config.qwenTtsModel || 'qwen-audio-3.0-tts-flash'); setLocalQwenVoice(config.qwenTtsVoice || 'longanlingxi'); setLocalQwenFormat(config.qwenTtsAudioFormat || 'mp3'); setLocalQwenEndpoint(config.qwenTtsEndpoint || '');
@@ -1469,6 +1471,7 @@ const Settings: React.FC = () => {
       aceStepApiKey: localAceStepKey,
       ttsProvider: localTtsProvider,
       readerTtsProvider: localReaderTtsProvider,
+      readerXiaomiTtsVoice: localReaderXiaomiVoice,
       fishAudioApiKey: localFishKey,
       fishAudioModel: localFishModel,
       qwenTtsApiKey: localQwenKey,
