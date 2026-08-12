@@ -1325,10 +1325,10 @@ const Chat: React.FC = () => {
 
         // 私聊的屏幕发送按钮会明确请求 AI 回复；键盘回车仍只发送。
         // triggerAI 内部从 DB 读取完整历史，因此这里的 messages 闭包尚未包含新消息也没关系。
-        // 屏幕发送按钮的文本，及相册最后一张图片保存完成后，都会触发一次角色回复。
-        // 多图时由输入栏只给最后一张传 triggerReply，确保角色能一次看见整组图片。
+        // 图片选择只负责把图片正常显示在聊天里；右侧发送按钮会走 handleManualTrigger，
+        // 从数据库读取这一组最新图片并请求角色回复。
         const instantCfg = loadInstantConfig();
-        const shouldTriggerReply = (type === 'text' || type === 'image')
+        const shouldTriggerReply = type === 'text'
             && (triggerReply || (isInstantConfigReady(instantCfg) && instantCfg.autoTriggerOnSend));
         if (shouldTriggerReply) {
             // 上一轮还在跑时直接跳过：triggerAI 内部会因 isTyping=true 静默 reject，
@@ -1432,11 +1432,11 @@ const Chat: React.FC = () => {
         void triggerAI(newHistory, undefined, undefined, { skipEmotionInjection: true });
     };
 
-    const handleImageSelect = async (file: File, triggerReply = true) => {
+    const handleImageSelect = async (file: File) => {
         try {
             const base64 = await processImage(file, { maxWidth: 600, quality: 0.6, forceJpeg: true });
             setShowPanel('none');
-            await handleSendText(base64, 'image', undefined, triggerReply);
+            await handleSendText(base64, 'image');
         } catch (err: any) {
             addToast(err.message || '图片处理失败', 'error');
         }
