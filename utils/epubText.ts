@@ -4,7 +4,11 @@ export type EpubTextResult = {
     title?: string;
     author?: string;
     chapterCount: number;
+    /** 按 EPUB spine 的真实阅读顺序保留的章节，供书库目录使用。 */
+    chapters: EpubTextChapter[];
 };
+
+export type EpubTextChapter = { title: string; partTitle?: string; text: string };
 
 type ZipEntry = { async: (type: 'string') => Promise<string> };
 type ZipLike = { file: (name: string) => ZipEntry | null };
@@ -44,6 +48,42 @@ const chapterText = (source: string): string => {
         .trim();
 };
 
+const chapterTitle = (source: string, fallback: string): string => {
+    const doc = new DOMParser().parseFromString(source, 'text/html');
+    const heading = doc.querySelector('h1,h2,h3,title');
+    return textOf(heading || undefined) || fallback;
+};
+
+/** EPUB3 nav.xhtml / EPUB2 toc.ncx 都可能给出比正文 h1 更准确的目录标题。 */
+const tocTitles = async (zip: ZipLike, opf: Document, opfPath: string): Promise<Map<string, string>> => {
+    const titles = new Map<string, string>();
+    const items = Array.from(opf.getElementsByTagName('item'));
+    const nav = items.find(item => (item.getAttribute('properties') || '').split(/\s+/).includes('nav'))
+        || items.find(item => item.getAttribute('media-type') === 'application/x-dtbncx+xml');
+    const href = nav?.getAttribute('href');
+    if (!href) return titles;
+    const path = resolvePath(opfPath, href);
+    const entry = zip.file(path);
+    if (!entry) return titles;
+    const source = await entry.async('string');
+    if (/\.ncx$/i.test(path) || /<navMap\b/i.test(source)) {
+        const doc = parseXml(source, 'EPUB 目录');
+        Array.from(doc.getElementsByTagName('navPoint')).forEach(point => {
+            const src = point.getElementsByTagName('content')[0]?.getAttribute('src')?.split('#')[0];
+            const label = textOf(point.getElementsByTagName('text')[0]);
+            if (src && label) titles.set(resolvePath(path, src), label);
+        });
+    } else {
+        const doc = new DOMParser().parseFromString(source, 'text/html');
+        doc.querySelectorAll('nav a[href]').forEach(link => {
+            const target = link.getAttribute('href')?.split('#')[0];
+            const label = textOf(link);
+            if (target && label) titles.set(resolvePath(path, target), label);
+        });
+    }
+    return titles;
+};
+
 /** 解析标准 EPUB 2/3 的 OPF spine，按阅读顺序提取章节正文。 */
 export async function extractEpubText(file: File, options: { onProgress?: (done: number, total: number) => void } = {}): Promise<EpubTextResult> {
     if (file.size > 80 * 1024 * 1024) throw new Error('EPUB 文件超过 80MB，暂不支持导入');
@@ -71,16 +111,18 @@ export async function extractEpubText(file: File, options: { onProgress?: (done:
         .map(item => manifest.get(item.getAttribute('idref') || ''))
         .filter((path): path is string => Boolean(path));
     if (spine.length === 0) throw new Error('EPUB 中没有可阅读的章节');
+    const toc = await tocTitles(zip, opf, opfPath);
 
-    const chapters: string[] = [];
+    const chapters: EpubTextChapter[] = [];
     for (let index = 0; index < spine.length; index += 1) {
         options.onProgress?.(index + 1, spine.length);
         const entry = zip.file(spine[index]);
         if (!entry) continue;
-        const text = chapterText(await entry.async('string'));
-        if (text) chapters.push(text);
+        const source = await entry.async('string');
+        const text = chapterText(source);
+        if (text) chapters.push({ title: toc.get(spine[index]) || chapterTitle(source, `第 ${chapters.length + 1} 章`), text });
     }
-    const text = chapters.join('\n\n\n').trim();
+    const text = chapters.map(chapter => chapter.text).join('\n\n\n').trim();
     if (!text) throw new Error('EPUB 中没有可提取的文字内容');
-    return { text, title: title || undefined, author: author || undefined, chapterCount: chapters.length };
+    return { text, title: title || undefined, author: author || undefined, chapterCount: chapters.length, chapters };
 }

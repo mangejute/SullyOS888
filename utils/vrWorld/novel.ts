@@ -2,11 +2,62 @@
  * 「彼方」小说工具 —— 切块、阅读窗口、书签推进、批注组织。
  */
 
-import { VRWorldNovel, VRNovelSegment, VRNovelAnnotation } from '../../types';
+import { VRWorldNovel, VRNovelSegment, VRNovelAnnotation, VRNovelChapter } from '../../types';
 import { VR_SEGMENT_TARGET_CHARS, VR_NOVEL_FEED_CHARS } from './constants';
 
 const genId = (prefix: string) =>
     `${prefix}_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
+
+export type NovelSourceChapter = { title: string; partTitle?: string; text: string };
+
+const PART_HEADING = /^第[\d零〇一二三四五六七八九十百千万两]+[卷部篇册集](?:\s|$)/;
+const CHAPTER_HEADING = /^(?:第[\d零〇一二三四五六七八九十百千万两]+[章节回](?:\s|$)|(?:序章|楔子|后记|番外)(?:\s|$)|(?:chapter|part|volume)\s+[\divxlcdm]+(?:\s|$))/i;
+
+/** TXT 的章节识别：只把独占一行、长度合理的标题当目录，避免误把正文切碎。 */
+export function detectNovelChapters(raw: string): NovelSourceChapter[] {
+    const lines = raw.replace(/\r\n/g, '\n').split('\n');
+    const chunks: NovelSourceChapter[] = [];
+    let currentTitle = '正文';
+    let currentPart: string | undefined;
+    let buffer: string[] = [];
+    const flush = () => {
+        const text = buffer.join('\n').trim();
+        if (text) chunks.push({ title: currentTitle, partTitle: currentPart, text });
+        buffer = [];
+    };
+    for (const original of lines) {
+        const line = original.trim();
+        const isPart = line.length > 0 && line.length <= 80 && PART_HEADING.test(line);
+        const isHeading = line.length > 0 && line.length <= 80 && CHAPTER_HEADING.test(line);
+        if (isPart) {
+            flush();
+            currentPart = line;
+            currentTitle = line;
+            continue;
+        }
+        if (isHeading) {
+            flush();
+            currentTitle = line;
+            continue;
+        }
+        buffer.push(original);
+    }
+    flush();
+    return chunks.length > 1 ? chunks : [{ title: '正文', text: raw }];
+}
+
+const buildChaptersFromSource = (source: NovelSourceChapter[], target = VR_SEGMENT_TARGET_CHARS): { segments: VRNovelSegment[]; chapters: VRNovelChapter[] } => {
+    const segments: VRNovelSegment[] = [];
+    const chapters: VRNovelChapter[] = [];
+    source.forEach((chapter, index) => {
+        const local = chunkNovelText(chapter.text, target);
+        if (!local.length) return;
+        const startSeg = segments.length;
+        local.forEach(segment => segments.push({ ...segment, idx: segments.length }));
+        chapters.push({ id: `chapter_${index}`, index: chapters.length, title: chapter.title || `第 ${index + 1} 章`, partTitle: chapter.partTitle, startSeg, endSeg: segments.length });
+    });
+    return { segments, chapters };
+};
 
 /**
  * 把整本小说原文切成阅读单元。按段落（空行/换行）聚合到 ~目标字数，
@@ -55,7 +106,7 @@ export function chunkNovelText(raw: string, target = VR_SEGMENT_TARGET_CHARS): V
 
 /** 从原文新建一本小说。 */
 export function buildNovel(title: string, raw: string, opts?: { author?: string; summary?: string }): VRWorldNovel {
-    const segments = chunkNovelText(raw);
+    const { segments, chapters } = buildChaptersFromSource(detectNovelChapters(raw));
     const totalChars = segments.reduce((s, seg) => s + seg.chars, 0);
     const now = Date.now();
     return {
@@ -64,6 +115,7 @@ export function buildNovel(title: string, raw: string, opts?: { author?: string;
         author: opts?.author?.trim() || undefined,
         summary: opts?.summary?.trim() || undefined,
         segments,
+        chapters,
         totalChars,
         createdAt: now,
         updatedAt: now,
@@ -121,9 +173,22 @@ export async function chunkNovelTextAsync(
 export async function buildNovelAsync(
     title: string,
     raw: string,
-    opts?: { author?: string; summary?: string; onProgress?: (ratio: number) => void },
+    opts?: { author?: string; summary?: string; onProgress?: (ratio: number) => void; chapters?: NovelSourceChapter[] },
 ): Promise<VRWorldNovel> {
-    const segments = await chunkNovelTextAsync(raw, VR_SEGMENT_TARGET_CHARS, opts?.onProgress);
+    const source = opts?.chapters?.filter(c => c.text.trim().length > 0) || detectNovelChapters(raw);
+    // 一章一章切块，保证章节边界永不被段落合并跨过；每处理一章让 UI 有机会刷新。
+    const segments: VRNovelSegment[] = [];
+    const chapters: VRNovelChapter[] = [];
+    for (let i = 0; i < source.length; i += 1) {
+        const local = await chunkNovelTextAsync(source[i].text, VR_SEGMENT_TARGET_CHARS);
+        if (local.length) {
+            const startSeg = segments.length;
+            local.forEach(s => segments.push({ ...s, idx: segments.length }));
+            chapters.push({ id: `chapter_${i}`, index: chapters.length, title: source[i].title || `第 ${i + 1} 章`, partTitle: source[i].partTitle, startSeg, endSeg: segments.length });
+        }
+        opts?.onProgress?.((i + 1) / source.length);
+        await new Promise<void>(r => setTimeout(r));
+    }
     const totalChars = segments.reduce((s, seg) => s + seg.chars, 0);
     const now = Date.now();
     return {
@@ -132,6 +197,7 @@ export async function buildNovelAsync(
         author: opts?.author?.trim() || undefined,
         summary: opts?.summary?.trim() || undefined,
         segments,
+        chapters,
         totalChars,
         createdAt: now,
         updatedAt: now,

@@ -50,11 +50,6 @@ jobs:
       - name: Build
         run: pnpm run build
 
-      # 内置陪睡音频不经过 Vite 入口引用，构建时显式复制到 Pages 根目录。
-      # 否则源码仓库里虽然有 audio/，dist/ 里没有它，线上会返回 404。
-      - name: Copy built-in sleep audio
-        run: cp -R public/audio dist/audio
-
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v3
         with:

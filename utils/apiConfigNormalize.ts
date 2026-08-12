@@ -3,6 +3,8 @@ import type { APIConfig, ApiPreset, SpeechRecognitionConfig } from '../types';
 // 语音识别是后加进总 API 配置的字段。独立保存一份，避免旧版配置迁移或其它 API
 // 保存操作写入旧结构时，把用户已经选择的识别服务悄悄退回浏览器默认值。
 export const SPEECH_RECOGNITION_STORAGE_KEY = 'os_speech_recognition_config';
+// MiniMax 的三项凭据单独留一份，避免旧版本或设置页的其它保存动作覆盖它们。
+export const MINIMAX_CONFIG_STORAGE_KEY = 'os_minimax_config_v1';
 
 // Clipboard contents can carry zero-width characters that String.trim() does not
 // remove. They are never valid at the edges of an API URL, token, or model id.

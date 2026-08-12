@@ -1184,10 +1184,29 @@ export interface VRWorldNovel {
     summary?: string;
     /** 原文按阅读单元切好的段落块（每块 ~数百字，便于定位批注与推进书签）。 */
     segments: VRNovelSegment[];
+    /**
+     * 原书章节目录。EPUB 保留真实 spine 章节，TXT 自动识别“第 X 部/第 X 章”；
+     * 老存档没有这一项时，阅读器会按段落生成兼容目录。
+     */
+    chapters?: VRNovelChapter[];
     /** 总字数（缓存，UI 展示用） */
     totalChars: number;
     createdAt: number;
     updatedAt: number;
+}
+
+/** 小说目录项。章节范围使用 segment 索引，既能稳定定位，也不破坏旧书签/批注。 */
+export interface VRNovelChapter {
+    id: string;
+    /** 目录顺序（0-based） */
+    index: number;
+    title: string;
+    /** “第一部”这类上级卷名，可选。 */
+    partTitle?: string;
+    /** 章节第一段，含。 */
+    startSeg: number;
+    /** 章节末后一段，不含。 */
+    endSeg: number;
 }
 
 /** 小说里的一个阅读单元（原文段落块）。 */
