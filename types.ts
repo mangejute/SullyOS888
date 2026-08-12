@@ -1236,6 +1236,10 @@ export interface VRNovelAnnotation {
     content: string;
     /** 角色实际批注的原文短句。新批注用它定位波浪线，旧存档没有该字段仍可正常查看。 */
     quote?: string;
+    /** 章节读后感与句子批注共用存储；读后感不画波浪线。 */
+    type?: 'annotation' | 'reflection';
+    /** 读后感所属章节，便于只展示在该章结尾。 */
+    chapterId?: string;
     /** 若是"吐槽别人的吐槽"，指向被吐槽的批注 id */
     targetAnnotationId?: string;
     createdAt: number;

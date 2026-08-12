@@ -2711,11 +2711,10 @@ const writeReaderPrefs = (id: string, value: ReaderPrefs) => {
 
 /** 老书没有目录时，尽可能从已保存正文的标题行重新识别章节；无法还原的 EPUB 才退回阅读位置。 */
 const resolvedChapters = (novel: VRWorldNovel): VRNovelChapter[] => {
-    if (novel.chapters?.length) return novel.chapters.filter(c => c.endSeg > c.startSeg);
     const inferred: VRNovelChapter[] = [];
     let partTitle: string | undefined;
     const partRe = /^第[\d零〇一二三四五六七八九十百千万两]+[卷部篇册集](?:\s|$)/;
-    const chapterRe = /^(?:第[\d零〇一二三四五六七八九十百千万两]+[章节回](?:\s|$)|(?:序章|楔子|后记|番外)(?:\s|$)|(?:chapter|part|volume)\s+[\divxlcdm]+(?:\s|$))/i;
+    const chapterRe = /^(?:第[\d零〇一二三四五六七八九十百千万两]+[章节回](?:\s|$)|(?:序章|楔子|后记|番外)(?:\s|$)|(?:chapter|part|volume)\s+[\divxlcdm]+(?:\s|$)|\d{1,3})$/i;
     novel.segments.forEach((segment, index) => {
         const lines = segment.text.split(/\r?\n/).map(line => line.trim()).filter(Boolean).slice(0, 4);
         const heading = lines.find(line => line.length <= 100 && chapterRe.test(line));
@@ -2727,6 +2726,7 @@ const resolvedChapters = (novel: VRWorldNovel): VRNovelChapter[] => {
         inferred.push({ id: `inferred_${index}`, index: inferred.length, title: heading, partTitle, startSeg: index, endSeg: novel.segments.length });
     });
     if (inferred.length > 1) return inferred.filter(chapter => chapter.endSeg > chapter.startSeg);
+    if (novel.chapters?.length) return novel.chapters.filter(c => c.endSeg > c.startSeg);
     const step = 24;
     return Array.from({ length: Math.ceil(novel.segments.length / step) }, (_, index) => ({
         id: `legacy_${index}`, index, title: `阅读位置 ${index + 1}`,
@@ -2737,13 +2737,29 @@ const chapterForSeg = (chapters: VRNovelChapter[], segIdx: number) =>
     chapters.find(c => segIdx >= c.startSeg && segIdx < c.endSeg) || chapters[chapters.length - 1];
 const chapterLabel = (chapter: VRNovelChapter | undefined) => chapter ? `${chapter.partTitle ? `${chapter.partTitle} · ` : ''}${chapter.title}` : '正文';
 
-type ReaderPage = { items: Array<{ segIdx: number; text: string }> };
+type ReaderPosition = { segIdx: number; offset: number };
+type ReaderPage = { items: Array<{ segIdx: number; offset: number; text: string }> };
+
+// 用原文位置而不是只用段落编号定位。一个长段落会被切成多页，字号或屏幕变化后
+// 重新分页时仍要留在用户刚才看的那一句，不能因为段落编号相同而跳回段首。
+const findReaderPage = (pages: ReaderPage[], position: ReaderPosition) => {
+    const contains = pages.findIndex(page => page.items.some(item =>
+        item.segIdx === position.segIdx && item.offset <= position.offset && position.offset < item.offset + item.text.length,
+    ));
+    if (contains >= 0) return contains;
+    const nextPiece = pages.findIndex(page => page.items.some(item =>
+        item.segIdx === position.segIdx && item.offset >= position.offset,
+    ));
+    if (nextPiece >= 0) return nextPiece;
+    const nextSegment = pages.findIndex(page => page.items.some(item => item.segIdx > position.segIdx));
+    return nextSegment >= 0 ? nextSegment : Math.max(0, pages.length - 1);
+};
 
 /**
  * 页面容量由实际阅读区域计算，切点优先落在句末。短段不会单独占一页，会继续装入下一段内容。
  * 这只是分段，不依赖固定设备尺寸；容器尺寸、字体或行距变更后会重新分页。
  */
-const buildReaderPages = (segments: VRWorldNovel['segments'], capacity: number): ReaderPage[] => {
+const buildReaderPages = (segments: VRWorldNovel['segments'], capacity: number, chapterStarts: Set<number>): ReaderPage[] => {
     const pages: ReaderPage[] = [];
     let items: ReaderPage['items'] = [];
     let used = 0;
@@ -2755,15 +2771,22 @@ const buildReaderPages = (segments: VRWorldNovel['segments'], capacity: number):
         return boundary >= Math.min(80, Math.floor(limit * 0.55)) ? boundary + 1 : limit;
     };
     for (const segment of segments) {
+        // 章节开头永远另起一页，不能和前一章的最后几句混在一起。
+        if (chapterStarts.has(segment.idx) && items.length) pushPage();
         let rest = segment.text.trim();
+        let offset = 0;
         while (rest) {
             const remaining = capacity - used;
             // 余量太小就换页，避免把一句话切得只剩几个字。
             if (used > 0 && remaining < 60) { pushPage(); continue; }
             const take = takeAtBoundary(rest, Math.max(1, remaining));
             const piece = rest.slice(0, take).trim();
-            if (piece) { items.push({ segIdx: segment.idx, text: piece }); used += piece.length; }
-            rest = rest.slice(take).trim();
+            if (piece) { items.push({ segIdx: segment.idx, offset, text: piece }); used += piece.length; }
+            const after = rest.slice(take);
+            // 分页切点后的换行或空格不显示，但要计入原文位置，方便下一次精确定位。
+            const leadingSpace = after.length - after.trimStart().length;
+            offset += take + leadingSpace;
+            rest = after.trimStart();
             if (rest) pushPage();
         }
     }
@@ -2822,8 +2845,9 @@ const ReaderModal: React.FC<{
     // 所有阅读都只用同一套翻页，不再让正文滚到被底栏遮住。
     const total = novel.segments.length;
     const [pageCapacity, setPageCapacity] = useState(360);
-    const readerPages = useMemo(() => buildReaderPages(novel.segments, pageCapacity), [novel.segments, pageCapacity]);
     const chapters = useMemo(() => resolvedChapters(novel), [novel]);
+    const chapterStarts = useMemo(() => new Set(chapters.map(chapter => chapter.startSeg)), [chapters]);
+    const readerPages = useMemo(() => buildReaderPages(novel.segments, pageCapacity, chapterStarts), [novel.segments, pageCapacity, chapterStarts]);
     const initialBm = useMemo(() => Math.min(Math.max(0, initialSeg != null ? initialSeg : readUserBm(novel.id)), Math.max(0, total - 1)), [novel.id, total, initialSeg]);
     const [annotations, setAnnotations] = useState<VRNovelAnnotation[]>([]);
     const [themeId, setThemeId] = useState(() => localStorage.getItem(READER_THEME_KEY) || 'paper');
@@ -2846,6 +2870,7 @@ const ReaderModal: React.FC<{
     const [doodleWidth, setDoodleWidth] = useState(3);
     const [doodleRevision, setDoodleRevision] = useState(0);
     const scrollRef = useRef<HTMLDivElement>(null);
+    const paginationAnchorRef = useRef<ReaderPosition | null>(null);
     const doodleAreaRef = useRef<HTMLDivElement>(null);
     const doodleCanvasRef = useRef<HTMLCanvasElement>(null);
     const doodlesByViewRef = useRef<Map<string, ReaderDoodleStroke[]>>(new Map());
@@ -2864,8 +2889,12 @@ const ReaderModal: React.FC<{
     const selectedChar = characters.find(c => c.id === readerCharId);
     const currentSeg = readerPages[page]?.items[0]?.segIdx ?? Math.max(0, total - 1);
     const currentChapter = chapterForSeg(chapters, currentSeg);
+    const chapterReflection = annotations.find(annotation => annotation.type === 'reflection' && annotation.chapterId === currentChapter?.id);
+    const isChapterLastPage = !currentChapter || !readerPages[page + 1] || !readerPages[page + 1].items.some(item => item.segIdx < currentChapter.endSeg);
     const totalPages = Math.max(1, readerPages.length);
     const renderSegs = (readerPages[page]?.items || []).map(item => ({ idx: item.segIdx, text: item.text }));
+    const nextPageStart = readerPages[page + 1]?.items[0]?.segIdx;
+    const canFillCurrentPage = nextPageStart != null && !chapterStarts.has(nextPageStart);
     const readerFont = prefs.fontFamily === 'sans' ? `'Noto Sans SC','Microsoft YaHei',sans-serif` : prefs.fontFamily === 'system' ? 'system-ui,sans-serif' : `'Noto Serif SC','Songti SC','Noto Serif','Georgia',serif`;
     // 涂鸦是会话内的临时纸张：翻页后可翻回看，退出阅读器即随组件卸载清空。
     const doodleViewKey = `page:${page}`;
@@ -2889,15 +2918,33 @@ const ReaderModal: React.FC<{
         return () => observer.disconnect();
     }, [fontSize, prefs.lineHeight, doodleMode, showAudio, showCtl]);
 
-    useEffect(() => setPage(current => Math.min(current, Math.max(0, readerPages.length - 1))), [readerPages.length]);
+    useEffect(() => {
+        const anchor = paginationAnchorRef.current;
+        if (anchor != null) {
+            setPage(findReaderPage(readerPages, anchor));
+            paginationAnchorRef.current = null;
+            return;
+        }
+        setPage(current => Math.min(current, Math.max(0, readerPages.length - 1)));
+    }, [readerPages]);
 
-    // 估算容量只是起点：以实际排版后的滚动高度为准，最后一行一旦被底栏挤住就自动收一点。
+    // 估算容量只是起点：以实际排版后的高度为准，溢出缩小，正文未读完却留白时扩大。
     useLayoutEffect(() => {
         const content = scrollRef.current;
-        if (!content || content.scrollHeight <= content.clientHeight + 1 || pageCapacity <= 100) return;
-        const overflow = content.scrollHeight - content.clientHeight;
-        setPageCapacity(current => Math.max(100, current - Math.max(12, Math.ceil(overflow / Math.max(1, fontSize) * 8))));
-    }, [page, pageCapacity, fontSize, prefs.lineHeight, renderSegs.length, showAudio, doodleMode]);
+        if (!content || !content.clientHeight) return;
+        const ratio = content.scrollHeight / content.clientHeight;
+        if (ratio > 1.001 && pageCapacity > 100) {
+            paginationAnchorRef.current = { segIdx: currentSeg, offset: readerPages[page]?.items[0]?.offset || 0 };
+            const overflow = content.scrollHeight - content.clientHeight;
+            setPageCapacity(current => Math.max(100, current - Math.max(12, Math.ceil(overflow / Math.max(1, fontSize) * 8))));
+            return;
+        }
+        // 章节末页不能混入下一章，所以那种留白是正常的；同章正文则继续往当前页装。
+        if (ratio < 0.88 && canFillCurrentPage) {
+            paginationAnchorRef.current = { segIdx: currentSeg, offset: readerPages[page]?.items[0]?.offset || 0 };
+            setPageCapacity(current => current + Math.max(24, Math.round(current * Math.min(0.22, (0.94 - ratio) * 0.75))));
+        }
+    }, [page, pageCapacity, currentSeg, canFillCurrentPage, fontSize, prefs.lineHeight, renderSegs.length, chapterReflection?.content, showAudio, doodleMode]);
 
     const renderDoodles = useCallback(() => {
         const canvas = doodleCanvasRef.current;
@@ -2971,7 +3018,7 @@ const ReaderModal: React.FC<{
     };
     const jumpToSegment = (idx: number) => {
         const target = Math.min(Math.max(0, idx), Math.max(0, total - 1));
-        const targetPage = readerPages.findIndex(readerPage => readerPage.items.some(item => item.segIdx >= target));
+        const targetPage = findReaderPage(readerPages, { segIdx: target, offset: 0 });
         // 章节起点若正好在旧书的最后一个不完整段，跳到最接近的末页，而不是错误回到首页。
         setPage(targetPage >= 0 ? targetPage : Math.max(0, readerPages.length - 1));
         setShowToc(false);
@@ -2990,7 +3037,7 @@ const ReaderModal: React.FC<{
         observer.observe(area);
         return () => observer.disconnect();
     }, [doodleMode, doodleRevision, renderDoodles]);
-    useEffect(() => { if (!peek) writeUserBm(novel.id, readerPages[page]?.segIdx || 0); }, [page, novel.id, peek, readerPages]);
+    useEffect(() => { if (!peek) writeUserBm(novel.id, readerPages[page]?.items[0]?.segIdx || 0); }, [page, novel.id, peek, readerPages]);
     useEffect(() => () => { window.speechSynthesis?.cancel(); audioRef.current?.pause(); noiseAudioRef.current?.pause(); charReadUrls.current.forEach(u => URL.revokeObjectURL(u)); if (sleepTimerRef.current) clearTimeout(sleepTimerRef.current); }, []);
 
     const chapterText = () => novel.segments.slice(currentChapter?.startSeg || 0, currentChapter?.endSeg || total).map(s => s.text).join('\n\n');
@@ -3048,6 +3095,7 @@ const ReaderModal: React.FC<{
         try {
             const chapterSegs = novel.segments.slice(currentChapter.startSeg, currentChapter.endSeg);
             const created: VRNovelAnnotation[] = [];
+            const readingNotes: string[] = [];
             // 长章节分批交给模型：每批保留完整自然段和全局段落索引，不会因单章太长而超上下文失败。
             const batches: typeof chapterSegs[] = [];
             let batch: typeof chapterSegs = []; let batchChars = 0;
@@ -3061,15 +3109,31 @@ const ReaderModal: React.FC<{
                 const currentBatch = batches[index];
                 const material = currentBatch.map(s => `[段落 ${s.idx}] ${s.text}`).join('\n\n');
                 const prompt = [
-                    `你正在与用户一起阅读小说《${novel.title}》的${chapterLabel(currentChapter)}，这是本章的第 ${index + 1}/${batches.length} 段内容。`,
+                    `你正在与用户一起阅读小说《${novel.title}》${novel.author ? `，作者是${novel.author}` : ''}的${chapterLabel(currentChapter)}，这是本章的第 ${index + 1}/${batches.length} 批内容。你必须把它当作同一整章的一部分连续阅读。`,
                     `请认真读完以下原文，并以这个角色本人的口吻留下 1~5 条有内容的阅读批注。每条必须选中对应段落里最值得吐槽、最被触动或最关键的一句原文短句（2~80字）；不要选整段，不要选相邻段，也不能编造原文不存在的句子。`,
                     `用户的专属批注引导：${prefs.annotationGuide?.trim() || '抓住角色真正会在意、会吐槽或会被触动的细节，不要写空泛读后感。'}`,
-                    `只输出 JSON，不要 Markdown：{"annotations":[{"segIdx":数字,"quote":"原文中逐字复制的一小句","content":"针对这句话的批注正文"}]}`,
+                    readingNotes.length ? `你已经读过本章前面的内容，阅读笔记：${readingNotes.join('；').slice(-1800)}` : '',
+                    `只输出 JSON，不要 Markdown：{"annotations":[{"segIdx":数字,"quote":"原文中逐字复制的一小句","content":"针对这句话的批注正文"}],"note":"不超过80字，记住这批内容的情节与感受，供继续读本章"}`,
                     `\n--- 原文 ---\n${material}`,
                 ].join('\n');
                 const data = await safeFetchJson(`${cfg.baseUrl.replace(/\/+$/, '')}/chat/completions`, { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${cfg.apiKey || 'sk-none'}` }, body: JSON.stringify({ model: cfg.model, temperature: 0.85, stream: false, messages: [{ role: 'system', content: selectedChar.systemPrompt || `你是${selectedChar.name}。` }, { role: 'user', content: prompt }] }) });
-                const parsed = parseChapterAnnotations(data.choices?.[0]?.message?.content || '', new Map(currentBatch.map(s => [s.idx, s.text])));
+                const reply = data.choices?.[0]?.message?.content || '';
+                const parsed = parseChapterAnnotations(reply, new Map(currentBatch.map(s => [s.idx, s.text])));
+                try { const raw = JSON.parse((reply.replace(/<think>[\s\S]*?<\/think>/gi, '').match(/\{[\s\S]*\}/) || [])[0] || '{}'); if (typeof raw.note === 'string' && raw.note.trim()) readingNotes.push(raw.note.trim()); } catch { /* annotations remain usable even if note parsing fails */ }
                 for (const item of parsed) { const annotation: VRNovelAnnotation = { id: genLocalId('vrann'), novelId: novel.id, segIdx: item.segIdx, authorId: selectedChar.id, authorName: selectedChar.name, quote: item.quote, content: item.content, createdAt: Date.now() }; await DB.saveVRAnnotation(annotation); created.push(annotation); }
+            }
+            const reflectionPrompt = [
+                `你已完整读完小说《${novel.title}》${novel.author ? `（作者：${novel.author}）` : ''}的${chapterLabel(currentChapter)}。`,
+                `请以${selectedChar.name}本人的口吻，写一段只针对这一章的100到300字阅读感悟：要点出具体情节、人物或主题，不要复述原文，不要 Markdown。`,
+                `本章阅读笔记：${readingNotes.join('；').slice(-2400) || '请根据刚读完的整章内容总结。'}`,
+            ].join('\n');
+            const reflectionData = await safeFetchJson(`${cfg.baseUrl.replace(/\/+$/, '')}/chat/completions`, { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${cfg.apiKey || 'sk-none'}` }, body: JSON.stringify({ model: cfg.model, temperature: 0.85, stream: false, messages: [{ role: 'system', content: selectedChar.systemPrompt || `你是${selectedChar.name}。` }, { role: 'user', content: reflectionPrompt }] }) });
+            const reflectionText = String(reflectionData.choices?.[0]?.message?.content || '').replace(/<think>[\s\S]*?<\/think>/gi, '').trim().slice(0, 900);
+            if (reflectionText) {
+                const previous = annotations.filter(annotation => annotation.type === 'reflection' && annotation.authorId === selectedChar.id && annotation.chapterId === currentChapter.id);
+                await Promise.all(previous.map(annotation => DB.deleteVRAnnotation(annotation.id)));
+                const reflection: VRNovelAnnotation = { id: genLocalId('vrref'), novelId: novel.id, segIdx: Math.max(currentChapter.startSeg, currentChapter.endSeg - 1), authorId: selectedChar.id, authorName: selectedChar.name, content: reflectionText, type: 'reflection', chapterId: currentChapter.id, createdAt: Date.now() };
+                await DB.saveVRAnnotation(reflection); created.push(reflection);
             }
             if (!created.length) throw new Error('没有可保存的批注');
             setAnnotations(prev => [...prev, ...created]);
@@ -3109,6 +3173,7 @@ const ReaderModal: React.FC<{
         <div ref={doodleAreaRef} className="relative flex-1 min-h-0">
             <div ref={scrollRef} className="relative h-full overflow-hidden px-5 py-4" style={{ background: backgroundUrl ? 'transparent' : theme.bg, touchAction: doodleMode ? 'none' : 'pan-x' }}>
                 {renderSegs.map(seg => <SegBlock key={seg.idx} seg={seg} anns={annBySeg.get(seg.idx) || []} theme={theme} fontSize={fontSize} lineHeight={prefs.lineHeight || 1.9} fontFamily={readerFont} nameOf={nameOf} onOpenAnnotation={setSelectedAnnotation} highlight={peek && seg.idx === initialSeg} />)}
+                {chapterReflection && isChapterLastPage && <div className="mt-6 border-t pt-4" style={{ borderColor: `${theme.accent}33`, color: theme.text }}><div className="mb-2 text-[11px] font-bold" style={{ color: theme.accent }}>{chapterReflection.authorName} 的本章感悟</div><p className="whitespace-pre-wrap text-[13px] leading-7">{stripLeakedAttrs(chapterReflection.content)}</p></div>}
             </div>
             {doodleMode && <canvas ref={doodleCanvasRef} className="absolute inset-0 z-[2]" style={{ touchAction: 'none', cursor: doodleTool === 'eraser' ? 'cell' : 'crosshair' }} onPointerDown={startDoodle} onPointerMove={moveDoodle} onPointerUp={endDoodle} onPointerCancel={endDoodle} />}
         </div>
@@ -3125,7 +3190,7 @@ const ReaderModal: React.FC<{
             </div>}
         </div>
         {showToc && <div className="absolute inset-0 z-10 flex" onClick={() => setShowToc(false)}><div className="w-[82%] max-w-sm h-full overflow-y-auto p-4" onClick={e => e.stopPropagation()} style={{ background: theme.paper, paddingTop: VR_TOP }}><div className="flex items-center mb-3"><span className="font-bold text-[15px]" style={{ color: theme.text }}>目录</span><button onClick={() => setShowToc(false)} className="ml-auto" style={{ color: theme.text }}><X size={19} /></button></div>{chapters.map(chapter => <button key={chapter.id} onClick={() => jumpToSegment(chapter.startSeg)} className="w-full text-left rounded-lg px-3 py-2.5 mb-1" style={{ color: chapter.id === currentChapter?.id ? theme.accent : theme.text, background: chapter.id === currentChapter?.id ? theme.annBg : 'transparent' }}><div className="text-[12px] font-semibold truncate">{chapterLabel(chapter)}</div><div className="text-[9px] mt-0.5" style={{ color: theme.sub }}>{chapter.endSeg - chapter.startSeg} 段</div></button>)}</div><div className="flex-1" /></div>}
-        {selectedAnnotation && <div className="absolute inset-0 z-20 flex items-end bg-black/35" onClick={() => setSelectedAnnotation(null)}><div className="w-full rounded-t-xl p-4" onClick={e => e.stopPropagation()} style={{ background: theme.paper, paddingBottom: vrBottomPad('1rem') }}><div className="flex items-center mb-2"><Note size={17} weight="fill" style={{ color: theme.accent }} /><span className="ml-1.5 text-[13px] font-bold" style={{ color: theme.text }}>{nameOf(selectedAnnotation.authorId) || selectedAnnotation.authorName} 的批注</span><button onClick={() => setSelectedAnnotation(null)} className="ml-auto" style={{ color: theme.text }}><X size={18} /></button></div><p className="text-[13px] leading-7" style={{ color: theme.text }}>{stripLeakedAttrs(selectedAnnotation.content)}</p></div></div>}
+        {selectedAnnotation && <div className="absolute inset-0 z-20 flex items-center justify-center bg-black/35 p-5" onClick={() => setSelectedAnnotation(null)}><div className="w-full max-w-md rounded-xl p-4 shadow-xl" onClick={e => e.stopPropagation()} style={{ background: theme.paper }}><div className="flex items-center mb-2"><Note size={17} weight="fill" style={{ color: theme.accent }} /><span className="ml-1.5 text-[13px] font-bold" style={{ color: theme.text }}>{nameOf(selectedAnnotation.authorId) || selectedAnnotation.authorName} 的批注</span><button onClick={() => setSelectedAnnotation(null)} className="ml-auto" style={{ color: theme.text }}><X size={18} /></button></div><p className="text-[13px] leading-7" style={{ color: theme.text }}>{stripLeakedAttrs(selectedAnnotation.content)}</p></div></div>}
     </div>;
 };
 
