@@ -3854,6 +3854,25 @@ export const OSProvider: React.FC<{ children: React.ReactNode }> = ({ children }
               studyApiConfig: (mode === 'text_only' || mode === 'full') ? (() => { try { const s = localStorage.getItem('study_api_config'); return s ? JSON.parse(s) : undefined; } catch { return undefined; } })() : undefined,
               studyTutorPresets: (mode === 'text_only' || mode === 'full') ? (() => { try { const s = localStorage.getItem('study_tutor_presets'); return s ? JSON.parse(s) : undefined; } catch { return undefined; } })() : undefined,
 
+              // 书库进度和阅读器外观是按书保存的 localStorage。书籍、角色批注已经由
+              // IndexedDB 导出；这里补上用户自己的“看到哪里”和字体/背景等阅读偏好。
+              // 涂鸦是临时层，按退出阅读器即清除的约定，不写入备份。
+              vrReaderLocal: (mode === 'text_only' || mode === 'full') ? (() => {
+                  const readerLocal: Record<string, string> = {};
+                  for (let i = 0; i < localStorage.length; i++) {
+                      const key = localStorage.key(i);
+                      if (!key) continue;
+                      if (key.startsWith('vr_user_bm_')
+                          || key.startsWith('vr_reader_prefs_')
+                          || key === 'vr_reader_theme'
+                          || key === 'vr_reader_font') {
+                          const value = localStorage.getItem(key);
+                          if (value !== null) readerLocal[key] = value;
+                      }
+                  }
+                  return Object.keys(readerLocal).length > 0 ? readerLocal : undefined;
+              })() : undefined,
+
               // 云端配置
               cloudBackupConfig: (mode === 'text_only' || mode === 'full') ? (() => { try { const s = localStorage.getItem('os_cloud_backup_config'); return s ? JSON.parse(s) : undefined; } catch { return undefined; } })() : undefined,
               remoteVectorConfig: (mode === 'text_only' || mode === 'full') ? (() => { try { const s = localStorage.getItem('os_remote_vector_config'); return s ? JSON.parse(s) : undefined; } catch { return undefined; } })() : undefined,
@@ -4706,6 +4725,20 @@ export const OSProvider: React.FC<{ children: React.ReactNode }> = ({ children }
           // Restore Study Room settings
           if (data.studyApiConfig) safeSetLocalStorage('study_api_config', JSON.stringify(data.studyApiConfig));
           if (data.studyTutorPresets) safeSetLocalStorage('study_tutor_presets', JSON.stringify(data.studyTutorPresets));
+
+          // Restore 彼方书库的用户进度和阅读器偏好。只接受预期的键名，避免导入文件
+          // 写入任意 localStorage；临时涂鸦从未进入此字段，也不会在导入后复活。
+          if (data.vrReaderLocal && typeof data.vrReaderLocal === 'object') {
+              for (const [key, value] of Object.entries(data.vrReaderLocal)) {
+                  const isReaderKey = key.startsWith('vr_user_bm_')
+                      || key.startsWith('vr_reader_prefs_')
+                      || key === 'vr_reader_theme'
+                      || key === 'vr_reader_font';
+                  if (isReaderKey && typeof value === 'string') {
+                      safeSetLocalStorage(key, value);
+                  }
+              }
+          }
 
           // Restore 云端配置
           if (data.cloudBackupConfig) safeSetLocalStorage('os_cloud_backup_config', JSON.stringify(data.cloudBackupConfig));

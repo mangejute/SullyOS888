@@ -3621,6 +3621,8 @@ export interface FullBackupData {
     vrPresets?: { key: string; name: string; prompt: string; blurb?: string }[]; // 剧院·用户自定义写作风格预设
     vrLetters?: VRLetter[];                    // 邮局信件（本地存档+队列）
     vrSettings?: any[];                        // 彼方设置（独立 API + 调用记录）
+    /** 彼方书库的本机阅读进度与阅读器偏好（存 localStorage）。不包含退出阅读器即清除的涂鸦。 */
+    vrReaderLocal?: Record<string, string>;
     worlds?: WorldProfile[];                   // 家园·世界定义
     worldEpisodes?: WorldEpisode[];            // 家园·演绎历史
     vrPostOffice?: Record<string, string>;     // 邮局本机配置：身份 deviceId / 后端地址（存 localStorage）
