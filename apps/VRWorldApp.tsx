@@ -16,6 +16,7 @@ import { VR_ROOMS, getRoom, VR_DEFAULT_INTERVAL_MIN, SIGNAL_EPIGRAPH, signalActF
 import { buildNovelAsync, groupAnnotationsBySeg, getBookmark } from '../utils/vrWorld/novel';
 import { decodeBytes } from '../utils/vrWorld/decodeText';
 import { extractPdfText, isPdfFile } from '../utils/pdfText';
+import { extractEpubText, isEpubFile } from '../utils/epubText';
 import { stripLeakedAttrs } from '../utils/vrWorld/prompts';
 import { PostOffice, MAX_LETTER_CHARS, exportIdentity, importIdentity, getAdminToken, setAdminToken, type RemoteReply, type RemoteLetterStat, type RemoteAdminLetter } from '../utils/vrWorld/postOffice';
 import { Signal, getMyAuthorship, setSignalWhisper, hasSignalNoticeAck, ackSignalNotice, type SignalState } from '../utils/vrWorld/signal';
@@ -2631,7 +2632,7 @@ const LibraryView: React.FC<{
     <div className="space-y-3">
         <button onClick={onAdd} className="w-full rounded-xl py-2.5 text-[13px] font-bold flex items-center justify-center gap-1.5 active:scale-[0.98] transition-transform shadow-[0_4px_14px_rgba(120,100,255,0.4)]"
             style={{ background: 'linear-gradient(120deg, rgba(150,168,255,.92), rgba(188,168,255,.85) 55%, rgba(150,212,204,.9))' }}>
-            <Plus size={16} weight="bold" /> 上传小说（支持 .txt）
+            <Plus size={16} weight="bold" /> 上传小说（支持 TXT / EPUB / PDF）
         </button>
         {novels.length === 0 ? (
             <p className="text-[11px] text-indigo-300/50 py-6 text-center">书库空空如也。上传的小说是所有角色共享的读物，每个角色各自留批注、各自记书签。</p>
@@ -2892,14 +2893,15 @@ const ReaderModal: React.FC<{ novel: VRWorldNovel; characters: CharacterProfile[
     );
 };
 
-// ============ 上传弹窗（支持大文件 .txt / .pdf，内容不入 DOM） ============
+// ============ 上传弹窗（支持大文件 .txt / .epub / .pdf，内容不入 DOM） ============
 type UploadFileInfo = {
     name: string;
     chars: number;
     preview: string;
     encoding: string;
-    kind: 'text' | 'pdf';
+    kind: 'text' | 'pdf' | 'epub';
     pages?: number;
+    chapters?: number;
 };
 
 const UploadModal: React.FC<{
@@ -2940,17 +2942,33 @@ const UploadModal: React.FC<{
     const onFile = async (f: File | undefined) => {
         if (!f) return;
         const pdfFile = isPdfFile(f);
+        const epubFile = isEpubFile(f);
         const textFile = f.type.toLowerCase() === 'text/plain' || /\.(txt|text)$/i.test(f.name);
-        if (!pdfFile && !textFile) {
-            onError('目前只支持 .txt 和 .pdf 文件');
+        if (!pdfFile && !epubFile && !textFile) {
+            onError('目前支持 .txt、.epub 和 .pdf 文件');
             if (fileRef.current) fileRef.current.value = '';
             return;
         }
         setReading(true);
-        setReadingStatus(pdfFile ? '正在载入 PDF…' : '读取并识别编码中…');
+        setReadingStatus(epubFile ? '正在解析 EPUB 章节…' : pdfFile ? '正在载入 PDF…' : '读取并识别编码中…');
         try {
-            const buf = await f.arrayBuffer();
-            if (pdfFile) {
+            if (epubFile) {
+                fileBufRef.current = null;
+                const result = await extractEpubText(f, {
+                    onProgress: (done, total) => setReadingStatus(`正在解析 EPUB 章节… ${done}/${total}`),
+                });
+                const content = result.text.trim();
+                fileContentRef.current = content;
+                setFileInfo({
+                    name: f.name, chars: content.length, preview: content.slice(0, 300).replace(/\s+/g, ' ').trim(),
+                    encoding: 'EPUB', kind: 'epub', chapters: result.chapterCount,
+                });
+                if (!title.trim() && result.title) setTitle(result.title);
+                if (!author.trim() && result.author) setAuthor(result.author);
+                trackEvent('导入 EPUB 小说到彼方书库', { chapters: result.chapterCount, chars: content.length });
+            } else {
+                const buf = await f.arrayBuffer();
+                if (pdfFile) {
                 fileBufRef.current = null;
                 const result = await extractPdfText(buf, {
                     onProgress: ({ page, totalPages }) => setReadingStatus(`正在提取 PDF 文本… ${page}/${totalPages}`),
@@ -2970,16 +2988,17 @@ const UploadModal: React.FC<{
                     pages: result.pageCount,
                 });
                 trackEvent('导入 PDF 小说到彼方书库', { pages: result.pageCount, chars: content.length });
-            } else {
+                } else {
                 fileBufRef.current = buf;
                 setChosenEncoding('auto');
                 applyDecode(f.name, buf, 'auto');
+                }
             }
             setPasteText(''); // 文件优先，清掉粘贴框
-            if (!title.trim()) setTitle(f.name.replace(/\.(txt|text|pdf)$/i, ''));
+            if (!title.trim()) setTitle(f.name.replace(/\.(txt|text|epub|pdf)$/i, ''));
         } catch (e) {
             console.error('[VRWorld] read novel file failed', e);
-            onError(pdfFile ? 'PDF 读取失败，文件可能已损坏、加密或网络组件加载失败' : '文件读取失败');
+            onError(epubFile ? (e instanceof Error ? `EPUB 读取失败：${e.message}` : 'EPUB 读取失败，文件可能已损坏或加密') : pdfFile ? 'PDF 读取失败，文件可能已损坏、加密或网络组件加载失败' : '文件读取失败');
         } finally {
             setReading(false);
             setReadingStatus('');
@@ -3036,7 +3055,7 @@ const UploadModal: React.FC<{
                     {!busy && <button onClick={onClose} className="ml-auto p-1 text-indigo-300/60"><X size={18} /></button>}
                 </div>
 
-                <input ref={fileRef} type="file" accept=".txt,text/plain,.pdf,application/pdf" className="hidden" onChange={e => onFile(e.target.files?.[0])} />
+                <input ref={fileRef} type="file" accept=".txt,text/plain,.epub,application/epub+zip,.pdf,application/pdf" className="hidden" onChange={e => onFile(e.target.files?.[0])} />
                 {reading ? (
                     <div className="w-full rounded-xl border border-indigo-300/30 py-5 mb-3 flex items-center justify-center gap-2 text-indigo-100/90">
                         <CircleNotch size={18} weight="bold" className="animate-spin" /> {readingStatus}
@@ -3047,7 +3066,7 @@ const UploadModal: React.FC<{
                             <BookOpen size={16} weight="fill" className="text-amber-200 shrink-0" />
                             <span className="text-[12.5px] text-white font-semibold truncate flex-1">{fileInfo.name}</span>
                             <span className="text-[8.5px] text-indigo-300/60 border border-indigo-300/30 rounded px-1 uppercase">
-                                {fileInfo.kind === 'pdf' ? `PDF · ${fileInfo.pages} 页` : fileInfo.encoding}
+                                {fileInfo.kind === 'pdf' ? `PDF · ${fileInfo.pages} 页` : fileInfo.kind === 'epub' ? `EPUB · ${fileInfo.chapters} 章` : fileInfo.encoding}
                             </span>
                             {!busy && <button onClick={clearFile} className="text-indigo-300/60 p-1"><X size={14} /></button>}
                         </div>
@@ -3071,7 +3090,7 @@ const UploadModal: React.FC<{
                 ) : (
                     <button onClick={() => fileRef.current?.click()}
                         className="w-full rounded-xl border border-dashed border-indigo-300/40 py-3 mb-3 text-[12.5px] text-indigo-100/90 flex items-center justify-center gap-2 active:bg-white/5">
-                        <UploadSimple size={16} weight="bold" /> 选择 .txt / .pdf 文件（大文件也 OK）
+                        <UploadSimple size={16} weight="bold" /> 选择 .txt / .epub / .pdf 文件（大文件也 OK）
                     </button>
                 )}
 
