@@ -9,6 +9,7 @@ export type EpubTextResult = {
 };
 
 export type EpubTextChapter = { title: string; partTitle?: string; text: string };
+type EpubTocEntry = Pick<EpubTextChapter, 'title' | 'partTitle'>;
 
 type ZipEntry = { async: (type: 'string') => Promise<string> };
 type ZipLike = { file: (name: string) => ZipEntry | null };
@@ -55,8 +56,8 @@ const chapterTitle = (source: string, fallback: string): string => {
 };
 
 /** EPUB3 nav.xhtml / EPUB2 toc.ncx 都可能给出比正文 h1 更准确的目录标题。 */
-const tocTitles = async (zip: ZipLike, opf: Document, opfPath: string): Promise<Map<string, string>> => {
-    const titles = new Map<string, string>();
+const tocTitles = async (zip: ZipLike, opf: Document, opfPath: string): Promise<Map<string, EpubTocEntry>> => {
+    const titles = new Map<string, EpubTocEntry>();
     const items = Array.from(opf.getElementsByTagName('item'));
     const nav = items.find(item => (item.getAttribute('properties') || '').split(/\s+/).includes('nav'))
         || items.find(item => item.getAttribute('media-type') === 'application/x-dtbncx+xml');
@@ -68,18 +69,31 @@ const tocTitles = async (zip: ZipLike, opf: Document, opfPath: string): Promise<
     const source = await entry.async('string');
     if (/\.ncx$/i.test(path) || /<navMap\b/i.test(source)) {
         const doc = parseXml(source, 'EPUB 目录');
-        Array.from(doc.getElementsByTagName('navPoint')).forEach(point => {
-            const src = point.getElementsByTagName('content')[0]?.getAttribute('src')?.split('#')[0];
-            const label = textOf(point.getElementsByTagName('text')[0]);
-            if (src && label) titles.set(resolvePath(path, src), label);
-        });
+        const walk = (point: Element, parentTitle?: string) => {
+            const children = Array.from(point.children).filter(node => node.tagName === 'navPoint');
+            const src = Array.from(point.children).find(node => node.tagName === 'content')?.getAttribute('src')?.split('#')[0];
+            const labelNode = Array.from(point.children).find(node => node.tagName === 'navLabel')?.getElementsByTagName('text')[0];
+            const label = textOf(labelNode);
+            if (src && label) titles.set(resolvePath(path, src), { title: label, partTitle: parentTitle });
+            children.forEach(child => walk(child, children.length ? label || parentTitle : parentTitle));
+        };
+        Array.from(doc.getElementsByTagName('navMap')[0]?.children || []).filter(node => node.tagName === 'navPoint').forEach(point => walk(point));
     } else {
         const doc = new DOMParser().parseFromString(source, 'text/html');
-        doc.querySelectorAll('nav a[href]').forEach(link => {
-            const target = link.getAttribute('href')?.split('#')[0];
-            const label = textOf(link);
-            if (target && label) titles.set(resolvePath(path, target), label);
-        });
+        const navs = Array.from(doc.querySelectorAll('nav'));
+        const tocNav = navs.find(nav => /(^|\s)toc(\s|$)/i.test(nav.getAttribute('epub:type') || '') || nav.getAttribute('role') === 'doc-toc') || navs[0];
+        const walk = (list: Element, parentTitle?: string) => {
+            Array.from(list.children).filter(node => node.tagName === 'LI').forEach(item => {
+                const link = Array.from(item.children).find(node => node.tagName === 'A') as HTMLAnchorElement | undefined;
+                const childList = Array.from(item.children).find(node => node.tagName === 'OL' || node.tagName === 'UL');
+                const title = textOf(link);
+                const target = link?.getAttribute('href')?.split('#')[0];
+                if (target && title) titles.set(resolvePath(path, target), { title, partTitle: parentTitle });
+                if (childList) walk(childList, title || parentTitle);
+            });
+        };
+        const list = tocNav && Array.from(tocNav.children).find(node => node.tagName === 'OL' || node.tagName === 'UL');
+        if (list) walk(list);
     }
     return titles;
 };
@@ -120,7 +134,10 @@ export async function extractEpubText(file: File, options: { onProgress?: (done:
         if (!entry) continue;
         const source = await entry.async('string');
         const text = chapterText(source);
-        if (text) chapters.push({ title: toc.get(spine[index]) || chapterTitle(source, `第 ${chapters.length + 1} 章`), text });
+        if (text) {
+            const tocEntry = toc.get(spine[index]);
+            chapters.push({ title: tocEntry?.title || chapterTitle(source, `第 ${chapters.length + 1} 章`), partTitle: tocEntry?.partTitle, text });
+        }
     }
     const text = chapters.map(chapter => chapter.text).join('\n\n\n').trim();
     if (!text) throw new Error('EPUB 中没有可提取的文字内容');

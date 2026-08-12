@@ -2676,6 +2676,7 @@ const READER_THEMES: ReaderTheme[] = [
     { id: 'green', name: '护眼', bg: '#bcd4bc', paper: '#d6e8d4', text: '#26331f', sub: '#5d7350', accent: '#3f6b3a', annBg: '#cadfc6' },
     { id: 'night', name: '夜阅', bg: '#15161a', paper: '#1f2128', text: '#cfc9bd', sub: '#7d7869', accent: '#c0915a', annBg: '#262932' },
     { id: 'ink', name: '墨黑', bg: '#0a0a0e', paper: '#131319', text: '#b9b4ab', sub: '#6f6a78', accent: '#8b9bff', annBg: '#1a1a24' },
+    { id: 'mono', name: '黑白', bg: '#ffffff', paper: '#ffffff', text: '#000000', sub: '#4a4a4a', accent: '#000000', annBg: '#f1f1f1' },
 ];
 const FONT_SIZES = [13, 15, 17, 20];
 const READER_THEME_KEY = 'vr_reader_theme';
@@ -2699,6 +2700,8 @@ type ReaderPrefs = {
     voiceSpeed?: number;
     sleepMinutes?: number;
 };
+type ReaderDoodlePoint = { x: number; y: number };
+type ReaderDoodleStroke = { tool: 'pen' | 'eraser'; width: number; points: ReaderDoodlePoint[] };
 const readerPrefsKey = (id: string) => `vr_reader_prefs_${id}`;
 const readReaderPrefs = (id: string): ReaderPrefs => {
     try { return JSON.parse(localStorage.getItem(readerPrefsKey(id)) || '{}') as ReaderPrefs; } catch { return {}; }
@@ -2707,12 +2710,27 @@ const writeReaderPrefs = (id: string, value: ReaderPrefs) => {
     try { localStorage.setItem(readerPrefsKey(id), JSON.stringify(value)); } catch { /* ignore */ }
 };
 
-/** 老书没有真实章节数据时，生成稳定的兼容目录；新 EPUB/TXT 不会走到这里。 */
+/** 老书没有目录时，尽可能从已保存正文的标题行重新识别章节；无法还原的 EPUB 才退回阅读位置。 */
 const resolvedChapters = (novel: VRWorldNovel): VRNovelChapter[] => {
     if (novel.chapters?.length) return novel.chapters.filter(c => c.endSeg > c.startSeg);
+    const inferred: VRNovelChapter[] = [];
+    let partTitle: string | undefined;
+    const partRe = /^第[\d零〇一二三四五六七八九十百千万两]+[卷部篇册集](?:\s|$)/;
+    const chapterRe = /^(?:第[\d零〇一二三四五六七八九十百千万两]+[章节回](?:\s|$)|(?:序章|楔子|后记|番外)(?:\s|$)|(?:chapter|part|volume)\s+[\divxlcdm]+(?:\s|$))/i;
+    novel.segments.forEach((segment, index) => {
+        const lines = segment.text.split(/\r?\n/).map(line => line.trim()).filter(Boolean).slice(0, 4);
+        const heading = lines.find(line => line.length <= 100 && chapterRe.test(line));
+        const part = lines.find(line => line.length <= 100 && partRe.test(line));
+        if (part) partTitle = part;
+        if (!heading) return;
+        const previous = inferred[inferred.length - 1];
+        if (previous) previous.endSeg = index;
+        inferred.push({ id: `inferred_${index}`, index: inferred.length, title: heading, partTitle, startSeg: index, endSeg: novel.segments.length });
+    });
+    if (inferred.length > 1) return inferred.filter(chapter => chapter.endSeg > chapter.startSeg);
     const step = 24;
     return Array.from({ length: Math.ceil(novel.segments.length / step) }, (_, index) => ({
-        id: `legacy_${index}`, index, title: `第 ${index + 1} 节`,
+        id: `legacy_${index}`, index, title: `阅读位置 ${index + 1}`,
         startSeg: index * step, endSeg: Math.min(novel.segments.length, (index + 1) * step),
     }));
 };
@@ -2779,7 +2797,15 @@ const ReaderModal: React.FC<{
     const [readingState, setReadingState] = useState<'idle' | 'reading' | 'paused'>('idle');
     const [noiseRef, setNoiseRef] = useState(() => (readReaderPrefs(novel.id) as ReaderPrefs & { noise?: { name: string; audioRef: string; mimeType?: string } }).noise);
     const [noisePlaying, setNoisePlaying] = useState(false);
+    const [doodleMode, setDoodleMode] = useState(false);
+    const [doodleTool, setDoodleTool] = useState<'pen' | 'eraser'>('pen');
+    const [doodleWidth, setDoodleWidth] = useState(3);
+    const [doodleRevision, setDoodleRevision] = useState(0);
     const scrollRef = useRef<HTMLDivElement>(null);
+    const doodleAreaRef = useRef<HTMLDivElement>(null);
+    const doodleCanvasRef = useRef<HTMLCanvasElement>(null);
+    const doodlesByViewRef = useRef<Map<string, ReaderDoodleStroke[]>>(new Map());
+    const activeDoodleRef = useRef<ReaderDoodleStroke | null>(null);
     const audioRef = useRef<HTMLAudioElement>(null);
     const noiseAudioRef = useRef<HTMLAudioElement>(null);
     const speechCancelled = useRef(false);
@@ -2797,6 +2823,65 @@ const ReaderModal: React.FC<{
     const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
     const renderSegs = mode === 'page' ? novel.segments.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE) : novel.segments.slice(winStart, winEnd);
     const readerFont = prefs.fontFamily === 'sans' ? `'Noto Sans SC','Microsoft YaHei',sans-serif` : prefs.fontFamily === 'system' ? 'system-ui,sans-serif' : `'Noto Serif SC','Songti SC','Noto Serif','Georgia',serif`;
+    // 涂鸦是会话内的临时纸张：翻页后可翻回看，退出阅读器即随组件卸载清空。
+    const doodleViewKey = mode === 'page' ? `page:${page}` : `scroll:${winStart}`;
+
+    const renderDoodles = useCallback(() => {
+        const canvas = doodleCanvasRef.current;
+        const area = doodleAreaRef.current;
+        if (!canvas || !area) return;
+        const rect = area.getBoundingClientRect();
+        const ratio = window.devicePixelRatio || 1;
+        const width = Math.max(1, Math.round(rect.width));
+        const height = Math.max(1, Math.round(rect.height));
+        if (canvas.width !== width * ratio || canvas.height !== height * ratio) {
+            canvas.width = width * ratio; canvas.height = height * ratio;
+            canvas.style.width = `${width}px`; canvas.style.height = `${height}px`;
+        }
+        const ctx = canvas.getContext('2d');
+        if (!ctx) return;
+        ctx.setTransform(ratio, 0, 0, ratio, 0, 0);
+        ctx.clearRect(0, 0, width, height);
+        for (const stroke of doodlesByViewRef.current.get(doodleViewKey) || []) {
+            if (!stroke.points.length) continue;
+            ctx.save();
+            ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+            ctx.globalCompositeOperation = stroke.tool === 'eraser' ? 'destination-out' : 'source-over';
+            ctx.strokeStyle = theme.text;
+            ctx.lineWidth = stroke.tool === 'eraser' ? 22 : stroke.width;
+            ctx.beginPath(); ctx.moveTo(stroke.points[0].x, stroke.points[0].y);
+            for (const point of stroke.points.slice(1)) ctx.lineTo(point.x, point.y);
+            if (stroke.points.length === 1) ctx.lineTo(stroke.points[0].x + 0.1, stroke.points[0].y + 0.1);
+            ctx.stroke(); ctx.restore();
+        }
+    }, [doodleViewKey, theme.text]);
+    const doodlePoint = (event: React.PointerEvent<HTMLCanvasElement>): ReaderDoodlePoint => {
+        const rect = event.currentTarget.getBoundingClientRect();
+        return { x: event.clientX - rect.left, y: event.clientY - rect.top };
+    };
+    const startDoodle = (event: React.PointerEvent<HTMLCanvasElement>) => {
+        if (!doodleMode) return;
+        event.preventDefault();
+        event.currentTarget.setPointerCapture(event.pointerId);
+        activeDoodleRef.current = { tool: doodleTool, width: doodleWidth, points: [doodlePoint(event)] };
+    };
+    const moveDoodle = (event: React.PointerEvent<HTMLCanvasElement>) => {
+        const active = activeDoodleRef.current;
+        if (!active) return;
+        event.preventDefault(); active.points.push(doodlePoint(event));
+        const strokes = doodlesByViewRef.current.get(doodleViewKey) || [];
+        doodlesByViewRef.current.set(doodleViewKey, [...strokes, active]);
+        // 临时放入列表重画后再去掉，既保证每一笔实时呈现，也不累积同一笔的重复项。
+        renderDoodles(); doodlesByViewRef.current.set(doodleViewKey, strokes);
+    };
+    const endDoodle = (event: React.PointerEvent<HTMLCanvasElement>) => {
+        const active = activeDoodleRef.current;
+        if (!active) return;
+        event.preventDefault();
+        const strokes = doodlesByViewRef.current.get(doodleViewKey) || [];
+        doodlesByViewRef.current.set(doodleViewKey, [...strokes, active]);
+        activeDoodleRef.current = null; setDoodleRevision(v => v + 1);
+    };
 
     const savePrefs = (patch: Partial<ReaderPrefs>) => setPrefs(prev => {
         const next = { ...prev, ...patch }; writeReaderPrefs(novel.id, next); return next;
@@ -2819,11 +2904,24 @@ const ReaderModal: React.FC<{
     useEffect(() => { localStorage.setItem(READER_THEME_KEY, themeId); }, [themeId]);
     useEffect(() => { localStorage.setItem(READER_FONT_KEY, String(fontSize)); }, [fontSize]);
     useEffect(() => {
+        if (!doodleMode) return;
+        renderDoodles();
+        const area = doodleAreaRef.current;
+        if (!area || typeof ResizeObserver === 'undefined') return;
+        const observer = new ResizeObserver(() => renderDoodles());
+        observer.observe(area);
+        return () => observer.disconnect();
+    }, [doodleMode, doodleRevision, renderDoodles]);
+    useEffect(() => {
         if (mode === 'page') { if (!peek) writeUserBm(novel.id, page * PAGE_SIZE); if (scrollRef.current) scrollRef.current.scrollTop = 0; }
     }, [page, mode, novel.id, peek]);
     useEffect(() => () => { window.speechSynthesis?.cancel(); audioRef.current?.pause(); noiseAudioRef.current?.pause(); charReadUrls.current.forEach(u => URL.revokeObjectURL(u)); if (sleepTimerRef.current) clearTimeout(sleepTimerRef.current); }, []);
 
     const switchMode = (m: 'page' | 'scroll') => {
+        if (doodleMode && m === 'scroll') {
+            setCoReadMessage('涂鸦时固定使用左右翻页，关闭涂鸦后可切换上下滑动');
+            return;
+        }
         if (m === mode) return;
         if (m === 'scroll') { const bm = page * PAGE_SIZE; setWinStart(bm); setWinEnd(Math.min(total, bm + 30)); setTopSeg(bm); }
         else setPage(Math.floor(readUserBm(novel.id) / PAGE_SIZE));
@@ -2930,23 +3028,34 @@ const ReaderModal: React.FC<{
             <button onClick={() => { saveProgress(); onClose(); }} className="p-1.5 -ml-1.5 rounded-full" style={{ color: theme.text }}><X size={20} weight="bold" /></button>
             <div className="min-w-0 flex-1"><div className="text-[14px] font-bold truncate" style={{ color: theme.text }}>{novel.title}</div><div className="text-[10px] truncate" style={{ color: theme.sub }}>{chapterLabel(currentChapter)} · {Math.round((currentSeg / Math.max(1, total)) * 100)}%</div></div>
             <button onClick={() => setShowToc(true)} className="p-1.5 rounded-full" style={{ color: theme.accent }} aria-label="目录"><List size={18} weight="bold" /></button>
+            <button onClick={() => setDoodleMode(enabled => { const next = !enabled; if (next) switchMode('page'); return next; })} className="p-1.5 rounded-full" style={{ color: doodleMode ? theme.paper : theme.accent, background: doodleMode ? theme.accent : 'transparent' }} aria-label="临时涂鸦"><PencilSimple size={18} weight="bold" /></button>
             <button onClick={() => setShowCtl(s => !s)} className="p-1.5 rounded-full" style={{ color: theme.accent }} aria-label="阅读设置"><Palette size={18} weight="bold" /></button>
         </div>
         {peek && <div className="relative px-4 py-1.5 shrink-0 text-[11px] text-center" style={{ background: theme.paper, color: theme.accent }}>正在查看批注位置，不会改动你的书签</div>}
         {showCtl && <div className="relative px-4 py-3 shrink-0 space-y-3 max-h-[46vh] overflow-y-auto" style={{ background: theme.paper, borderBottom: `1px solid ${theme.accent}22` }}>
             <div className="flex items-center gap-2"><Palette size={14} style={{ color: theme.sub }} /><div className="flex gap-1 flex-1">{READER_THEMES.map(t => <button key={t.id} onClick={() => setThemeId(t.id)} className="flex-1 h-7 rounded-lg text-[9px] font-bold" style={{ background: t.paper, color: t.text, border: themeId === t.id ? `2px solid ${t.accent}` : `1px solid ${t.accent}33` }}>{t.name}</button>)}</div></div>
             <div className="flex items-center gap-2"><TextAa size={14} style={{ color: theme.sub }} /><div className="flex gap-1.5">{FONT_SIZES.map(fs => <button key={fs} onClick={() => setFontSize(fs)} className="w-8 h-7 rounded-lg font-bold" style={{ background: fontSize === fs ? theme.accent : 'transparent', color: fontSize === fs ? theme.paper : theme.sub, border: `1px solid ${theme.accent}44`, fontSize: Math.min(fs, 15) }}>A</button>)}</div><select value={prefs.fontFamily || 'serif'} onChange={e => savePrefs({ fontFamily: e.target.value as ReaderPrefs['fontFamily'] })} className="ml-auto rounded-lg px-2 py-1 text-[10px]" style={{ color: theme.text, background: theme.bg, border: `1px solid ${theme.accent}44` }}><option value="serif">衬线字体</option><option value="sans">无衬线</option><option value="system">系统字体</option></select></div>
-            <div className="flex items-center gap-2 text-[10px]" style={{ color: theme.sub }}>行距 <input type="range" min="1.5" max="2.5" step="0.1" value={prefs.lineHeight || 1.9} onChange={e => savePrefs({ lineHeight: Number(e.target.value) })} className="flex-1" /><span>{(prefs.lineHeight || 1.9).toFixed(1)}</span><button onClick={() => switchMode(mode === 'page' ? 'scroll' : 'page')} className="rounded-lg px-2 py-1 font-semibold" style={{ border: `1px solid ${theme.accent}44`, color: theme.accent }}>{mode === 'page' ? '翻页' : '滚动'}</button></div>
+            <div className="flex items-center gap-2 text-[10px]" style={{ color: theme.sub }}>行距 <input type="range" min="1.5" max="2.5" step="0.1" value={prefs.lineHeight || 1.9} onChange={e => savePrefs({ lineHeight: Number(e.target.value) })} className="flex-1" /><span>{(prefs.lineHeight || 1.9).toFixed(1)}</span></div>
+            <div className="flex items-center gap-2 text-[10px]" style={{ color: theme.sub }}><span className="shrink-0">阅读方式</span><div className="flex flex-1 gap-1.5"><button onClick={() => switchMode('scroll')} disabled={doodleMode} className="flex-1 rounded-lg px-2 py-1.5 font-semibold disabled:opacity-45" style={{ background: mode === 'scroll' ? theme.accent : theme.bg, color: mode === 'scroll' ? theme.paper : theme.text, border: `1px solid ${theme.accent}44` }}>上下滑动</button><button onClick={() => switchMode('page')} className="flex-1 rounded-lg px-2 py-1.5 font-semibold" style={{ background: mode === 'page' ? theme.accent : theme.bg, color: mode === 'page' ? theme.paper : theme.text, border: `1px solid ${theme.accent}44` }}>左右翻页</button></div></div>
             <label className="flex items-center gap-2 text-[10px] cursor-pointer" style={{ color: theme.sub }}><UploadSimple size={14} /> 自定义背景<input type="file" accept="image/*" className="hidden" onChange={async e => { const file = e.target.files?.[0]; if (file) savePrefs({ backgroundRef: await putImageBlob(file) }); }} /></label>
             {prefs.backgroundRef && <button onClick={() => savePrefs({ backgroundRef: undefined })} className="text-[10px]" style={{ color: theme.accent }}>恢复纯色背景</button>}
             <textarea value={prefs.annotationGuide || ''} onChange={e => savePrefs({ annotationGuide: e.target.value })} placeholder="专属批注引导词：例如更关注人物关系、伏笔和情绪变化" className="w-full rounded-lg p-2 text-[10px] outline-none" rows={2} style={{ color: theme.text, background: theme.bg, border: `1px solid ${theme.accent}33` }} />
         </div>}
-        <div ref={scrollRef} onScroll={mode === 'scroll' ? onScroll : undefined} className="relative flex-1 overflow-y-auto vr-reader-scroll px-5 py-4" style={{ background: backgroundUrl ? 'transparent' : theme.bg }}>
-            {mode === 'scroll' && winStart > 0 && <div className="text-center text-[10px] mb-3" style={{ color: theme.sub }}>上滑加载更早内容</div>}
-            {renderSegs.map(seg => <SegBlock key={seg.idx} seg={seg} anns={annBySeg.get(seg.idx) || []} theme={theme} fontSize={fontSize} lineHeight={prefs.lineHeight || 1.9} fontFamily={readerFont} nameOf={nameOf} onOpenAnnotation={setSelectedAnnotation} highlight={peek && seg.idx === initialSeg} />)}
+        {doodleMode && <div className="relative flex items-center gap-1.5 px-4 py-1.5 shrink-0" style={{ background: theme.annBg, borderBottom: `1px solid ${theme.accent}22`, color: theme.text }}>
+            <span className="text-[10px] mr-1" style={{ color: theme.sub }}>涂鸦</span>
+            {([['pen', '划线'], ['eraser', '橡皮']] as const).map(([tool, label]) => <button key={tool} onClick={() => setDoodleTool(tool)} className="rounded-md px-2 py-1 text-[10px] font-semibold" style={{ color: doodleTool === tool ? theme.paper : theme.text, background: doodleTool === tool ? theme.accent : theme.paper }}>{label}</button>)}
+            {doodleTool === 'pen' && <div className="ml-auto flex items-center gap-1"><span className="text-[10px]" style={{ color: theme.sub }}>粗细</span>{([2, 4, 7] as const).map(width => <button key={width} onClick={() => setDoodleWidth(width)} aria-label={`划线粗细 ${width}`} className="flex h-6 w-6 items-center justify-center rounded-md" style={{ background: doodleWidth === width ? theme.accent : theme.paper, color: doodleWidth === width ? theme.paper : theme.text }}><span className="rounded-full" style={{ display: 'block', width: width + 1, height: width + 1, background: 'currentColor' }} /></button>)}</div>}
+            <span className="absolute right-4 -bottom-4 text-[9px]" style={{ color: theme.sub }}>退出阅读后自动清除</span>
+        </div>}
+        <div ref={doodleAreaRef} className="relative flex-1 min-h-0">
+            <div ref={scrollRef} onScroll={doodleMode ? undefined : (mode === 'scroll' ? onScroll : undefined)} className="relative h-full overflow-y-auto vr-reader-scroll px-5 py-4" style={{ background: backgroundUrl ? 'transparent' : theme.bg, touchAction: doodleMode ? 'none' : 'pan-y' }}>
+                {mode === 'scroll' && winStart > 0 && <div className="text-center text-[10px] mb-3" style={{ color: theme.sub }}>上滑加载更早内容</div>}
+                {renderSegs.map(seg => <SegBlock key={seg.idx} seg={seg} anns={annBySeg.get(seg.idx) || []} theme={theme} fontSize={fontSize} lineHeight={prefs.lineHeight || 1.9} fontFamily={readerFont} nameOf={nameOf} onOpenAnnotation={setSelectedAnnotation} highlight={peek && seg.idx === initialSeg} />)}
+            </div>
+            {doodleMode && <canvas ref={doodleCanvasRef} className="absolute inset-0 z-[2]" style={{ touchAction: 'none', cursor: doodleTool === 'eraser' ? 'cell' : 'crosshair' }} onPointerDown={startDoodle} onPointerMove={moveDoodle} onPointerUp={endDoodle} onPointerCancel={endDoodle} />}
         </div>
         <div className="relative shrink-0" style={{ background: theme.paper, borderTop: `1px solid ${theme.accent}22`, paddingBottom: vrBottomPad('0.5rem') }}>
-            <div className="flex items-center gap-2 px-4 pt-2"><select value={readerCharId} onChange={e => { setReaderCharId(e.target.value); setCoReadState('idle'); }} className="min-w-0 max-w-[30%] rounded-lg px-1.5 py-1 text-[10px] truncate" style={{ color: theme.text, background: theme.bg, border: `1px solid ${theme.accent}33` }} aria-label="选择共读角色">{characters.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}</select><button onClick={() => setShowAudio(v => !v)} className="text-[11px] font-semibold whitespace-nowrap" style={{ color: theme.accent }}><SpeakerHigh size={14} className="inline mr-1" />音效</button><button onClick={() => saveProgress()} className="text-[11px] font-semibold whitespace-nowrap" style={{ color: theme.accent }}><BookmarkSimple size={14} className="inline mr-1" />保存</button><button onClick={readTogether} disabled={coReadState === 'loading'} className="ml-auto text-[11px] font-semibold disabled:opacity-45 whitespace-nowrap" style={{ color: theme.accent }}>{coReadState === 'loading' ? <CircleNotch size={14} className="inline mr-1 animate-spin" /> : <BookOpen size={14} className="inline mr-1" />}{coReadState === 'done' ? '已读完' : '一起读本章'}</button></div>
+            <div className="flex items-center gap-2 px-4 pt-2"><div className="relative min-w-0 max-w-[30%]"><select value={readerCharId} onChange={e => { setReaderCharId(e.target.value); setCoReadState('idle'); }} className="w-full appearance-none bg-transparent py-1 pr-4 text-[11px] font-semibold outline-none truncate" style={{ color: theme.accent }} aria-label="选择共读角色">{characters.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}</select><CaretDown size={12} weight="bold" className="pointer-events-none absolute right-0 top-1/2 -translate-y-1/2" style={{ color: theme.accent }} /></div><button onClick={() => setShowAudio(v => !v)} className="text-[11px] font-semibold whitespace-nowrap" style={{ color: theme.accent }}><SpeakerHigh size={14} className="inline mr-1" />音效</button><button onClick={() => saveProgress()} className="text-[11px] font-semibold whitespace-nowrap" style={{ color: theme.accent }}><BookmarkSimple size={14} className="inline mr-1" />保存</button><button onClick={readTogether} disabled={coReadState === 'loading'} className="ml-auto text-[11px] font-semibold disabled:opacity-45 whitespace-nowrap" style={{ color: theme.accent }}>{coReadState === 'loading' ? <CircleNotch size={14} className="inline mr-1 animate-spin" /> : <BookOpen size={14} className="inline mr-1" />}{coReadState === 'done' ? '已读完' : '一起读本章'}</button></div>
             <div className="flex items-center justify-between px-5 py-2">{mode === 'page' ? <><button disabled={page === 0} onClick={() => setPage(p => Math.max(0, p - 1))} className="text-[12px] disabled:opacity-30 font-semibold" style={{ color: theme.accent }}>‹ 上一页</button><span className="text-[10px]" style={{ color: theme.sub }}>{page + 1} / {totalPages}</span><button disabled={page >= totalPages - 1} onClick={() => setPage(p => Math.min(totalPages - 1, p + 1))} className="text-[12px] disabled:opacity-30 font-semibold" style={{ color: theme.accent }}>下一页 ›</button></> : <><button onClick={() => jumpToSegment(0)} className="text-[11px] font-semibold" style={{ color: theme.accent }}>从头</button><span className="text-[10px]" style={{ color: theme.sub }}>滚动阅读 · 自动保存位置</span><button onClick={() => saveProgress()} className="text-[11px] font-semibold" style={{ color: theme.accent }}>保存</button></>}</div>
             {coReadMessage && <div className="px-4 pb-1 text-center text-[10px]" style={{ color: coReadState === 'error' ? '#bd554f' : theme.sub }}>{coReadMessage}</div>}
             {showAudio && <div className="mx-4 mb-2 rounded-lg p-2.5 space-y-2" style={{ background: theme.bg, border: `1px solid ${theme.accent}33` }}>
