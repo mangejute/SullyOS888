@@ -13,6 +13,7 @@ import { isScheduleFeatureOn } from './scheduleFeature';
 import { VOICE_ACTING_GUIDE } from './minimaxTts';
 import { FISH_VOICE_ACTING_GUIDE } from './fishAudioTts';
 import { QWEN_VOICE_ACTING_GUIDE } from './qwenTts';
+import { XIAOMI_VOICE_ACTING_GUIDE } from './xiaomiTts';
 import { getTtsProvider, getVoicePromptOverride } from './ttsProvider';
 import { resolveCharTimeZone, nowInTimeZone } from './timezone';
 import { buildLifeRecordInjection } from './lifeRecords';
@@ -30,6 +31,7 @@ const voiceActingGuide = (): string => {
   const custom = getVoicePromptOverride(provider);
   if (custom) return custom;
   if (provider === 'qwen') return QWEN_VOICE_ACTING_GUIDE;
+  if (provider === 'xiaomi') return XIAOMI_VOICE_ACTING_GUIDE;
   return provider === 'fishaudio' ? FISH_VOICE_ACTING_GUIDE : VOICE_ACTING_GUIDE;
 };
 

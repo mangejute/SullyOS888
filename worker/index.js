@@ -3861,6 +3861,32 @@ export default {
       }
     }
 
+    // ========== 小米 MiMo TTS 代理（OpenAI 兼容 chat/completions 音频模式） ==========
+    // 前端只把用户自己的 Key 用在本次 Authorization 透传；Worker 不记录、不保存该 Key。
+    if (url.pathname === '/xiaomi-tts') {
+      if (request.method !== 'POST') return jsonResponse({ error: 'Method not allowed' }, { status: 405, origin });
+      const auth = request.headers.get('Authorization');
+      if (!auth) return jsonResponse({ error: 'Missing Xiaomi MiMo API key' }, { status: 401, origin });
+      const configuredBase = (request.headers.get('X-Xiaomi-TTS-Base-Url') || 'https://api.xiaomimimo.com/v1').replace(/\/+$/, '');
+      let target;
+      try { target = new URL(`${configuredBase}/chat/completions`); } catch { return jsonResponse({ error: 'Invalid Xiaomi MiMo base URL' }, { status: 400, origin }); }
+      // 仅允许官方小米域名或用户自己的 HTTPS 兼容中转，阻断 Worker 被用作任意内网代理。
+      if (target.protocol !== 'https:' || (!/\.xiaomimimo\.com$/i.test(target.hostname) && !/\.xiaomi\.com$/i.test(target.hostname))) {
+        return jsonResponse({ error: 'Unsupported Xiaomi MiMo endpoint' }, { status: 400, origin });
+      }
+      try {
+        const upstream = await fetch(target.toString(), {
+          method: 'POST',
+          headers: { 'Authorization': auth, 'Content-Type': 'application/json', 'Accept': 'application/json' },
+          body: await request.text(),
+        });
+        const text = await upstream.text();
+        return new Response(text, { status: upstream.status, headers: { 'Content-Type': upstream.headers.get('Content-Type') || 'application/json; charset=utf-8', ...corsHeaders(origin) } });
+      } catch (e) {
+        return jsonResponse({ error: 'Xiaomi MiMo upstream fetch failed', detail: String(e && e.message || e) }, { status: 502, origin });
+      }
+    }
+
     // ========== 麦当劳 MCP 代理 (浏览器 CORS 兜底, 纯透传) ==========
     // 前端 POST /mcp/mcd  + Authorization: Bearer <user_mcp_token>
     // body 即 MCP JSON-RPC 报文 (initialize / tools/list / tools/call ...)

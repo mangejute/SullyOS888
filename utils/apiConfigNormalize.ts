@@ -5,6 +5,48 @@ import type { APIConfig, ApiPreset, SpeechRecognitionConfig } from '../types';
 export const SPEECH_RECOGNITION_STORAGE_KEY = 'os_speech_recognition_config';
 // MiniMax 的三项凭据单独留一份，避免旧版本或设置页的其它保存动作覆盖它们。
 export const MINIMAX_CONFIG_STORAGE_KEY = 'os_minimax_config_v1';
+// 非 LLM 服务各自独立保存。新版加载时它会补回 os_api_config 被旧包/缓存覆写掉的字段；
+// 空值不允许覆盖已有有效凭据。
+export const OTHER_API_CONFIG_STORAGE_KEY = 'os_other_api_config_v2';
+
+const OTHER_API_KEYS = [
+  'minimaxApiKey', 'minimaxGroupId', 'minimaxRegion', 'aceStepApiKey', 'ttsProvider',
+  'fishAudioApiKey', 'fishAudioModel', 'qwenTtsApiKey', 'qwenTtsWorkspaceId', 'qwenTtsRegion',
+  'qwenTtsModel', 'qwenTtsVoice', 'qwenTtsAudioFormat', 'qwenTtsEndpoint',
+  'xiaomiTtsApiKey', 'xiaomiTtsBaseUrl', 'xiaomiTtsModel', 'xiaomiTtsVoice', 'voicePrompts',
+] as const;
+
+export function loadStoredOtherApiConfig(): Partial<APIConfig> {
+  try {
+    const raw = localStorage.getItem(OTHER_API_CONFIG_STORAGE_KEY);
+    if (!raw) return {};
+    const parsed = JSON.parse(raw) as Partial<APIConfig>;
+    const result: Partial<APIConfig> = {};
+    for (const key of OTHER_API_KEYS) {
+      const value = parsed[key];
+      if (key === 'voicePrompts') {
+        if (value && typeof value === 'object') result.voicePrompts = value as APIConfig['voicePrompts'];
+      } else if (typeof value === 'string' ? value.trim() : value != null) {
+        (result as any)[key] = value;
+      }
+    }
+    return result;
+  } catch { return {}; }
+}
+
+export function saveStoredOtherApiConfig(config: APIConfig): void {
+  const payload: Partial<APIConfig> = {};
+  for (const key of OTHER_API_KEYS) {
+    const value = config[key];
+    if (key === 'voicePrompts') {
+      if (value && typeof value === 'object') payload.voicePrompts = value as APIConfig['voicePrompts'];
+    } else if (typeof value === 'string' ? value.trim() : value != null) {
+      (payload as any)[key] = value;
+    }
+  }
+  if (!Object.keys(payload).length) return;
+  try { localStorage.setItem(OTHER_API_CONFIG_STORAGE_KEY, JSON.stringify(payload)); } catch { /* main config + mirror remain fallback */ }
+}
 
 // Clipboard contents can carry zero-width characters that String.trim() does not
 // remove. They are never valid at the edges of an API URL, token, or model id.

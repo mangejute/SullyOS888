@@ -10,7 +10,7 @@
 import type { APIConfig, TtsProvider } from '../types';
 
 export const normalizeTtsProvider = (raw: unknown): TtsProvider =>
-  raw === 'fishaudio' || raw === 'qwen' ? raw : 'minimax';
+  raw === 'fishaudio' || raw === 'qwen' || raw === 'xiaomi' ? raw : 'minimax';
 
 let currentProvider: TtsProvider = 'minimax';
 
@@ -45,6 +45,7 @@ export function setVoicePromptOverrides(overrides: APIConfig['voicePrompts'] | u
     minimax: typeof overrides?.minimax === 'string' ? overrides.minimax : undefined,
     fishaudio: typeof overrides?.fishaudio === 'string' ? overrides.fishaudio : undefined,
     qwen: typeof overrides?.qwen === 'string' ? overrides.qwen : undefined,
+    xiaomi: typeof overrides?.xiaomi === 'string' ? overrides.xiaomi : undefined,
     dateVoice: typeof overrides?.dateVoice === 'string' ? overrides.dateVoice : undefined,
   };
 }

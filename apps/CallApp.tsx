@@ -9,6 +9,8 @@ import { cleanTextForTts, insertSpeechBreaks, convertHexAudioToBlob, fetchRemote
 import { normalizeVoiceTags } from '../utils/sanitize';
 import { FISH_VOICE_ACTING_GUIDE, synthesizeSpeechFishDetailed, resolveFishAudioApiKey, cleanTextForTtsFish, stripFishMarkupForDisplay } from '../utils/fishAudioTts';
 import { QWEN_VOICE_ACTING_GUIDE, synthesizeSpeechQwenDetailed } from '../utils/qwenTts';
+import { synthesizeSpeechXiaomiDetailed } from '../utils/xiaomiTts';
+import { XIAOMI_VOICE_ACTING_GUIDE } from '../utils/xiaomiTts';
 import { resolveTtsProvider, getTtsProvider, getVoicePromptOverride } from '../utils/ttsProvider';
 import { VOICE_LANGUAGE_OPTIONS } from '../utils/voiceLanguage';
 import { startStt, isSttSupported, type SttSession } from '../utils/speechToText';
@@ -490,7 +492,7 @@ const buildCallPrompt = (
 
 注意：不要写小说式中文旁白，如”（我靠在椅背上，目光看向远方）”——会被直接删掉，等于白写。
 
-${getVoicePromptOverride(getTtsProvider()) ?? (getTtsProvider() === 'fishaudio' ? FISH_VOICE_ACTING_GUIDE : getTtsProvider() === 'qwen' ? QWEN_VOICE_ACTING_GUIDE : VOICE_ACTING_GUIDE)}
+${getVoicePromptOverride(getTtsProvider()) ?? (getTtsProvider() === 'fishaudio' ? FISH_VOICE_ACTING_GUIDE : getTtsProvider() === 'qwen' ? QWEN_VOICE_ACTING_GUIDE : getTtsProvider() === 'xiaomi' ? XIAOMI_VOICE_ACTING_GUIDE : VOICE_ACTING_GUIDE)}
 
 ### 历史消息的来源标记（重要）
 
@@ -1450,6 +1452,7 @@ const CallApp: React.FC = () => {
   // ── TTS 服务商分发：电话语音也支持 MiniMax ↔ 鱼声二选一 ──
   const isFishTts = resolveTtsProvider(apiConfig) === 'fishaudio';
   const isQwenTts = resolveTtsProvider(apiConfig) === 'qwen';
+  const isXiaomiTts = resolveTtsProvider(apiConfig) === 'xiaomi';
   // 当前服务商下，这个角色能否合成语音（决定要不要走 TTS / 给"语音未配置"提示）。
   const canSpeakVoice = (): boolean => {
     if (!isSpeakerOn) return false;
@@ -1459,6 +1462,7 @@ const CallApp: React.FC = () => {
     if (isQwenTts) {
       return !!apiConfig.qwenTtsApiKey && !!apiConfig.qwenTtsWorkspaceId;
     }
+    if (isXiaomiTts) return !!apiConfig.xiaomiTtsApiKey;
     const voiceId = resolveVoiceId();
     const hasTimber = (selectedChar?.voiceProfile?.timberWeights?.length || 0) > 1;
     return !!resolveMiniMaxApiKey(apiConfig) && (!!voiceId || hasTimber);
@@ -1486,6 +1490,11 @@ const CallApp: React.FC = () => {
     if (isQwenTts) {
       if (!selectedChar) throw new Error('未选择角色');
       const { url } = await synthesizeSpeechQwenDetailed(rawText, selectedChar, apiConfig);
+      return { url: url || '', traceIds: [] };
+    }
+    if (isXiaomiTts) {
+      if (!selectedChar) throw new Error('未选择角色');
+      const { url } = await synthesizeSpeechXiaomiDetailed(rawText, selectedChar, apiConfig);
       return { url: url || '', traceIds: [] };
     }
     const minimaxApiKey = resolveMiniMaxApiKey(apiConfig);

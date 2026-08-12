@@ -394,6 +394,7 @@ const Chat: React.FC = () => {
         if (!characterHasVoice(char, apiConfig)) return false;
         if (resolveTtsProvider(apiConfig) === 'fishaudio') return !!resolveFishAudioApiKey(apiConfig);
         if (resolveTtsProvider(apiConfig) === 'qwen') return !!apiConfig.qwenTtsApiKey && !!apiConfig.qwenTtsWorkspaceId;
+        if (resolveTtsProvider(apiConfig) === 'xiaomi') return !!apiConfig.xiaomiTtsApiKey;
         return !!resolveMiniMaxApiKey(apiConfig);
     }, [char, apiConfig]);
 
@@ -516,6 +517,8 @@ const Chat: React.FC = () => {
                     ? '该角色未配置鱼声音色或缺少 Fish API Key，无法播放真实语音，可点「转文字」查看内容'
                     : resolveTtsProvider(apiConfig) === 'qwen'
                         ? '未配置 Qwen TTS API Key / Workspace ID，无法播放真实语音，可点「转文字」查看内容'
+                        : resolveTtsProvider(apiConfig) === 'xiaomi'
+                            ? '未配置小米 MiMo API Key，无法播放真实语音，可点「转文字」查看内容'
                         : '该角色未配置 MiniMax 语音，无法播放真实语音，可点「转文字」查看内容';
                 addToast(tip, 'info');
             }

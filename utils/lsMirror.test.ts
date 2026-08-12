@@ -66,7 +66,9 @@ describe('localStorage IndexedDB 镜像 (lsMirror)', () => {
 
     it('镜像键名单不含大体积键（data URI 类必须走 assets）', () => {
         for (const k of MIRRORED_KEYS) {
-            expect(k).not.toMatch(/wallpaper|font|sprite|image|blob/i);
+            // 生图的「模型列表 / 命名预设」只是很小的 JSON，允许镜像；真正的
+            // 图片、壁纸、字体、精灵和 Blob 仍必须进 assets，不可进 localStorage。
+            expect(k).not.toMatch(/wallpaper|font|sprite|blob/i);
         }
     });
 });

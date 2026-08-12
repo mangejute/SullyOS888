@@ -11,6 +11,7 @@ import {
 } from './minimaxTts';
 import { synthesizeSpeechFishDetailed } from './fishAudioTts';
 import { synthesizeSpeechQwenDetailed } from './qwenTts';
+import { synthesizeSpeechXiaomiDetailed } from './xiaomiTts';
 import { resolveTtsProvider } from './ttsProvider';
 
 export type { TtsResult };
@@ -28,6 +29,9 @@ export async function synthesizeSpeechDetailed(
   }
   if (resolveTtsProvider(apiConfig) === 'qwen') {
     return synthesizeSpeechQwenDetailed(text, char, apiConfig);
+  }
+  if (resolveTtsProvider(apiConfig) === 'xiaomi') {
+    return synthesizeSpeechXiaomiDetailed(text, char, apiConfig);
   }
   return minimaxSynthesizeDetailed(text, char, apiConfig, options);
 }
@@ -54,6 +58,9 @@ export const characterHasVoice = (char: CharacterProfile, apiConfig: APIConfig):
   }
   if (resolveTtsProvider(apiConfig) === 'qwen') {
     // Qwen 内置默认音色 longanlingxi；角色或全局音色留空也能直接合成。
+    return true;
+  }
+  if (resolveTtsProvider(apiConfig) === 'xiaomi') {
     return true;
   }
   return !!(vp?.voiceId || (vp?.timberWeights && vp.timberWeights.length > 0));

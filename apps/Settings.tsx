@@ -16,6 +16,7 @@ import { getProxyWorkerUrl, setProxyWorkerUrl, DEFAULT_PROXY_WORKER } from '../u
 import { VOICE_ACTING_GUIDE } from '../utils/minimaxTts';
 import { FISH_VOICE_ACTING_GUIDE } from '../utils/fishAudioTts';
 import { getQwenTtsVoices, previewQwenTtsVoice, QWEN_TTS_MODELS, QWEN_VOICE_ACTING_GUIDE, testQwenTtsConnection } from '../utils/qwenTts';
+import { previewXiaomiTtsVoice, testXiaomiTtsConnection, XIAOMI_TTS_MODELS, XIAOMI_TTS_VOICES, XIAOMI_VOICE_ACTING_GUIDE } from '../utils/xiaomiTts';
 import { DATE_VOICE_GUIDE } from '../utils/datePrompts';
 import { Sun, Newspaper, NotePencil, Notebook, Book, ForkKnife, Coffee, PlugsConnected, Bell, SpeakerHigh, Sparkle, LockKey, ChatCircleDots, Microphone } from '@phosphor-icons/react';
 import { loadMcpServers, saveMcpServers, createMcpServer, testMcpConnection, resetMcpSession, getMcpUseNativeTools, setMcpUseNativeTools, type McpServerConfig } from '../utils/mcpClient';
@@ -76,7 +77,7 @@ const OTHER_API_PRESETS_STORAGE_KEY = 'os_other_api_presets';
 
 type ImageApiConfig = NonNullable<APIConfig['imageGenerationApi']>;
 type ImageApiPreset = { id: string; name: string; config: ImageApiConfig };
-type OtherApiPresetConfig = Pick<APIConfig, 'minimaxApiKey' | 'minimaxGroupId' | 'minimaxRegion' | 'aceStepApiKey' | 'ttsProvider' | 'fishAudioApiKey' | 'fishAudioModel' | 'qwenTtsApiKey' | 'qwenTtsWorkspaceId' | 'qwenTtsRegion' | 'qwenTtsModel' | 'qwenTtsVoice' | 'qwenTtsAudioFormat' | 'qwenTtsEndpoint' | 'voicePrompts'>;
+type OtherApiPresetConfig = Pick<APIConfig, 'minimaxApiKey' | 'minimaxGroupId' | 'minimaxRegion' | 'aceStepApiKey' | 'ttsProvider' | 'fishAudioApiKey' | 'fishAudioModel' | 'qwenTtsApiKey' | 'qwenTtsWorkspaceId' | 'qwenTtsRegion' | 'qwenTtsModel' | 'qwenTtsVoice' | 'qwenTtsAudioFormat' | 'qwenTtsEndpoint' | 'xiaomiTtsApiKey' | 'xiaomiTtsBaseUrl' | 'xiaomiTtsModel' | 'xiaomiTtsVoice' | 'voicePrompts'>;
 type OtherApiPreset = { id: string; name: string; config: OtherApiPresetConfig };
 
 const readStoredVisionModels = (): string[] => {
@@ -514,8 +515,8 @@ const Settings: React.FC = () => {
     apiConfig.minimaxRegion === 'overseas' ? 'overseas' : 'domestic'
   );
   const [localAceStepKey, setLocalAceStepKey] = useState(apiConfig.aceStepApiKey || '');
-  const [localTtsProvider, setLocalTtsProvider] = useState<'minimax' | 'fishaudio' | 'qwen'>(
-    apiConfig.ttsProvider === 'fishaudio' ? 'fishaudio' : apiConfig.ttsProvider === 'qwen' ? 'qwen' : 'minimax'
+  const [localTtsProvider, setLocalTtsProvider] = useState<'minimax' | 'fishaudio' | 'qwen' | 'xiaomi'>(
+    apiConfig.ttsProvider === 'fishaudio' ? 'fishaudio' : apiConfig.ttsProvider === 'qwen' ? 'qwen' : apiConfig.ttsProvider === 'xiaomi' ? 'xiaomi' : 'minimax'
   );
   const [localFishKey, setLocalFishKey] = useState(apiConfig.fishAudioApiKey || '');
   const [localFishModel, setLocalFishModel] = useState(apiConfig.fishAudioModel || 's2.1-pro');
@@ -526,6 +527,14 @@ const Settings: React.FC = () => {
   const [localQwenVoice, setLocalQwenVoice] = useState(apiConfig.qwenTtsVoice || 'longanlingxi');
   const [localQwenFormat, setLocalQwenFormat] = useState<'mp3' | 'wav' | 'pcm' | 'opus'>(apiConfig.qwenTtsAudioFormat || 'mp3');
   const [localQwenEndpoint, setLocalQwenEndpoint] = useState(apiConfig.qwenTtsEndpoint || '');
+  const [localXiaomiKey, setLocalXiaomiKey] = useState(apiConfig.xiaomiTtsApiKey || '');
+  const [localXiaomiBaseUrl, setLocalXiaomiBaseUrl] = useState(apiConfig.xiaomiTtsBaseUrl || 'https://api.xiaomimimo.com/v1');
+  const [localXiaomiModel, setLocalXiaomiModel] = useState(apiConfig.xiaomiTtsModel || 'mimo-v2.5-tts');
+  const [localXiaomiVoice, setLocalXiaomiVoice] = useState(apiConfig.xiaomiTtsVoice || '冰糖');
+  const [xiaomiPreviewingVoice, setXiaomiPreviewingVoice] = useState<string | null>(null);
+  const xiaomiPreviewAudioRef = useRef<HTMLAudioElement | null>(null);
+  const xiaomiPreviewUrlRef = useRef<string | null>(null);
+  const [otherApiOpen, setOtherApiOpen] = useState<Record<'qwen' | 'minimax' | 'fish' | 'xiaomi', boolean>>({ qwen: false, minimax: false, fish: false, xiaomi: false });
   const [showCustomQwenVoice, setShowCustomQwenVoice] = useState(false);
   const [qwenPreviewingVoice, setQwenPreviewingVoice] = useState<string | null>(null);
   const qwenPreviewAudioRef = useRef<HTMLAudioElement | null>(null);
@@ -559,6 +568,8 @@ const Settings: React.FC = () => {
   useEffect(() => () => {
     qwenPreviewAudioRef.current?.pause();
     if (qwenPreviewUrlRef.current) URL.revokeObjectURL(qwenPreviewUrlRef.current);
+    xiaomiPreviewAudioRef.current?.pause();
+    if (xiaomiPreviewUrlRef.current) URL.revokeObjectURL(xiaomiPreviewUrlRef.current);
   }, []);
   
   // UI States
@@ -952,7 +963,7 @@ const Settings: React.FC = () => {
       setLocalAceStepKey(apiConfig.aceStepApiKey || '');
       setLocalFishKey(apiConfig.fishAudioApiKey || '');
       setLocalFishModel(apiConfig.fishAudioModel || 's2.1-pro');
-      setLocalTtsProvider(apiConfig.ttsProvider === 'fishaudio' ? 'fishaudio' : apiConfig.ttsProvider === 'qwen' ? 'qwen' : 'minimax');
+      setLocalTtsProvider(apiConfig.ttsProvider === 'fishaudio' ? 'fishaudio' : apiConfig.ttsProvider === 'qwen' ? 'qwen' : apiConfig.ttsProvider === 'xiaomi' ? 'xiaomi' : 'minimax');
       setLocalQwenKey(apiConfig.qwenTtsApiKey || '');
       setLocalQwenWorkspace(apiConfig.qwenTtsWorkspaceId || '');
       setLocalQwenRegion(apiConfig.qwenTtsRegion === 'singapore' ? 'singapore' : 'beijing');
@@ -960,6 +971,10 @@ const Settings: React.FC = () => {
       setLocalQwenVoice(apiConfig.qwenTtsVoice || 'longanlingxi');
       setLocalQwenFormat(apiConfig.qwenTtsAudioFormat || 'mp3');
       setLocalQwenEndpoint(apiConfig.qwenTtsEndpoint || '');
+      setLocalXiaomiKey(apiConfig.xiaomiTtsApiKey || '');
+      setLocalXiaomiBaseUrl(apiConfig.xiaomiTtsBaseUrl || 'https://api.xiaomimimo.com/v1');
+      setLocalXiaomiModel(apiConfig.xiaomiTtsModel || 'mimo-v2.5-tts');
+      setLocalXiaomiVoice(apiConfig.xiaomiTtsVoice || '冰糖');
       setLocalVoicePromptQwen(apiConfig.voicePrompts?.qwen || '');
       setLocalVoicePromptMinimax(apiConfig.voicePrompts?.minimax || '');
       setLocalVoicePromptFish(apiConfig.voicePrompts?.fishaudio || '');
@@ -1212,17 +1227,19 @@ const Settings: React.FC = () => {
     aceStepApiKey: localAceStepKey.trim(), ttsProvider: localTtsProvider, fishAudioApiKey: localFishKey.trim(), fishAudioModel: localFishModel.trim(),
     qwenTtsApiKey: localQwenKey.trim(), qwenTtsWorkspaceId: localQwenWorkspace.trim(), qwenTtsRegion: localQwenRegion,
     qwenTtsModel: localQwenModel.trim(), qwenTtsVoice: localQwenVoice.trim(), qwenTtsAudioFormat: localQwenFormat, qwenTtsEndpoint: localQwenEndpoint.trim(),
-    voicePrompts: { minimax: localVoicePromptMinimax.trim() || undefined, fishaudio: localVoicePromptFish.trim() || undefined, qwen: localVoicePromptQwen.trim() || undefined, dateVoice: localVoicePromptDate.trim() || undefined },
+    xiaomiTtsApiKey: localXiaomiKey.trim(), xiaomiTtsBaseUrl: localXiaomiBaseUrl.trim(), xiaomiTtsModel: localXiaomiModel.trim(), xiaomiTtsVoice: localXiaomiVoice.trim(),
+    voicePrompts: { minimax: localVoicePromptMinimax.trim() || undefined, fishaudio: localVoicePromptFish.trim() || undefined, qwen: localVoicePromptQwen.trim() || undefined, xiaomi: undefined, dateVoice: localVoicePromptDate.trim() || undefined },
   });
 
   const loadOtherApiPreset = (preset: OtherApiPreset) => {
     const config = preset.config;
     setLocalMiniMaxKey(config.minimaxApiKey || ''); setLocalMiniMaxGroupId(config.minimaxGroupId || '');
     setLocalMiniMaxRegion(config.minimaxRegion === 'overseas' ? 'overseas' : 'domestic');
-    setLocalAceStepKey(config.aceStepApiKey || ''); setLocalTtsProvider(config.ttsProvider === 'fishaudio' ? 'fishaudio' : config.ttsProvider === 'qwen' ? 'qwen' : 'minimax');
+    setLocalAceStepKey(config.aceStepApiKey || ''); setLocalTtsProvider(config.ttsProvider === 'fishaudio' ? 'fishaudio' : config.ttsProvider === 'qwen' ? 'qwen' : config.ttsProvider === 'xiaomi' ? 'xiaomi' : 'minimax');
     setLocalFishKey(config.fishAudioApiKey || ''); setLocalFishModel(config.fishAudioModel || 's2.1-pro');
     setLocalQwenKey(config.qwenTtsApiKey || ''); setLocalQwenWorkspace(config.qwenTtsWorkspaceId || ''); setLocalQwenRegion(config.qwenTtsRegion === 'singapore' ? 'singapore' : 'beijing');
     setLocalQwenModel(config.qwenTtsModel || 'qwen-audio-3.0-tts-flash'); setLocalQwenVoice(config.qwenTtsVoice || 'longanlingxi'); setLocalQwenFormat(config.qwenTtsAudioFormat || 'mp3'); setLocalQwenEndpoint(config.qwenTtsEndpoint || '');
+    setLocalXiaomiKey(config.xiaomiTtsApiKey || ''); setLocalXiaomiBaseUrl(config.xiaomiTtsBaseUrl || 'https://api.xiaomimimo.com/v1'); setLocalXiaomiModel(config.xiaomiTtsModel || 'mimo-v2.5-tts'); setLocalXiaomiVoice(config.xiaomiTtsVoice || '冰糖');
     setLocalVoicePromptMinimax(config.voicePrompts?.minimax || ''); setLocalVoicePromptFish(config.voicePrompts?.fishaudio || ''); setLocalVoicePromptQwen(config.voicePrompts?.qwen || ''); setLocalVoicePromptDate(config.voicePrompts?.dateVoice || '');
     addToast(`已载入其他 API 预设「${preset.name}」，保存后生效`, 'info');
   };
@@ -1260,6 +1277,33 @@ const Settings: React.FC = () => {
     } catch (error: any) {
       setOtherStatusMsg(`❌ Qwen 测试失败：${error?.message || '无法连接'}`);
     } finally { setTestingOtherApis(false); }
+  };
+
+  const testXiaomiApi = async () => {
+    if (!localXiaomiKey.trim()) { setOtherStatusMsg('请先填写小米 MiMo API Key'); return; }
+    setTestingOtherApis(true); setOtherStatusMsg('正在测试小米 MiMo TTS…');
+    try {
+      await testXiaomiTtsConnection({ ...apiConfig, xiaomiTtsApiKey: localXiaomiKey.trim(), xiaomiTtsBaseUrl: localXiaomiBaseUrl.trim(), xiaomiTtsModel: localXiaomiModel.trim(), xiaomiTtsVoice: localXiaomiVoice.trim() });
+      setOtherStatusMsg('✅ 小米 MiMo TTS 连接正常');
+    } catch (error: any) {
+      setOtherStatusMsg(`❌ 测试失败：${error?.message || '无法连接'}`);
+    } finally { setTestingOtherApis(false); }
+  };
+
+  const previewXiaomiVoice = async (voice: string) => {
+    if (!localXiaomiKey.trim()) { addToast('请先填写小米 MiMo API Key', 'error'); return; }
+    xiaomiPreviewAudioRef.current?.pause();
+    if (xiaomiPreviewUrlRef.current) URL.revokeObjectURL(xiaomiPreviewUrlRef.current);
+    setXiaomiPreviewingVoice(voice);
+    try {
+      const { url } = await previewXiaomiTtsVoice({ ...apiConfig, xiaomiTtsApiKey: localXiaomiKey.trim(), xiaomiTtsBaseUrl: localXiaomiBaseUrl.trim(), xiaomiTtsModel: localXiaomiModel.trim(), xiaomiTtsVoice: voice }, voice);
+      const audio = new Audio(url);
+      xiaomiPreviewAudioRef.current = audio; xiaomiPreviewUrlRef.current = url;
+      audio.onended = () => { if (xiaomiPreviewUrlRef.current === url) xiaomiPreviewUrlRef.current = null; URL.revokeObjectURL(url); setXiaomiPreviewingVoice(null); };
+      await audio.play();
+    } catch (error: any) {
+      addToast(`试听失败：${error?.message || '未知错误'}`, 'error'); setXiaomiPreviewingVoice(null);
+    }
   };
 
   const previewQwenVoice = async (voice: string) => {
@@ -1430,10 +1474,15 @@ const Settings: React.FC = () => {
       qwenTtsVoice: localQwenVoice,
       qwenTtsAudioFormat: localQwenFormat,
       qwenTtsEndpoint: localQwenEndpoint,
+      xiaomiTtsApiKey: localXiaomiKey,
+      xiaomiTtsBaseUrl: localXiaomiBaseUrl,
+      xiaomiTtsModel: localXiaomiModel,
+      xiaomiTtsVoice: localXiaomiVoice,
       voicePrompts: {
         minimax: localVoicePromptMinimax.trim() ? localVoicePromptMinimax : undefined,
         fishaudio: localVoicePromptFish.trim() ? localVoicePromptFish : undefined,
         qwen: localVoicePromptQwen.trim() ? localVoicePromptQwen : undefined,
+        xiaomi: undefined,
         dateVoice: localVoicePromptDate.trim() ? localVoicePromptDate : undefined,
       },
     });
@@ -1444,7 +1493,7 @@ const Settings: React.FC = () => {
   // 选「谁来做语音生成」立即落库——不需要再点下面的保存。
   // 连同当前「其他 API」草稿一起提交（与保存按钮同一份 payload）：一是即时生效，
   // 二是避免 [apiConfig] 同步 effect 把刚填、还没保存的 Key 草稿冲掉。
-  const selectTtsProvider = (provider: 'minimax' | 'fishaudio' | 'qwen') => {
+  const selectTtsProvider = (provider: 'minimax' | 'fishaudio' | 'qwen' | 'xiaomi') => {
     setLocalTtsProvider(provider);
     updateApiConfig({
       minimaxApiKey: localMiniMaxKey,
@@ -1460,15 +1509,20 @@ const Settings: React.FC = () => {
       qwenTtsVoice: localQwenVoice,
       qwenTtsAudioFormat: localQwenFormat,
       qwenTtsEndpoint: localQwenEndpoint,
+      xiaomiTtsApiKey: localXiaomiKey,
+      xiaomiTtsBaseUrl: localXiaomiBaseUrl,
+      xiaomiTtsModel: localXiaomiModel,
+      xiaomiTtsVoice: localXiaomiVoice,
       voicePrompts: {
         minimax: localVoicePromptMinimax.trim() ? localVoicePromptMinimax : undefined,
         fishaudio: localVoicePromptFish.trim() ? localVoicePromptFish : undefined,
         qwen: localVoicePromptQwen.trim() ? localVoicePromptQwen : undefined,
+        xiaomi: undefined,
         dateVoice: localVoicePromptDate.trim() ? localVoicePromptDate : undefined,
       },
       ttsProvider: provider,
     });
-    addToast(provider === 'fishaudio' ? '语音生成已切到鱼声 Fish' : provider === 'qwen' ? '语音生成已切到 Qwen TTS' : '语音生成已切到 MiniMax', 'success');
+    addToast(provider === 'fishaudio' ? '语音生成已切到鱼声 Fish' : provider === 'qwen' ? '语音生成已切到 Qwen TTS' : provider === 'xiaomi' ? '语音生成已切到小米 MiMo' : '语音生成已切到 MiniMax', 'success');
   };
 
   // 选鱼声模型：立即落库（同上，连带草稿一起提交，避免被同步 effect 冲掉）。
@@ -1489,10 +1543,15 @@ const Settings: React.FC = () => {
       qwenTtsVoice: localQwenVoice,
       qwenTtsAudioFormat: localQwenFormat,
       qwenTtsEndpoint: localQwenEndpoint,
+      xiaomiTtsApiKey: localXiaomiKey,
+      xiaomiTtsBaseUrl: localXiaomiBaseUrl,
+      xiaomiTtsModel: localXiaomiModel,
+      xiaomiTtsVoice: localXiaomiVoice,
       voicePrompts: {
         minimax: localVoicePromptMinimax.trim() ? localVoicePromptMinimax : undefined,
         fishaudio: localVoicePromptFish.trim() ? localVoicePromptFish : undefined,
         qwen: localVoicePromptQwen.trim() ? localVoicePromptQwen : undefined,
+        xiaomi: undefined,
         dateVoice: localVoicePromptDate.trim() ? localVoicePromptDate : undefined,
       },
     });
@@ -2880,14 +2939,16 @@ const Settings: React.FC = () => {
 
             <div className="space-y-4">
                 <p className="text-[11px] text-slate-400 -mt-1 pl-1 leading-relaxed">
-                    🎙️ 语音生成支持 <span className="font-semibold text-slate-500">MiniMax</span>、<span className="font-semibold text-slate-500">鱼声 Fish</span> 和 <span className="font-semibold text-slate-500">Qwen TTS</span>——配置都可以保留，最后在底部切换当前引擎。
+                    🎙️ 语音生成支持 <span className="font-semibold text-slate-500">MiniMax</span>、<span className="font-semibold text-slate-500">鱼声 Fish</span>、<span className="font-semibold text-slate-500">通义千问</span> 和 <span className="font-semibold text-slate-500">小米 MiMo</span>。每项默认收起，配置都会保留。
                 </p>
 
                 {otherApiPresets.length > 0 && <div className="flex gap-2 flex-wrap">
                     {otherApiPresets.map(preset => <button key={preset.id} type="button" onClick={() => loadOtherApiPreset(preset)} className="px-3 py-1.5 rounded-lg border border-slate-200 bg-white text-[11px] text-slate-600">{preset.name}</button>)}
                 </div>}
 
-                <div className="group">
+                <div className="group rounded-2xl border border-slate-200/70 bg-white/50 p-3">
+                    <button type="button" onClick={() => setOtherApiOpen(prev => ({ ...prev, minimax: !prev.minimax }))} className="w-full flex items-center justify-between text-left"><span className="text-[12px] font-bold text-slate-600">MiniMax</span><span className="text-[11px] text-slate-400">{otherApiOpen.minimax ? '收起' : localMiniMaxKey ? '已配置 · 展开' : '展开配置'}</span></button>
+                    {otherApiOpen.minimax && <div className="mt-3 space-y-3">
                     <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1.5 block pl-1">MiniMax 服务器</label>
                     <div className="flex bg-white/50 border border-slate-200/60 rounded-xl p-1 gap-1">
                         <button
@@ -2910,11 +2971,21 @@ const Settings: React.FC = () => {
                             ? '海外站（api.minimax.io）— 请使用海外账号签发的 Key。'
                             : '国服（api.minimaxi.com）— 默认，适配国内账号。'}
                     </p>
+                    <div>
+                        <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1.5 block pl-1">MiniMax Key（可选）</label>
+                        <input type="password" name="minimax-api-secret" autoComplete="new-password" spellCheck={false} value={localMiniMaxKey} onChange={(e) => setLocalMiniMaxKey(e.target.value)} placeholder="MiniMax API Secret（留空则复用聊天 Key）" className="w-full bg-white/50 border border-slate-200/60 rounded-xl px-4 py-2.5 text-sm font-mono focus:bg-white transition-all" />
+                    </div>
+                    <div>
+                        <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1.5 block pl-1">MiniMax Group ID（可选）</label>
+                        <input type="text" value={localMiniMaxGroupId} onChange={(e) => setLocalMiniMaxGroupId(e.target.value)} placeholder="group_id（部分账号/模型需要）" className="w-full bg-white/50 border border-slate-200/60 rounded-xl px-4 py-2.5 text-sm font-mono focus:bg-white transition-all" />
+                    </div>
+                    </div>}
                 </div>
 
                 {/* 阿里云 Qwen-Audio-TTS / CosyVoice */}
                 <div className="group rounded-2xl border border-slate-200/70 bg-white/50 p-3">
-                    <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-1.5 block pl-1">Qwen TTS（阿里云百炼）</label>
+                    <button type="button" onClick={() => setOtherApiOpen(prev => ({ ...prev, qwen: !prev.qwen }))} className="w-full flex items-center justify-between text-left"><span className="text-[12px] font-bold text-slate-600">通义千问 TTS</span><span className="text-[11px] text-slate-400">{otherApiOpen.qwen ? '收起' : localQwenKey ? '已配置 · 展开' : '展开配置'}</span></button>
+                    {otherApiOpen.qwen && <div className="mt-3"><label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-1.5 block pl-1">Qwen TTS（阿里云百炼）</label>
                     <input type="password" name="qwen-tts-api-key" autoComplete="new-password" spellCheck={false} value={localQwenKey} onChange={e => setLocalQwenKey(e.target.value)} placeholder="DashScope API Key" className="w-full bg-white/70 border border-slate-200/60 rounded-xl px-4 py-2.5 text-sm font-mono focus:bg-white transition-all" />
                     <input type="text" value={localQwenWorkspace} onChange={e => setLocalQwenWorkspace(e.target.value)} placeholder="Workspace ID（业务空间 ID）" className="w-full mt-2 bg-white/70 border border-slate-200/60 rounded-xl px-4 py-2.5 text-sm font-mono focus:bg-white transition-all" />
                     <div className="grid grid-cols-2 gap-2 mt-2">
@@ -2955,22 +3026,12 @@ const Settings: React.FC = () => {
                     </div>
                     <input type="text" value={localQwenEndpoint} onChange={e => setLocalQwenEndpoint(e.target.value)} placeholder="自建 WebSocket 中转地址（可选，留空用项目 Worker）" className="w-full mt-2 bg-white/70 border border-slate-200/60 rounded-xl px-4 py-2.5 text-xs font-mono focus:bg-white transition-all" />
                     <p className="text-[11px] text-slate-400 mt-1 pl-1 leading-relaxed">浏览器不能直接给 WebSocket 加鉴权请求头，留空会使用项目 Worker 转发到阿里云。Worker 只转发，不保存你的 Key。</p>
+                    </div>}
                 </div>
 
-                <div className="group">
-                    <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1.5 block pl-1">MiniMax Key (可选)</label>
-                    <input type="password" name="minimax-api-secret" autoComplete="new-password" spellCheck={false} value={localMiniMaxKey} onChange={(e) => setLocalMiniMaxKey(e.target.value)} placeholder="MiniMax API Secret（留空则复用 Key）" className="w-full bg-white/50 border border-slate-200/60 rounded-xl px-4 py-2.5 text-sm font-mono focus:bg-white transition-all" />
-                    <p className="text-[11px] text-slate-400 mt-1 pl-1">电话 / 音色查询优先使用这个 Key，空着时回退通用 Key。</p>
-                </div>
-
-                <div className="group">
-                    <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1.5 block pl-1">MiniMax Group ID (可选)</label>
-                    <input type="text" value={localMiniMaxGroupId} onChange={(e) => setLocalMiniMaxGroupId(e.target.value)} placeholder="group_id（部分账号/模型需要）" className="w-full bg-white/50 border border-slate-200/60 rounded-xl px-4 py-2.5 text-sm font-mono focus:bg-white transition-all" />
-                    <p className="text-[11px] text-slate-400 mt-1 pl-1">如控制台给了 group_id，请填这里；会透传到 TTS 请求体和代理日志。</p>
-                </div>
-
-                {/* 鱼声 Fish Audio —— 与 MiniMax 对等的另一套语音系统，中性样式、不做视觉偏向 */}
-                <div className="group">
+                <div className="group rounded-2xl border border-slate-200/70 bg-white/50 p-3">
+                    <button type="button" onClick={() => setOtherApiOpen(prev => ({ ...prev, fish: !prev.fish }))} className="w-full flex items-center justify-between text-left"><span className="text-[12px] font-bold text-slate-600">鱼声 Fish Audio</span><span className="text-[11px] text-slate-400">{otherApiOpen.fish ? '收起' : localFishKey ? '已配置 · 展开' : '展开配置'}</span></button>
+                    {otherApiOpen.fish && <div className="mt-3">
                     <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1.5 block pl-1">鱼声 Fish Audio Key</label>
                     <input type="password" name="fish-api-key" autoComplete="new-password" spellCheck={false} value={localFishKey} onChange={(e) => setLocalFishKey(e.target.value)} placeholder="Fish Audio API Key（fish.audio 控制台签发）" className="w-full bg-white/50 border border-slate-200/60 rounded-xl px-4 py-2.5 text-sm font-mono focus:bg-white transition-all" />
                     <p className="text-[11px] text-slate-400 mt-1 pl-1">在 <a href="https://fish.audio/zh-CN/developers/" target="_blank" rel="noopener noreferrer" className="text-primary hover:underline font-semibold">fish.audio 开发者页</a> 拿 Key（<span className="text-amber-600 font-medium">需梯子</span>）。角色音色在「角色 → 语音」里填 reference_id。</p>
@@ -2991,17 +3052,30 @@ const Settings: React.FC = () => {
                             ? '免费版：和 s2.1-pro 同一个模型、$0，但不保证 TTFA / DPA，适合自用测试。选了立即生效。'
                             : '切换立即生效。角色也可在「角色 → 语音」单独覆盖模型（留空则用这里的全局默认）。'}
                     </p>
+                    </div>}
+                </div>
+
+                <div className="group rounded-2xl border border-slate-200/70 bg-white/50 p-3">
+                    <button type="button" onClick={() => setOtherApiOpen(prev => ({ ...prev, xiaomi: !prev.xiaomi }))} className="w-full flex items-center justify-between text-left"><span className="text-[12px] font-bold text-slate-600">小米 MiMo TTS</span><span className="text-[11px] text-slate-400">{otherApiOpen.xiaomi ? '收起' : localXiaomiKey ? '已配置 · 展开' : '展开配置'}</span></button>
+                    {otherApiOpen.xiaomi && <div className="mt-3 space-y-2">
+                        <input type="password" name="xiaomi-mimo-api-key" autoComplete="new-password" spellCheck={false} value={localXiaomiKey} onChange={e => setLocalXiaomiKey(e.target.value)} placeholder="小米 MiMo API Key" className="w-full bg-white/70 border border-slate-200/60 rounded-xl px-4 py-2.5 text-sm font-mono focus:bg-white transition-all" />
+                        <input type="url" value={localXiaomiBaseUrl} onChange={e => setLocalXiaomiBaseUrl(e.target.value)} placeholder="https://api.xiaomimimo.com/v1" className="w-full bg-white/70 border border-slate-200/60 rounded-xl px-4 py-2.5 text-xs font-mono focus:bg-white transition-all" />
+                        <select value={localXiaomiModel} onChange={e => setLocalXiaomiModel(e.target.value)} className="w-full bg-white/70 border border-slate-200/60 rounded-xl px-3 py-2.5 text-sm focus:bg-white transition-all">{XIAOMI_TTS_MODELS.map(model => <option key={model.id} value={model.id}>{model.name} · {model.description}</option>)}</select>
+                        <div className="flex gap-2"><select value={localXiaomiVoice} onChange={e => setLocalXiaomiVoice(e.target.value)} className="min-w-0 flex-1 bg-white/70 border border-slate-200/60 rounded-xl px-3 py-2.5 text-sm focus:bg-white transition-all">{XIAOMI_TTS_VOICES.map(voice => <option key={voice.id} value={voice.id}>{voice.name} · {voice.description}</option>)}</select><button type="button" onClick={() => { void previewXiaomiVoice(localXiaomiVoice); }} disabled={xiaomiPreviewingVoice !== null} className="shrink-0 rounded-xl border border-orange-200 bg-orange-50 px-3 text-xs font-bold text-orange-700 disabled:opacity-50">{xiaomiPreviewingVoice === localXiaomiVoice ? '试听中…' : '试听'}</button></div>
+                        <p className="text-[11px] text-slate-400 leading-relaxed">默认使用小米官方 `mimo-v2.5-tts` 内置音色。小米的 Key 只在本机保存，并由 Worker 单次转发，不会被保存到服务器。</p>
+                    </div>}
                 </div>
 
                 {/* 底部：当前语音引擎 —— radio 样式（配置都在上面，这里只挑用哪家） */}
                 <div className="group rounded-2xl border border-slate-200/70 bg-slate-50/60 p-3">
-                    <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-0.5 block">当前语音引擎（三选一）</label>
+                    <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-0.5 block">当前语音引擎（四选一）</label>
                     <p className="text-[11px] text-slate-400 mb-2.5">聊天语音条 / 约会 / 电话用哪一家。各家的配置都会保留，这里只切换当前生效的。</p>
                     <div className="space-y-2">
                         {([
                             ['minimax', 'MiniMax', '国内可直连，默认推荐'],
                             ['fishaudio', '鱼声 Fish', '需科学上网（梯子 / 魔法），否则一直合成失败'],
                             ['qwen', 'Qwen TTS', '阿里云百炼，使用 WebSocket 实时合成'],
+                            ['xiaomi', '小米 MiMo', '免费额度友好，适合长篇朗读'],
                         ] as const).map(([key, name, desc]) => {
                             const active = localTtsProvider === key;
                             return (
@@ -3176,7 +3250,7 @@ const Settings: React.FC = () => {
                 </div>
 
                 <div className="flex gap-2 mt-2"><input value={newOtherPresetName} onChange={e => setNewOtherPresetName(e.target.value)} placeholder="其他 API 预设名称" className="min-w-0 flex-1 bg-white/60 border border-slate-200/60 rounded-xl px-3 py-2 text-xs" /><button type="button" onClick={saveOtherApiPreset} className="shrink-0 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-bold text-amber-600">保存预设</button></div>
-                <div className="grid grid-cols-3 gap-2 mt-2"><button type="button" onClick={() => { void testOtherApis(); }} disabled={testingOtherApis} className="w-full py-3 rounded-2xl font-bold text-amber-700 border border-amber-200 bg-amber-50 active:scale-95 transition-all disabled:opacity-50">{testingOtherApis ? '测试中…' : '测试 MiniMax'}</button><button type="button" onClick={() => { void testQwenApi(); }} disabled={testingOtherApis} className="w-full py-3 rounded-2xl font-bold text-sky-700 border border-sky-200 bg-sky-50 active:scale-95 transition-all disabled:opacity-50">{testingOtherApis ? '测试中…' : '测试 Qwen'}</button><button onClick={handleSaveOtherApis} className="w-full py-3 rounded-2xl font-bold text-white shadow-lg shadow-amber-500/20 bg-amber-500 active:scale-95 transition-all">
+                <div className="grid grid-cols-2 gap-2 mt-2"><button type="button" onClick={() => { void testOtherApis(); }} disabled={testingOtherApis} className="w-full py-3 rounded-2xl font-bold text-amber-700 border border-amber-200 bg-amber-50 active:scale-95 transition-all disabled:opacity-50">{testingOtherApis ? '测试中…' : '测试 MiniMax'}</button><button type="button" onClick={() => { void testQwenApi(); }} disabled={testingOtherApis} className="w-full py-3 rounded-2xl font-bold text-sky-700 border border-sky-200 bg-sky-50 active:scale-95 transition-all disabled:opacity-50">{testingOtherApis ? '测试中…' : '测试 Qwen'}</button><button type="button" onClick={() => { void testXiaomiApi(); }} disabled={testingOtherApis} className="w-full py-3 rounded-2xl font-bold text-orange-700 border border-orange-200 bg-orange-50 active:scale-95 transition-all disabled:opacity-50">{testingOtherApis ? '测试中…' : '测试小米'}</button><button onClick={handleSaveOtherApis} className="w-full py-3 rounded-2xl font-bold text-white shadow-lg shadow-amber-500/20 bg-amber-500 active:scale-95 transition-all">
                     {otherStatusMsg || '保存其他 API'}
                 </button></div>
             </div>

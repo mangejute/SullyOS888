@@ -28,6 +28,7 @@ export const MIRRORED_KEYS: readonly string[] = [
     'os_theme',                          // 外观主题（丢了 = 回初始主题）
     'os_api_config',                     // 全局 API（丢了 = 一切生成静默失效）
     'os_minimax_config_v1',              // MiniMax 独立凭据（跨版本兜底）
+    'os_other_api_config_v2',            // MiniMax / Qwen / Fish / 小米等其它 API 的独立保险存档
     'os_speech_recognition_config',      // 语音识别独立记录（防旧配置迁移覆盖服务商选择）
     'os_api_presets',
     'os_image_generation_models',

@@ -34,6 +34,8 @@ import {
   normalizeApiPreset,
   saveStoredSpeechRecognitionConfig,
   MINIMAX_CONFIG_STORAGE_KEY,
+  loadStoredOtherApiConfig,
+  saveStoredOtherApiConfig,
 } from '../utils/apiConfigNormalize';
 import { markBackupDone } from '../utils/backupReminder';
 import { normalizeCharacterImpression, normalizeCharacterDefaults } from '../utils/impression';
@@ -1363,12 +1365,18 @@ export const OSProvider: React.FC<{ children: React.ReactNode }> = ({ children }
             let savedMiniMax: Partial<APIConfig> = {};
             try {
               const rawMiniMax = localStorage.getItem(MINIMAX_CONFIG_STORAGE_KEY);
-              if (rawMiniMax) savedMiniMax = JSON.parse(rawMiniMax) as Partial<APIConfig>;
+              if (rawMiniMax) {
+                const parsed = JSON.parse(rawMiniMax) as Partial<APIConfig>;
+                // 旧包会把空 MiniMax 兜底记录写回；空值绝不能覆盖用户已保存的总配置。
+                savedMiniMax = Object.fromEntries(Object.entries(parsed).filter(([, value]) => typeof value !== 'string' || value.trim())) as Partial<APIConfig>;
+              }
             } catch { /* ignore malformed legacy cache */ }
+            const savedOtherApis = loadStoredOtherApiConfig();
             const normalizedApi = normalizeApiConfig({
                 ...defaultApiConfig,
                 ...JSON.parse(savedApi),
                 ...savedMiniMax,
+                ...savedOtherApis,
                 // This separate record intentionally wins: it is written only when the user
                 // saves the recognition settings, whereas old builds may rewrite the general
                 // API object without knowing this field exists.
@@ -1377,19 +1385,25 @@ export const OSProvider: React.FC<{ children: React.ReactNode }> = ({ children }
             setApiConfig(normalizedApi);
             safeSetLocalStorage('os_api_config', JSON.stringify(normalizedApi));
             safeSetLocalStorage(MINIMAX_CONFIG_STORAGE_KEY, JSON.stringify({ minimaxApiKey: normalizedApi.minimaxApiKey || '', minimaxGroupId: normalizedApi.minimaxGroupId || '', minimaxRegion: normalizedApi.minimaxRegion || 'domestic' }));
+            saveStoredOtherApiConfig(normalizedApi);
             saveStoredSpeechRecognitionConfig(normalizedApi.speechRecognition);
         } else {
             const savedSpeechRecognition = loadStoredSpeechRecognitionConfig();
             let savedMiniMax: Partial<APIConfig> = {};
             try {
               const rawMiniMax = localStorage.getItem(MINIMAX_CONFIG_STORAGE_KEY);
-              if (rawMiniMax) savedMiniMax = JSON.parse(rawMiniMax) as Partial<APIConfig>;
+              if (rawMiniMax) {
+                const parsed = JSON.parse(rawMiniMax) as Partial<APIConfig>;
+                savedMiniMax = Object.fromEntries(Object.entries(parsed).filter(([, value]) => typeof value !== 'string' || value.trim())) as Partial<APIConfig>;
+              }
             } catch { /* ignore malformed legacy cache */ }
-            if (savedSpeechRecognition || Object.keys(savedMiniMax).length) {
-                const normalizedApi = normalizeApiConfig({ ...defaultApiConfig, ...savedMiniMax, ...(savedSpeechRecognition ? { speechRecognition: savedSpeechRecognition } : {}) });
+            const savedOtherApis = loadStoredOtherApiConfig();
+            if (savedSpeechRecognition || Object.keys(savedMiniMax).length || Object.keys(savedOtherApis).length) {
+                const normalizedApi = normalizeApiConfig({ ...defaultApiConfig, ...savedMiniMax, ...savedOtherApis, ...(savedSpeechRecognition ? { speechRecognition: savedSpeechRecognition } : {}) });
                 setApiConfig(normalizedApi);
                 safeSetLocalStorage('os_api_config', JSON.stringify(normalizedApi));
                 safeSetLocalStorage(MINIMAX_CONFIG_STORAGE_KEY, JSON.stringify({ minimaxApiKey: normalizedApi.minimaxApiKey || '', minimaxGroupId: normalizedApi.minimaxGroupId || '', minimaxRegion: normalizedApi.minimaxRegion || 'domestic' }));
+                saveStoredOtherApiConfig(normalizedApi);
             }
         }
         if (savedModels) {
@@ -2919,6 +2933,7 @@ export const OSProvider: React.FC<{ children: React.ReactNode }> = ({ children }
         minimaxGroupId: newConfig.minimaxGroupId || '',
         minimaxRegion: newConfig.minimaxRegion || 'domestic',
       }));
+      saveStoredOtherApiConfig(newConfig);
       saveStoredSpeechRecognitionConfig(newConfig.speechRecognition);
     } catch (error) {
       console.warn('[API] 写入 localStorage 失败，将依赖 IndexedDB 镜像保存', error);
@@ -3809,6 +3824,12 @@ export const OSProvider: React.FC<{ children: React.ReactNode }> = ({ children }
               apiConfig: (mode === 'text_only' || mode === 'full') ? apiConfig : undefined,
               apiPresets: (mode === 'text_only' || mode === 'full') ? apiPresets : undefined,
               availableModels: (mode === 'text_only' || mode === 'full') ? availableModels : undefined,
+              // These three lists are maintained by Settings rather than React context.
+              // Export them explicitly so a restore brings back API presets as well as
+              // the currently selected configuration and credentials.
+              imageGenerationModels: (mode === 'text_only' || mode === 'full') ? (() => { try { const raw = localStorage.getItem('os_image_generation_models'); return raw ? JSON.parse(raw) : undefined; } catch { return undefined; } })() : undefined,
+              imageGenerationPresets: (mode === 'text_only' || mode === 'full') ? (() => { try { const raw = localStorage.getItem('os_image_generation_presets'); return raw ? JSON.parse(raw) : undefined; } catch { return undefined; } })() : undefined,
+              otherApiPresets: (mode === 'text_only' || mode === 'full') ? (() => { try { const raw = localStorage.getItem('os_other_api_presets'); return raw ? JSON.parse(raw) : undefined; } catch { return undefined; } })() : undefined,
               realtimeConfig: (mode === 'text_only' || mode === 'full') ? realtimeConfig : undefined,
               memoryPalaceConfig: (mode === 'text_only' || mode === 'full') ? memoryPalaceConfig : undefined,
               theme: cloneForInPlace(theme), // Include theme in all modes (text/media)
@@ -4635,6 +4656,12 @@ export const OSProvider: React.FC<{ children: React.ReactNode }> = ({ children }
           if (data.apiConfig) updateApiConfig(data.apiConfig);
           if (data.availableModels) saveModels(data.availableModels);
           if (data.apiPresets) savePresets(data.apiPresets);
+          // API preset lists use their own localStorage records. Keep restoring them
+          // separate from apiConfig so a backup cannot silently discard MiniMax/Qwen/
+          // Fish/Xiaomi presets that the user has already named and saved.
+          if (Array.isArray(data.imageGenerationModels)) safeSetLocalStorage('os_image_generation_models', JSON.stringify(data.imageGenerationModels));
+          if (Array.isArray(data.imageGenerationPresets)) safeSetLocalStorage('os_image_generation_presets', JSON.stringify(data.imageGenerationPresets));
+          if (Array.isArray(data.otherApiPresets)) safeSetLocalStorage('os_other_api_presets', JSON.stringify(data.otherApiPresets));
           if (data.realtimeConfig) updateRealtimeConfig(data.realtimeConfig); // 恢复实时感知配置
           if (data.memoryPalaceConfig) updateMemoryPalaceConfig(data.memoryPalaceConfig); // 恢复记忆宫殿全局配置
 

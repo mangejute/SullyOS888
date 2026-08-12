@@ -233,7 +233,7 @@ export interface VirtualTime {
 export type MinimaxRegion = 'domestic' | 'overseas';
 
 // 语音合成（TTS）服务商。切换后所有语音场景（聊天语音条 / 约会 / 电话）统一使用当前引擎。
-export type TtsProvider = 'minimax' | 'fishaudio' | 'qwen';
+export type TtsProvider = 'minimax' | 'fishaudio' | 'qwen' | 'xiaomi';
 
 export interface VisionApiConfig {
   /** 开启后，聊天图片先由独立视觉模型转成文字，再交给主对话模型。 */
@@ -290,6 +290,11 @@ export interface APIConfig {
   qwenTtsAudioFormat?: 'mp3' | 'wav' | 'pcm' | 'opus';
   /** 可选的自建 Qwen WebSocket 中转地址；留空使用当前代理 Worker。 */
   qwenTtsEndpoint?: string;
+  // 小米 MiMo TTS（OpenAI 兼容接口）。默认使用官方 API 和 mimo-v2.5-tts 内置音色。
+  xiaomiTtsApiKey?: string;
+  xiaomiTtsBaseUrl?: string;
+  xiaomiTtsModel?: string;
+  xiaomiTtsVoice?: string;
   // 用户自定义「语音表演指南」——注入到角色 system prompt、教模型怎么写出有情绪的语音台词。
   // minimax / fishaudio：聊天 + 电话共用，按 TTS 服务商分别存（两家标记体系不同，不能共用一份）；
   //   留空 → 用内置默认（minimaxTts.VOICE_ACTING_GUIDE / fishAudioTts.FISH_VOICE_ACTING_GUIDE）。
@@ -300,6 +305,7 @@ export interface APIConfig {
     minimax?: string;
     fishaudio?: string;
     qwen?: string;
+    xiaomi?: string;
     dateVoice?: string;
   };
   // Replicate token (r8_xxx) for ACE-Step song generation in 写歌 App.
@@ -2653,6 +2659,8 @@ export interface CharacterProfile {
       fishModel?: string;
       // Qwen-Audio-TTS / CosyVoice 音色；留空时使用系统设置中的全局音色。
       qwenVoice?: string;
+      // 小米 MiMo 音色；留空时使用系统设置里的内置默认音色。
+      xiaomiVoice?: string;
       voiceName?: string;
       source?: 'system' | 'voice_cloning' | 'voice_generation' | 'custom';
       model?: string;
@@ -3559,6 +3567,10 @@ export interface FullBackupData {
     version: number;
     theme?: OSTheme;
     apiConfig?: APIConfig;
+    /** API setting-page lists that live outside the main API object. */
+    imageGenerationModels?: string[];
+    imageGenerationPresets?: unknown[];
+    otherApiPresets?: unknown[];
     instantPushConfig?: InstantPushConfig;
     pushVapid?: { vapidPublicKey: string; vapidPrivateKey: string; vapidEmail?: string; updatedAt?: number; };
     /**
