@@ -3751,24 +3751,6 @@ ${sentencePlan}`;
         </div>
       </div>
       <audio
-        ref={sleepAudioRef}
-        src={(showSleepMode || sleeping) ? (selectedSleepAudioUrl || undefined) : undefined}
-        preload="metadata"
-        loop
-        playsInline
-        controls
-        aria-label="白噪音播放器"
-        className={showSleepMode && selectedSleepAudioUrl
-          ? 'mx-5 mb-2 h-9 w-[calc(100%-2.5rem)] rounded-lg opacity-90'
-          : 'pointer-events-none fixed bottom-0 left-0 h-px w-px opacity-0'}
-        onPlay={() => { setSleepNoiseState('playing'); setSleepNoiseError(''); }}
-        onPause={() => { if (sleeping) setSleepNoiseState('idle'); }}
-        onError={() => {
-          setSleepNoiseState('error');
-          setSleepNoiseError('这条音频无法在当前浏览器播放，请直接点播放器播放键或重新上传音频。');
-        }}
-      />
-      <audio
         ref={audioRef}
         src={audioUrl}
         muted={!isSpeakerOn}
@@ -3816,7 +3798,23 @@ ${sentencePlan}`;
               <div className="mt-3 flex items-start justify-between gap-3"><span className="shrink-0 pt-1 text-xs font-medium text-white/85">白噪音时长</span><div className="flex flex-wrap justify-end gap-1.5">{[0, 30, 60, 120, 480].map(minutes => <button key={minutes} type="button" onClick={() => setSleepNoiseDurationMinutes(minutes)} className={`rounded-full border px-2.5 py-1.5 text-[11px] font-medium ${sleepNoiseDurationMinutes === minutes ? 'border-fuchsia-300 bg-fuchsia-500/35 text-white' : 'border-white/25 bg-white/[.06] text-white/85'}`}>{minutes === 0 ? '一直循环' : minutes < 60 ? `${minutes} 分钟` : `${minutes / 60} 小时`}</button>)}</div></div>
               <div className="mt-4 flex flex-wrap gap-2">{['none', ...BUILTIN_SLEEP_NOISES.map(item => item.id), 'ocean', 'book', 'night', 'market', 'birds'].map(id => { const builtin = BUILTIN_SLEEP_NOISES.find(item => item.id === id); const label = id === 'none' ? '无' : builtin?.name || ({ ocean: '海浪', book: '翻书', night: '夜晚', market: '市场', birds: '鸟叫' } as Record<string, string>)[id] || '自定义'; const custom = selectedChar?.callSettings?.customSleepNoises?.find(item => item.id === id); const available = id === 'none' || Boolean(builtin) || Boolean(custom); const active = selectedChar?.callSettings?.sleepNoiseId === id || (!selectedChar?.callSettings?.sleepNoiseId && id === 'none'); return <button key={id} type="button" disabled={!available} onClick={() => selectedChar && updateCharacter(selectedChar.id, { callSettings: { ...selectedChar.callSettings, sleepNoiseId: id } })} className={`rounded-full border px-3 py-2 text-xs font-medium ${active ? 'border-fuchsia-300 bg-fuchsia-500/35 text-white' : 'border-white/25 bg-white/[.06] text-white/80'} disabled:opacity-45`}>{builtin?.name || custom?.name || label}{!available ? '（待添加）' : ''}</button>; })}</div>
               {!!selectedChar?.callSettings?.customSleepNoises?.length && <div className="mt-3 space-y-2">{selectedChar.callSettings.customSleepNoises.map(item => <button key={item.id} type="button" onClick={() => updateCharacter(selectedChar.id, { callSettings: { ...selectedChar.callSettings, sleepNoiseId: item.id } })} className={`block w-full rounded-xl border px-3 py-2 text-left text-xs font-medium leading-5 ${selectedChar.callSettings?.sleepNoiseId === item.id ? 'border-fuchsia-300 bg-fuchsia-500/35 text-white' : 'border-white/25 bg-white/[.06] text-white/85'}`}>{item.name}</button>)}</div>}
-              {selectedSleepNoise && <div className={`mt-3 rounded-xl border px-3 py-2 text-[11px] leading-5 ${sleepNoiseState === 'error' ? 'border-rose-300/70 bg-rose-500/15 text-white' : 'border-white/20 bg-black/20 text-white/80'}`}><span className="font-semibold text-white">当前音频：{selectedSleepNoise.name}</span><br />{sleepNoiseState === 'playing' ? '正在循环播放' : sleepNoiseState === 'loading' ? '正在加载音频…' : sleepNoiseState === 'error' ? sleepNoiseError : '点击开始陪睡后播放'}</div>}
+              {selectedSleepNoise && <div className={`mt-3 rounded-xl border px-3 py-2 text-[11px] leading-5 ${sleepNoiseState === 'error' ? 'border-rose-300/70 bg-rose-500/15 text-white' : 'border-white/20 bg-black/20 text-white/80'}`}><span className="font-semibold text-white">当前音频：{selectedSleepNoise.name}</span><br />{sleepNoiseState === 'playing' ? '正在循环播放' : sleepNoiseState === 'loading' ? '正在加载音频…' : sleepNoiseState === 'error' ? sleepNoiseError : '点击播放按钮开始'}</div>}
+              {selectedSleepAudioUrl && <div className="mt-3 rounded-xl border border-white/25 bg-black/25 p-2.5">
+                <audio
+                  ref={sleepAudioRef}
+                  src={selectedSleepAudioUrl}
+                  preload="metadata"
+                  loop
+                  playsInline
+                  controls
+                  aria-label="白噪音播放器"
+                  className="h-10 w-full"
+                  onPlay={() => { setSleepNoiseState('playing'); setSleepNoiseError(''); }}
+                  onPause={() => { if (sleeping) setSleepNoiseState('idle'); }}
+                  onError={() => { setSleepNoiseState('error'); setSleepNoiseError('这条音频无法在当前浏览器播放，请换一个内置音频或重新上传。'); }}
+                />
+                <button type="button" onClick={playSelectedSleepNoise} className="mt-2 w-full rounded-xl border border-white/30 bg-white/[.1] py-2.5 text-xs font-semibold text-white active:scale-[.98]">播放白噪音</button>
+              </div>}
               {selectedSleepAudioUrl && <p className="mt-2 text-[10px] leading-4 text-white/55">Edge 手机上如果自动播放被拦截，请直接点上方播放器的播放键；点一次即可持续循环。</p>}
               {sleeping && selectedSleepNoise && <button type="button" onClick={playSelectedSleepNoise} className="mt-3 w-full rounded-xl border border-white/30 bg-white/[.1] py-2.5 text-xs font-semibold text-white active:scale-[.98]">重新播放白噪音</button>}
             </div>
