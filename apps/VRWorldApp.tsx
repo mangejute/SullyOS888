@@ -2737,9 +2737,9 @@ const chapterForSeg = (chapters: VRNovelChapter[], segIdx: number) =>
     chapters.find(c => segIdx >= c.startSeg && segIdx < c.endSeg) || chapters[chapters.length - 1];
 const chapterLabel = (chapter: VRNovelChapter | undefined) => chapter ? `${chapter.partTitle ? `${chapter.partTitle} · ` : ''}${chapter.title}` : '正文';
 
-/** 阅读页按自然句切到保守的长度；字号、行距开到最大时也不会被底栏盖住。 */
+/** 阅读页优先容纳 2~3 段文字，仍预留足够空间避免被底栏盖住。 */
 const buildReaderPages = (segments: VRWorldNovel['segments']) => {
-    const MAX_CHARS = 120;
+    const MAX_CHARS = 360;
     const pages: Array<{ segIdx: number; text: string }> = [];
     for (const segment of segments) {
         let rest = segment.text.trim();
@@ -2747,7 +2747,7 @@ const buildReaderPages = (segments: VRWorldNovel['segments']) => {
             if (rest.length <= MAX_CHARS) { pages.push({ segIdx: segment.idx, text: rest }); break; }
             const sample = rest.slice(0, MAX_CHARS + 1);
             const boundary = Math.max(sample.lastIndexOf('。'), sample.lastIndexOf('！'), sample.lastIndexOf('？'), sample.lastIndexOf('；'), sample.lastIndexOf('\n'));
-            const cut = boundary >= 50 ? boundary + 1 : MAX_CHARS;
+            const cut = boundary >= 140 ? boundary + 1 : MAX_CHARS;
             pages.push({ segIdx: segment.idx, text: rest.slice(0, cut).trim() });
             rest = rest.slice(cut).trim();
         }
@@ -2909,6 +2909,11 @@ const ReaderModal: React.FC<{
         doodlesByViewRef.current.set(doodleViewKey, [...strokes, active]);
         activeDoodleRef.current = null; setDoodleRevision(v => v + 1);
     };
+    const clearCurrentDoodle = () => {
+        doodlesByViewRef.current.delete(doodleViewKey);
+        activeDoodleRef.current = null;
+        setDoodleRevision(v => v + 1);
+    };
 
     const savePrefs = (patch: Partial<ReaderPrefs>) => setPrefs(prev => {
         const next = { ...prev, ...patch }; writeReaderPrefs(novel.id, next); return next;
@@ -3050,6 +3055,7 @@ const ReaderModal: React.FC<{
             <span className="text-[10px] mr-1" style={{ color: theme.sub }}>涂鸦</span>
             {([['pen', '划线'], ['eraser', '橡皮']] as const).map(([tool, label]) => <button key={tool} onClick={() => setDoodleTool(tool)} className="rounded-md px-2 py-1 text-[10px] font-semibold" style={{ color: doodleTool === tool ? theme.paper : theme.text, background: doodleTool === tool ? theme.accent : theme.paper }}>{label}</button>)}
             {doodleTool === 'pen' && <div className="ml-auto flex items-center gap-1"><span className="text-[10px]" style={{ color: theme.sub }}>粗细</span>{([2, 4, 7] as const).map(width => <button key={width} onClick={() => setDoodleWidth(width)} aria-label={`划线粗细 ${width}`} className="flex h-6 w-6 items-center justify-center rounded-md" style={{ background: doodleWidth === width ? theme.accent : theme.paper, color: doodleWidth === width ? theme.paper : theme.text }}><span className="rounded-full" style={{ display: 'block', width: width + 1, height: width + 1, background: 'currentColor' }} /></button>)}</div>}
+            <button onClick={clearCurrentDoodle} className="rounded-md px-2 py-1 text-[10px] font-semibold" style={{ color: theme.accent, background: theme.paper, border: `1px solid ${theme.accent}33` }}>清屏</button>
             <span className="absolute right-4 -bottom-4 text-[9px]" style={{ color: theme.sub }}>退出阅读后自动清除</span>
         </div>}
         <div ref={doodleAreaRef} className="relative flex-1 min-h-0">
