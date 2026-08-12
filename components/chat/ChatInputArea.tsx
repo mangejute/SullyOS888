@@ -35,7 +35,7 @@ interface ChatInputAreaProps {
     /** 提供时整体替换内置 actions 双页网格——群聊传自己的功能格。不传 = 原行为 */
     actionsContent?: React.ReactNode;
     onPanelAction: (type: string, payload?: any) => void;
-    /** 多选图片会先全部写入聊天记录，仅在最后一张完成后触发一次角色回复。 */
+    /** 点击发送时写入图片；多选时仅最后一张触发一次角色回复。 */
     onImageSelect: (file: File, triggerReply?: boolean) => void | Promise<void>;
     isSummarizing: boolean;
     // Categories Support
@@ -94,6 +94,8 @@ const ChatInputArea: React.FC<ChatInputAreaProps> = ({
     const textareaRef = useRef<HTMLTextAreaElement>(null);
     const panelRef = useRef<HTMLDivElement>(null);
     const [actionsPage, setActionsPage] = useState<0 | 1 | 2>(0);
+    // 图片选择和发送分开：选图不会立刻落库或触发 AI，必须点击发送按钮。
+    const [pendingImageFiles, setPendingImageFiles] = useState<File[]>([]);
     // 气泡样式面板：搜索 + 两步确认删除（防止 hover 小 × 误删）
     const [bubbleSearch, setBubbleSearch] = useState('');
     // 会话面板的主要用途仍是切换聊天；气泡选择作为次级工具默认收起。
@@ -141,18 +143,27 @@ const ChatInputArea: React.FC<ChatInputAreaProps> = ({
         }
     };
 
-    const handleSendButtonClick = () => {
-        onSend();
+    const handleSendButtonClick = async () => {
+        const hasTextToSend = Boolean(input.trim());
+        if (pendingImageFiles.length > 0) {
+            const filesToSend = pendingImageFiles;
+            setPendingImageFiles([]);
+            for (let index = 0; index < filesToSend.length; index += 1) {
+                // 有文字时由文字作为本次发送的最后一条内容触发回复；纯图片则由最后一张触发。
+                await onImageSelect(filesToSend[index], !hasTextToSend && index === filesToSend.length - 1);
+            }
+        }
+        // 同时有文字时，文字沿用原来的发送逻辑；纯图片则由最后一张图片触发回复。
+        if (hasTextToSend) onSend();
     };
 
     const handleImageChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
         const files = Array.from(e.target.files || []);
         // 先清空 input，方便用户随后再次选择同一张图。
         e.target.value = '';
-        for (let index = 0; index < files.length; index += 1) {
-            // 多选图片必须先全部落到记录中，角色才能一次看见这一组图片。
-            // 只由最后一张触发回复，避免前一张已开始回复后把后续图片阻断。
-            await onImageSelect(files[index], index === files.length - 1);
+        if (files.length > 0) {
+            setPendingImageFiles(previous => [...previous, ...files]);
+            setShowPanel('none');
         }
     };
 
@@ -471,6 +482,11 @@ const ChatInputArea: React.FC<ChatInputAreaProps> = ({
                         <Plus className="w-6 h-6" weight="bold" />
                     </button>
                     <div className={`flex-1 min-w-0 flex items-center px-1 transition-all ${useIOSStandaloneInputFix ? 'overflow-visible' : 'overflow-hidden'} ${inputWrapClass} ${isPixelStyle ? 'focus-within:bg-[#fff7ed]' : isDiscordStyle ? 'focus-within:bg-slate-800 focus-within:border-white/20' : 'border border-transparent focus-within:bg-white focus-within:border-primary/30'}`}>
+                        {pendingImageFiles.length > 0 && (
+                            <span className="shrink-0 ml-2 px-2 py-1 rounded-full bg-slate-200 text-slate-600 text-[11px] font-bold" aria-label={`已选择 ${pendingImageFiles.length} 张图片`}>
+                                图片 {pendingImageFiles.length}
+                            </span>
+                        )}
                         <textarea 
                             ref={textareaRef}
                             rows={1} 
