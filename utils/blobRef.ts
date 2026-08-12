@@ -243,7 +243,7 @@ export async function resolveBlobRefsDeep(root: unknown): Promise<void> {
  *   · 其它（data: / http(s) / 渐变 / undefined）→ 原样返回。
  * 令牌解析前返回 undefined（首帧可能无图，等 Blob 读出后再渲染，属预期）。
  */
-export function useBlobRefUrl(value: string | undefined | null): string | undefined {
+export function useBlobRefUrl(value: string | undefined | null, mimeType?: string): string | undefined {
     const [url, setUrl] = useState<string | undefined>(
         isBlobRef(value) ? undefined : (value ?? undefined)
     );
@@ -258,7 +258,10 @@ export function useBlobRefUrl(value: string | undefined | null): string | undefi
         getBlobForRef(value).then(blob => {
             if (!alive) return;
             if (blob) {
-                objUrl = URL.createObjectURL(blob);
+                // Older uploads may have been stored without a MIME type. Re-wrap them
+                // with the saved/inferred type so Android can choose its MP3 decoder.
+                const typedBlob = mimeType && blob.type !== mimeType ? new Blob([blob], { type: mimeType }) : blob;
+                objUrl = URL.createObjectURL(typedBlob);
                 setUrl(objUrl);
             } else {
                 setUrl(undefined);
@@ -268,7 +271,52 @@ export function useBlobRefUrl(value: string | undefined | null): string | undefi
             alive = false;
             if (objUrl) URL.revokeObjectURL(objUrl);
         };
-    }, [value]);
+    }, [value, mimeType]);
 
     return url;
+}
+
+/**
+ * 音频专用解析。部分 Android Edge 版本会把 IndexedDB Blob 生成的 blob: URL 当成
+ * 无效媒体（控件显示 0:00 / 0:00），但 data URL 可以稳定交给同一套解码器。
+ * 音频一般只在陪睡时取一首，不会像图片那样大量常驻，因此优先兼容性。
+ */
+export function useBlobRefAudioUrl(value: string | undefined | null, mimeType?: string): string | undefined {
+    const [url, setUrl] = useState<string | undefined>(
+        isBlobRef(value) ? undefined : (value ?? undefined)
+    );
+
+    useEffect(() => {
+        if (!isBlobRef(value)) {
+            setUrl(value ?? undefined);
+            return;
+        }
+        let alive = true;
+        getBlobForRef(value).then(async blob => {
+            if (!blob || !alive) {
+                if (alive) setUrl(undefined);
+                return;
+            }
+            const typedBlob = mimeType && blob.type !== mimeType ? new Blob([blob], { type: mimeType }) : blob;
+            try {
+                const dataUrl = await blobToDataUrl(typedBlob);
+                if (alive) setUrl(dataUrl);
+            } catch {
+                if (alive) setUrl(undefined);
+            }
+        });
+        return () => { alive = false; };
+    }, [value, mimeType]);
+
+    return url;
+}
+
+/** 读取本地音频 Blob，供播放器在 Android Edge 的 object URL 失败时即时降级。 */
+export async function getBlobRefAudioDataUrl(value: string | undefined | null, mimeType?: string): Promise<string | undefined> {
+    if (!value) return undefined;
+    if (!isBlobRef(value)) return value;
+    const blob = await getBlobForRef(value);
+    if (!blob) return undefined;
+    const typedBlob = mimeType && blob.type !== mimeType ? new Blob([blob], { type: mimeType }) : blob;
+    return blobToDataUrl(typedBlob);
 }

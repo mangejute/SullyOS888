@@ -237,7 +237,7 @@ export async function buildChatRequestPayload(input: BuildChatPayloadInput): Pro
             userProfile,
             emojis,
             undefined,
-            { useVisionDescriptions },
+            { useVisionDescriptions, onlyCurrentTurnImages: true },
         );
         const cleanedApiMessages = cleanApiMessages(input.stripImages ? flattenImageContentParts(apiMessages) : apiMessages);
         console.warn('[DevDebug] Prompt Build skipped: sending chat history without system prompt injection.');
@@ -348,7 +348,7 @@ export async function buildChatRequestPayload(input: BuildChatPayloadInput): Pro
         userProfile,
         emojis,
         undefined,
-        { useVisionDescriptions },
+        { useVisionDescriptions, onlyCurrentTurnImages: true },
     );
 
     // ── 8. 剥离历史里旧的双语标签（stripImages 时先压平 image_url → 纯文本占位） ──

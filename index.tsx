@@ -10,6 +10,7 @@ import { VRScheduler } from './utils/vrWorld/scheduler';
 import { installIOSStandaloneWorkaround } from './utils/iosStandalone';
 import { installWakeListener } from './utils/proactivePushConfig';
 import { initAnalytics } from './utils/analytics';
+import { restoreBackgroundKeepAlive } from './utils/browserFeatures';
 import { Capacitor } from '@capacitor/core';
 
 // 默认构建不开启时 Rollup 会整段裁掉；普通浏览器/PWA 不加载原生插件、不申请权限。
@@ -29,6 +30,7 @@ KeepAlive.init().then(() => {
 });
 
 installIOSStandaloneWorkaround();
+restoreBackgroundKeepAlive();
 
 // 使用统计。构建时没配 VITE_UMAMI_* 就整个不生效，自部署实例默认如此。
 // 用户关掉开关、或浏览器开了 DNT，同样在这里就返回，连脚本都不会挂上去。

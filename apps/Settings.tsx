@@ -15,8 +15,10 @@ import { getLuckinToken, setLuckinToken as saveLuckinToken, isLuckinEnabled, set
 import { getProxyWorkerUrl, setProxyWorkerUrl, DEFAULT_PROXY_WORKER } from '../utils/proxyWorker';
 import { VOICE_ACTING_GUIDE } from '../utils/minimaxTts';
 import { FISH_VOICE_ACTING_GUIDE } from '../utils/fishAudioTts';
+import { getQwenTtsVoices, previewQwenTtsVoice, QWEN_TTS_MODELS, QWEN_VOICE_ACTING_GUIDE, testQwenTtsConnection } from '../utils/qwenTts';
+import { previewXiaomiTtsVoice, testXiaomiTtsConnection, XIAOMI_TTS_MODELS, XIAOMI_TTS_VOICES, XIAOMI_VOICE_ACTING_GUIDE } from '../utils/xiaomiTts';
 import { DATE_VOICE_GUIDE } from '../utils/datePrompts';
-import { Sun, Newspaper, NotePencil, Notebook, Book, ForkKnife, Coffee, PlugsConnected, Bell, SpeakerHigh, Sparkle, LockKey, ChatCircleDots } from '@phosphor-icons/react';
+import { Sun, Newspaper, NotePencil, Notebook, Book, ForkKnife, Coffee, PlugsConnected, Bell, SpeakerHigh, Sparkle, LockKey, ChatCircleDots, Microphone } from '@phosphor-icons/react';
 import { loadMcpServers, saveMcpServers, createMcpServer, testMcpConnection, resetMcpSession, getMcpUseNativeTools, setMcpUseNativeTools, type McpServerConfig } from '../utils/mcpClient';
 import { loadPushConfig, savePushConfig, registerScheduleOnWorker, startHeartbeat, stopHeartbeat, isPushConfigAvailable, ensureSubscribed, sendTestPush, getPushDiagnostics, resetSubscription, deepResetSubscription, type PushDiagnostics } from '../utils/proactivePushConfig';
 import { ProactiveChat } from '../utils/proactiveChat';
@@ -35,7 +37,11 @@ import { getBackupReminderState, setBackupReminderIntervalDays, daysSinceLastBac
 import { bucketRetryCount, isAnalyticsConfigured, isAnalyticsEnabled, setAnalyticsEnabled, trackEvent } from '../utils/analytics';
 import { normalizeApiBaseUrl, normalizeApiCredential, normalizeApiModel } from '../utils/apiConfigNormalize';
 import { describeImageWithVisionApi, VISION_API_TEST_IMAGE_DATA_URL, visionApiConfigFromPreset } from '../utils/visionApi';
+import { fetchMiniMaxVoices } from '../utils/minimaxVoice';
 import { getBrowserNotificationPermission, isBackgroundKeepAliveEnabled, isBrowserNotificationsEnabled, requestBrowserNotifications, setBackgroundKeepAlive, setBrowserNotificationsEnabled, showCharacterNotification } from '../utils/browserFeatures';
+import { snapshotLocalStorageMirror } from '../utils/lsMirror';
+import { DEFAULT_SILICONFLOW_STT_MODEL, DEFAULT_SILICONFLOW_STT_URL, testSiliconFlowSttConnection } from '../utils/siliconFlowStt';
+import type { APIConfig } from '../types';
 
 // hot_news（news.orz.ai）可选热榜平台。key 必须与 API 的 ?platform= 完全一致。
 const HOTNEWS_PLATFORM_OPTIONS: { key: string; label: string }[] = [
@@ -65,12 +71,29 @@ const HOTNEWS_PLATFORM_OPTIONS: { key: string; label: string }[] = [
 // 这里设为 false 只是把设置页里的入口隐藏掉，想恢复改回 true 即可。
 const SHOW_PROACTIVE_PUSH_ACCEL_UI = false;
 const VISION_MODEL_LIST_STORAGE_KEY = 'os_vision_available_models';
+const IMAGE_MODEL_LIST_STORAGE_KEY = 'os_image_generation_models';
+const IMAGE_PRESETS_STORAGE_KEY = 'os_image_generation_presets';
+const OTHER_API_PRESETS_STORAGE_KEY = 'os_other_api_presets';
+
+type ImageApiConfig = NonNullable<APIConfig['imageGenerationApi']>;
+type ImageApiPreset = { id: string; name: string; config: ImageApiConfig };
+type OtherApiPresetConfig = Pick<APIConfig, 'minimaxApiKey' | 'minimaxGroupId' | 'minimaxRegion' | 'aceStepApiKey' | 'ttsProvider' | 'readerTtsProvider' | 'fishAudioApiKey' | 'fishAudioModel' | 'qwenTtsApiKey' | 'qwenTtsWorkspaceId' | 'qwenTtsRegion' | 'qwenTtsModel' | 'qwenTtsVoice' | 'qwenTtsAudioFormat' | 'qwenTtsEndpoint' | 'xiaomiTtsApiKey' | 'xiaomiTtsBaseUrl' | 'xiaomiTtsModel' | 'xiaomiTtsVoice' | 'voicePrompts'>;
+type OtherApiPreset = { id: string; name: string; config: OtherApiPresetConfig };
 
 const readStoredVisionModels = (): string[] => {
     try {
         return normalizeModelIds(JSON.parse(localStorage.getItem(VISION_MODEL_LIST_STORAGE_KEY) || '[]'));
     } catch {
         return [];
+    }
+};
+
+const readStoredJson = <T,>(key: string, fallback: T): T => {
+    try {
+        const parsed = JSON.parse(localStorage.getItem(key) || 'null');
+        return parsed === null ? fallback : parsed as T;
+    } catch {
+        return fallback;
     }
 };
 
@@ -442,6 +465,7 @@ const Settings: React.FC = () => {
       cloudBackupConfig, updateCloudBackupConfig,
       cloudBackupToWebDAV, cloudRestoreFromWebDAV, listCloudBackups,
       theme, updateTheme,
+      memoryPalaceConfig,
   } = useOS();
   
   const [localKey, setLocalKey] = useState(apiConfig.apiKey);
@@ -455,12 +479,24 @@ const Settings: React.FC = () => {
   const [localVisionUrl, setLocalVisionUrl] = useState(apiConfig.visionApi?.baseUrl || '');
   const [localVisionKey, setLocalVisionKey] = useState(apiConfig.visionApi?.apiKey || '');
   const [localVisionModel, setLocalVisionModel] = useState(apiConfig.visionApi?.model || '');
+  const [localSttProvider, setLocalSttProvider] = useState<'browser' | 'siliconflow'>(apiConfig.speechRecognition?.provider === 'siliconflow' ? 'siliconflow' : 'browser');
+  const [localSttUrl, setLocalSttUrl] = useState(apiConfig.speechRecognition?.baseUrl || memoryPalaceConfig.embedding.baseUrl || DEFAULT_SILICONFLOW_STT_URL);
+  const [localSttKey, setLocalSttKey] = useState(apiConfig.speechRecognition?.apiKey || memoryPalaceConfig.embedding.apiKey || '');
+  const [localSttModel, setLocalSttModel] = useState(apiConfig.speechRecognition?.model || DEFAULT_SILICONFLOW_STT_MODEL);
+  const [localSttLanguage, setLocalSttLanguage] = useState(apiConfig.speechRecognition?.language || 'zh-CN');
+  const [localSttCleanEmoji, setLocalSttCleanEmoji] = useState(apiConfig.speechRecognition?.cleanEmotionEmoji !== false);
+  const [availableSttModels, setAvailableSttModels] = useState<string[]>([]);
+  const [sttModelFilter, setSttModelFilter] = useState('');
+  const [sttStatus, setSttStatus] = useState('');
+  const [testingStt, setTestingStt] = useState(false);
   const [localImageGenUrl, setLocalImageGenUrl] = useState(apiConfig.imageGenerationApi?.baseUrl || '');
   const [localImageGenKey, setLocalImageGenKey] = useState(apiConfig.imageGenerationApi?.apiKey || '');
   const [localImageGenModel, setLocalImageGenModel] = useState(apiConfig.imageGenerationApi?.model || '');
   const [localImageGenPrompt, setLocalImageGenPrompt] = useState(apiConfig.imageGenerationApi?.prompt || '');
   const [localImageGenAspectRatio, setLocalImageGenAspectRatio] = useState<NonNullable<NonNullable<typeof apiConfig.imageGenerationApi>['aspectRatio']>>(apiConfig.imageGenerationApi?.aspectRatio || '1:1');
-  const [availableImageGenModels, setAvailableImageGenModels] = useState<string[]>([]);
+  const [availableImageGenModels, setAvailableImageGenModels] = useState<string[]>(() => readStoredJson<string[]>(IMAGE_MODEL_LIST_STORAGE_KEY, []).filter(Boolean));
+  const [imageGenPresets, setImageGenPresets] = useState<ImageApiPreset[]>(() => readStoredJson<ImageApiPreset[]>(IMAGE_PRESETS_STORAGE_KEY, []));
+  const [otherApiPresets, setOtherApiPresets] = useState<OtherApiPreset[]>(() => readStoredJson<OtherApiPreset[]>(OTHER_API_PRESETS_STORAGE_KEY, []));
   const [availableVisionModels, setAvailableVisionModels] = useState<string[]>(readStoredVisionModels);
   const [selectedVisionPresetId, setSelectedVisionPresetId] = useState<string | null>(null);
   const [visionStatusMsg, setVisionStatusMsg] = useState('');
@@ -468,20 +504,46 @@ const Settings: React.FC = () => {
   const [visionTestResult, setVisionTestResult] = useState<string | null>(null);
   const [testingImageGenApi, setTestingImageGenApi] = useState(false);
   const [imageGenTestResult, setImageGenTestResult] = useState<string | null>(null);
+  const [showImageModelModal, setShowImageModelModal] = useState(false);
+  const [imageModelFilter, setImageModelFilter] = useState('');
+  const [newImagePresetName, setNewImagePresetName] = useState('');
+  const [newOtherPresetName, setNewOtherPresetName] = useState('');
+  const [testingOtherApis, setTestingOtherApis] = useState(false);
   const [localMiniMaxKey, setLocalMiniMaxKey] = useState(apiConfig.minimaxApiKey || '');
   const [localMiniMaxGroupId, setLocalMiniMaxGroupId] = useState(apiConfig.minimaxGroupId || '');
   const [localMiniMaxRegion, setLocalMiniMaxRegion] = useState<'domestic' | 'overseas'>(
     apiConfig.minimaxRegion === 'overseas' ? 'overseas' : 'domestic'
   );
   const [localAceStepKey, setLocalAceStepKey] = useState(apiConfig.aceStepApiKey || '');
-  const [localTtsProvider, setLocalTtsProvider] = useState<'minimax' | 'fishaudio'>(
-    apiConfig.ttsProvider === 'fishaudio' ? 'fishaudio' : 'minimax'
+  const [localTtsProvider, setLocalTtsProvider] = useState<'minimax' | 'fishaudio' | 'qwen' | 'xiaomi'>(
+    apiConfig.ttsProvider === 'fishaudio' ? 'fishaudio' : apiConfig.ttsProvider === 'qwen' ? 'qwen' : apiConfig.ttsProvider === 'xiaomi' ? 'xiaomi' : 'minimax'
   );
+  const [localReaderTtsProvider, setLocalReaderTtsProvider] = useState<'system' | 'minimax' | 'xiaomi'>(apiConfig.readerTtsProvider === 'xiaomi' ? 'xiaomi' : apiConfig.readerTtsProvider === 'minimax' ? 'minimax' : 'system');
   const [localFishKey, setLocalFishKey] = useState(apiConfig.fishAudioApiKey || '');
   const [localFishModel, setLocalFishModel] = useState(apiConfig.fishAudioModel || 's2.1-pro');
+  const [localQwenKey, setLocalQwenKey] = useState(apiConfig.qwenTtsApiKey || '');
+  const [localQwenWorkspace, setLocalQwenWorkspace] = useState(apiConfig.qwenTtsWorkspaceId || '');
+  const [localQwenRegion, setLocalQwenRegion] = useState<'beijing' | 'singapore'>(apiConfig.qwenTtsRegion === 'singapore' ? 'singapore' : 'beijing');
+  const [localQwenModel, setLocalQwenModel] = useState(apiConfig.qwenTtsModel || 'qwen-audio-3.0-tts-flash');
+  const [localQwenVoice, setLocalQwenVoice] = useState(apiConfig.qwenTtsVoice || 'longanlingxi');
+  const [localQwenFormat, setLocalQwenFormat] = useState<'mp3' | 'wav' | 'pcm' | 'opus'>(apiConfig.qwenTtsAudioFormat || 'mp3');
+  const [localQwenEndpoint, setLocalQwenEndpoint] = useState(apiConfig.qwenTtsEndpoint || '');
+  const [localXiaomiKey, setLocalXiaomiKey] = useState(apiConfig.xiaomiTtsApiKey || '');
+  const [localXiaomiBaseUrl, setLocalXiaomiBaseUrl] = useState(apiConfig.xiaomiTtsBaseUrl || 'https://api.xiaomimimo.com/v1');
+  const [localXiaomiModel, setLocalXiaomiModel] = useState(apiConfig.xiaomiTtsModel || 'mimo-v2.5-tts');
+  const [localXiaomiVoice, setLocalXiaomiVoice] = useState(apiConfig.xiaomiTtsVoice || '冰糖');
+  const [xiaomiPreviewingVoice, setXiaomiPreviewingVoice] = useState<string | null>(null);
+  const xiaomiPreviewAudioRef = useRef<HTMLAudioElement | null>(null);
+  const xiaomiPreviewUrlRef = useRef<string | null>(null);
+  const [otherApiOpen, setOtherApiOpen] = useState<Record<'qwen' | 'minimax' | 'fish' | 'xiaomi', boolean>>({ qwen: false, minimax: false, fish: false, xiaomi: false });
+  const [showCustomQwenVoice, setShowCustomQwenVoice] = useState(false);
+  const [qwenPreviewingVoice, setQwenPreviewingVoice] = useState<string | null>(null);
+  const qwenPreviewAudioRef = useRef<HTMLAudioElement | null>(null);
+  const qwenPreviewUrlRef = useRef<string | null>(null);
   // 自定义语音表演指南（留空 → 用内置默认）。按服务商分两份。
   const [localVoicePromptMinimax, setLocalVoicePromptMinimax] = useState(apiConfig.voicePrompts?.minimax || '');
   const [localVoicePromptFish, setLocalVoicePromptFish] = useState(apiConfig.voicePrompts?.fishaudio || '');
+  const [localVoicePromptQwen, setLocalVoicePromptQwen] = useState(apiConfig.voicePrompts?.qwen || '');
   const [localVoicePromptDate, setLocalVoicePromptDate] = useState(apiConfig.voicePrompts?.dateVoice || '');
   const [showVoicePrompts, setShowVoicePrompts] = useState(false);
   const [showAceStepGuide, setShowAceStepGuide] = useState(false);
@@ -495,6 +557,21 @@ const Settings: React.FC = () => {
   const [selectedPresetName, setSelectedPresetName] = useState('');
   const [holdingDeletePresetId, setHoldingDeletePresetId] = useState<string | null>(null);
   const presetDeleteTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const qwenVoiceOptions = useMemo(() => getQwenTtsVoices(localQwenModel), [localQwenModel]);
+  const qwenModelOptions = useMemo(() => {
+    const known = QWEN_TTS_MODELS.some(option => option.id === localQwenModel);
+    return known || !localQwenModel.trim()
+      ? QWEN_TTS_MODELS
+      : [{ id: localQwenModel, name: `${localQwenModel}（自定义）`, description: '当前保存的自定义模型' }, ...QWEN_TTS_MODELS];
+  }, [localQwenModel]);
+
+  useEffect(() => () => {
+    qwenPreviewAudioRef.current?.pause();
+    if (qwenPreviewUrlRef.current) URL.revokeObjectURL(qwenPreviewUrlRef.current);
+    xiaomiPreviewAudioRef.current?.pause();
+    if (xiaomiPreviewUrlRef.current) URL.revokeObjectURL(xiaomiPreviewUrlRef.current);
+  }, []);
   
   // UI States
   const [showModelModal, setShowModelModal] = useState(false);
@@ -503,6 +580,7 @@ const Settings: React.FC = () => {
   const [visionModelFilter, setVisionModelFilter] = useState('');
   const [showExportModal, setShowExportModal] = useState(false); // Used for completion now
   const [showResetConfirm, setShowResetConfirm] = useState(false);
+  const [isTrimmingChatCache, setIsTrimmingChatCache] = useState(false);
   const [showPresetModal, setShowPresetModal] = useState(false);
   const [showApiCallLog, setShowApiCallLog] = useState(false);
   const [showRealtimeModal, setShowRealtimeModal] = useState(false);
@@ -686,6 +764,10 @@ const Settings: React.FC = () => {
       () => buildModelPickerView(availableVisionModels, visionModelFilter),
       [visionModelFilter, availableVisionModels],
   );
+  const imageModelPickerView = useMemo(
+      () => buildModelPickerView(availableImageGenModels, imageModelFilter),
+      [imageModelFilter, availableImageGenModels],
+  );
 
   const refreshPpDiag = useCallback(async () => {
       try { setPpDiag(await getPushDiagnostics()); } catch { /* ignore */ }
@@ -866,6 +948,12 @@ const Settings: React.FC = () => {
       setLocalVisionUrl(apiConfig.visionApi?.baseUrl || '');
       setLocalVisionKey(apiConfig.visionApi?.apiKey || '');
       setLocalVisionModel(apiConfig.visionApi?.model || '');
+      setLocalSttProvider(apiConfig.speechRecognition?.provider === 'siliconflow' ? 'siliconflow' : 'browser');
+      setLocalSttUrl(apiConfig.speechRecognition?.baseUrl || memoryPalaceConfig.embedding.baseUrl || DEFAULT_SILICONFLOW_STT_URL);
+      setLocalSttKey(apiConfig.speechRecognition?.apiKey || memoryPalaceConfig.embedding.apiKey || '');
+      setLocalSttModel(apiConfig.speechRecognition?.model || DEFAULT_SILICONFLOW_STT_MODEL);
+      setLocalSttLanguage(apiConfig.speechRecognition?.language || 'zh-CN');
+      setLocalSttCleanEmoji(apiConfig.speechRecognition?.cleanEmotionEmoji !== false);
       setLocalImageGenUrl(apiConfig.imageGenerationApi?.baseUrl || '');
       setLocalImageGenKey(apiConfig.imageGenerationApi?.apiKey || '');
       setLocalImageGenModel(apiConfig.imageGenerationApi?.model || '');
@@ -875,13 +963,26 @@ const Settings: React.FC = () => {
       setLocalMiniMaxGroupId(apiConfig.minimaxGroupId || '');
       setLocalMiniMaxRegion(apiConfig.minimaxRegion === 'overseas' ? 'overseas' : 'domestic');
       setLocalAceStepKey(apiConfig.aceStepApiKey || '');
-      setLocalTtsProvider(apiConfig.ttsProvider === 'fishaudio' ? 'fishaudio' : 'minimax');
       setLocalFishKey(apiConfig.fishAudioApiKey || '');
       setLocalFishModel(apiConfig.fishAudioModel || 's2.1-pro');
+      setLocalTtsProvider(apiConfig.ttsProvider === 'fishaudio' ? 'fishaudio' : apiConfig.ttsProvider === 'qwen' ? 'qwen' : apiConfig.ttsProvider === 'xiaomi' ? 'xiaomi' : 'minimax');
+      setLocalReaderTtsProvider(apiConfig.readerTtsProvider === 'xiaomi' ? 'xiaomi' : apiConfig.readerTtsProvider === 'minimax' ? 'minimax' : 'system');
+      setLocalQwenKey(apiConfig.qwenTtsApiKey || '');
+      setLocalQwenWorkspace(apiConfig.qwenTtsWorkspaceId || '');
+      setLocalQwenRegion(apiConfig.qwenTtsRegion === 'singapore' ? 'singapore' : 'beijing');
+      setLocalQwenModel(apiConfig.qwenTtsModel || 'qwen-audio-3.0-tts-flash');
+      setLocalQwenVoice(apiConfig.qwenTtsVoice || 'longanlingxi');
+      setLocalQwenFormat(apiConfig.qwenTtsAudioFormat || 'mp3');
+      setLocalQwenEndpoint(apiConfig.qwenTtsEndpoint || '');
+      setLocalXiaomiKey(apiConfig.xiaomiTtsApiKey || '');
+      setLocalXiaomiBaseUrl(apiConfig.xiaomiTtsBaseUrl || 'https://api.xiaomimimo.com/v1');
+      setLocalXiaomiModel(apiConfig.xiaomiTtsModel || 'mimo-v2.5-tts');
+      setLocalXiaomiVoice(apiConfig.xiaomiTtsVoice || '冰糖');
+      setLocalVoicePromptQwen(apiConfig.voicePrompts?.qwen || '');
       setLocalVoicePromptMinimax(apiConfig.voicePrompts?.minimax || '');
       setLocalVoicePromptFish(apiConfig.voicePrompts?.fishaudio || '');
       setLocalVoicePromptDate(apiConfig.voicePrompts?.dateVoice || '');
-  }, [apiConfig]);
+  }, [apiConfig, memoryPalaceConfig.embedding.baseUrl, memoryPalaceConfig.embedding.apiKey]);
 
   const selectedApiPreset = useMemo(
       () => apiPresets.find(preset => preset.id === selectedPresetId) || null,
@@ -1093,19 +1194,190 @@ const Settings: React.FC = () => {
     }
   };
 
-  const handleSaveImageGenerationApi = () => {
-    const next = {
+  const currentImageApiConfig = (): ImageApiConfig => ({
       baseUrl: normalizeApiBaseUrl(localImageGenUrl),
       apiKey: normalizeApiCredential(localImageGenKey),
       model: normalizeApiModel(localImageGenModel),
       prompt: localImageGenPrompt.trim(),
       aspectRatio: localImageGenAspectRatio,
-    };
+  });
+
+  const loadImageGenerationPreset = (preset: ImageApiPreset) => {
+    setLocalImageGenUrl(preset.config.baseUrl || '');
+    setLocalImageGenKey(preset.config.apiKey || '');
+    setLocalImageGenModel(preset.config.model || '');
+    setLocalImageGenPrompt(preset.config.prompt || '');
+    setLocalImageGenAspectRatio(preset.config.aspectRatio || '1:1');
+    setImageGenTestResult(null);
+    addToast(`已载入生图预设「${preset.name}」，保存后生效`, 'info');
+  };
+
+  const saveImageGenerationPreset = () => {
+    const name = newImagePresetName.trim();
+    const config = currentImageApiConfig();
+    if (!name) { addToast('请输入生图预设名称', 'error'); return; }
+    if (!config.baseUrl || !config.apiKey || !config.model) { addToast('请先填写完整的生图连接、秘钥和模型', 'error'); return; }
+    const next = [...imageGenPresets.filter(item => item.name !== name), { id: `${Date.now()}`, name, config }];
+    setImageGenPresets(next);
+    localStorage.setItem(IMAGE_PRESETS_STORAGE_KEY, JSON.stringify(next));
+    void snapshotLocalStorageMirror();
+    setNewImagePresetName('');
+    addToast('生图预设已保存', 'success');
+  };
+
+  const currentOtherApiConfig = (): OtherApiPresetConfig => ({
+    minimaxApiKey: localMiniMaxKey.trim(), minimaxGroupId: localMiniMaxGroupId.trim(), minimaxRegion: localMiniMaxRegion,
+    aceStepApiKey: localAceStepKey.trim(), ttsProvider: localTtsProvider, readerTtsProvider: localReaderTtsProvider, fishAudioApiKey: localFishKey.trim(), fishAudioModel: localFishModel.trim(),
+    qwenTtsApiKey: localQwenKey.trim(), qwenTtsWorkspaceId: localQwenWorkspace.trim(), qwenTtsRegion: localQwenRegion,
+    qwenTtsModel: localQwenModel.trim(), qwenTtsVoice: localQwenVoice.trim(), qwenTtsAudioFormat: localQwenFormat, qwenTtsEndpoint: localQwenEndpoint.trim(),
+    xiaomiTtsApiKey: localXiaomiKey.trim(), xiaomiTtsBaseUrl: localXiaomiBaseUrl.trim(), xiaomiTtsModel: localXiaomiModel.trim(), xiaomiTtsVoice: localXiaomiVoice.trim(),
+    voicePrompts: { minimax: localVoicePromptMinimax.trim() || undefined, fishaudio: localVoicePromptFish.trim() || undefined, qwen: localVoicePromptQwen.trim() || undefined, xiaomi: undefined, dateVoice: localVoicePromptDate.trim() || undefined },
+  });
+
+  const loadOtherApiPreset = (preset: OtherApiPreset) => {
+    const config = preset.config;
+    setLocalMiniMaxKey(config.minimaxApiKey || ''); setLocalMiniMaxGroupId(config.minimaxGroupId || '');
+    setLocalMiniMaxRegion(config.minimaxRegion === 'overseas' ? 'overseas' : 'domestic');
+    setLocalAceStepKey(config.aceStepApiKey || ''); setLocalTtsProvider(config.ttsProvider === 'fishaudio' ? 'fishaudio' : config.ttsProvider === 'qwen' ? 'qwen' : config.ttsProvider === 'xiaomi' ? 'xiaomi' : 'minimax'); setLocalReaderTtsProvider(config.readerTtsProvider === 'xiaomi' ? 'xiaomi' : config.readerTtsProvider === 'minimax' ? 'minimax' : 'system');
+    setLocalFishKey(config.fishAudioApiKey || ''); setLocalFishModel(config.fishAudioModel || 's2.1-pro');
+    setLocalQwenKey(config.qwenTtsApiKey || ''); setLocalQwenWorkspace(config.qwenTtsWorkspaceId || ''); setLocalQwenRegion(config.qwenTtsRegion === 'singapore' ? 'singapore' : 'beijing');
+    setLocalQwenModel(config.qwenTtsModel || 'qwen-audio-3.0-tts-flash'); setLocalQwenVoice(config.qwenTtsVoice || 'longanlingxi'); setLocalQwenFormat(config.qwenTtsAudioFormat || 'mp3'); setLocalQwenEndpoint(config.qwenTtsEndpoint || '');
+    setLocalXiaomiKey(config.xiaomiTtsApiKey || ''); setLocalXiaomiBaseUrl(config.xiaomiTtsBaseUrl || 'https://api.xiaomimimo.com/v1'); setLocalXiaomiModel(config.xiaomiTtsModel || 'mimo-v2.5-tts'); setLocalXiaomiVoice(config.xiaomiTtsVoice || '冰糖');
+    setLocalVoicePromptMinimax(config.voicePrompts?.minimax || ''); setLocalVoicePromptFish(config.voicePrompts?.fishaudio || ''); setLocalVoicePromptQwen(config.voicePrompts?.qwen || ''); setLocalVoicePromptDate(config.voicePrompts?.dateVoice || '');
+    addToast(`已载入其他 API 预设「${preset.name}」，保存后生效`, 'info');
+  };
+
+  const saveOtherApiPreset = () => {
+    const name = newOtherPresetName.trim();
+    if (!name) { addToast('请输入其他 API 预设名称', 'error'); return; }
+    const next = [...otherApiPresets.filter(item => item.name !== name), { id: `${Date.now()}`, name, config: currentOtherApiConfig() }];
+    setOtherApiPresets(next); localStorage.setItem(OTHER_API_PRESETS_STORAGE_KEY, JSON.stringify(next)); void snapshotLocalStorageMirror(); setNewOtherPresetName('');
+    addToast('其他 API 预设已保存', 'success');
+  };
+
+  const testOtherApis = async () => {
+    const key = localMiniMaxKey.trim() || apiConfig.apiKey.trim();
+    if (!key) { setOtherStatusMsg('请先填写 MiniMax Key'); return; }
+    setTestingOtherApis(true); setOtherStatusMsg('正在测试 MiniMax…');
+    try { await fetchMiniMaxVoices(key, 'system'); setOtherStatusMsg('✅ MiniMax 连接正常'); }
+    catch (error: any) { setOtherStatusMsg(`❌ 测试失败：${error?.message || '无法连接'}`); }
+    finally { setTestingOtherApis(false); }
+  };
+
+  const testQwenApi = async () => {
+    if (!localQwenKey.trim() || !localQwenWorkspace.trim()) {
+      setOtherStatusMsg('请先填写 Qwen API Key 和 Workspace ID');
+      return;
+    }
+    setTestingOtherApis(true); setOtherStatusMsg('正在测试 Qwen TTS…');
+    try {
+      await testQwenTtsConnection({
+        ...apiConfig,
+        qwenTtsApiKey: localQwenKey.trim(), qwenTtsWorkspaceId: localQwenWorkspace.trim(), qwenTtsRegion: localQwenRegion,
+        qwenTtsModel: localQwenModel.trim(), qwenTtsVoice: localQwenVoice.trim(), qwenTtsAudioFormat: localQwenFormat, qwenTtsEndpoint: localQwenEndpoint.trim() || undefined,
+      });
+      setOtherStatusMsg('✅ Qwen TTS 连接正常');
+    } catch (error: any) {
+      setOtherStatusMsg(`❌ Qwen 测试失败：${error?.message || '无法连接'}`);
+    } finally { setTestingOtherApis(false); }
+  };
+
+  const testXiaomiApi = async () => {
+    if (!localXiaomiKey.trim()) { setOtherStatusMsg('请先填写小米 MiMo API Key'); return; }
+    setTestingOtherApis(true); setOtherStatusMsg('正在测试小米 MiMo TTS…');
+    try {
+      await testXiaomiTtsConnection({ ...apiConfig, xiaomiTtsApiKey: localXiaomiKey.trim(), xiaomiTtsBaseUrl: localXiaomiBaseUrl.trim(), xiaomiTtsModel: localXiaomiModel.trim(), xiaomiTtsVoice: localXiaomiVoice.trim() });
+      setOtherStatusMsg('✅ 小米 MiMo TTS 连接正常');
+    } catch (error: any) {
+      setOtherStatusMsg(`❌ 测试失败：${error?.message || '无法连接'}`);
+    } finally { setTestingOtherApis(false); }
+  };
+
+  const previewXiaomiVoice = async (voice: string) => {
+    if (!localXiaomiKey.trim()) { addToast('请先填写小米 MiMo API Key', 'error'); return; }
+    xiaomiPreviewAudioRef.current?.pause();
+    if (xiaomiPreviewUrlRef.current) URL.revokeObjectURL(xiaomiPreviewUrlRef.current);
+    setXiaomiPreviewingVoice(voice);
+    try {
+      const { url } = await previewXiaomiTtsVoice({ ...apiConfig, xiaomiTtsApiKey: localXiaomiKey.trim(), xiaomiTtsBaseUrl: localXiaomiBaseUrl.trim(), xiaomiTtsModel: localXiaomiModel.trim(), xiaomiTtsVoice: voice }, voice);
+      const audio = new Audio(url);
+      xiaomiPreviewAudioRef.current = audio; xiaomiPreviewUrlRef.current = url;
+      audio.onended = () => { if (xiaomiPreviewUrlRef.current === url) xiaomiPreviewUrlRef.current = null; URL.revokeObjectURL(url); setXiaomiPreviewingVoice(null); };
+      await audio.play();
+    } catch (error: any) {
+      addToast(`试听失败：${error?.message || '未知错误'}`, 'error'); setXiaomiPreviewingVoice(null);
+    }
+  };
+
+  const previewQwenVoice = async (voice: string) => {
+    if (!localQwenKey.trim() || !localQwenWorkspace.trim()) {
+      addToast('请先填写 Qwen API Key 和 Workspace ID', 'error');
+      return;
+    }
+    qwenPreviewAudioRef.current?.pause();
+    if (qwenPreviewUrlRef.current) URL.revokeObjectURL(qwenPreviewUrlRef.current);
+    setQwenPreviewingVoice(voice);
+    try {
+      const { url } = await previewQwenTtsVoice({
+        ...apiConfig,
+        qwenTtsApiKey: localQwenKey.trim(), qwenTtsWorkspaceId: localQwenWorkspace.trim(), qwenTtsRegion: localQwenRegion,
+        qwenTtsModel: localQwenModel.trim(), qwenTtsVoice: voice, qwenTtsAudioFormat: localQwenFormat, qwenTtsEndpoint: localQwenEndpoint.trim() || undefined,
+      }, voice);
+      const audio = new Audio(url);
+      qwenPreviewAudioRef.current = audio;
+      qwenPreviewUrlRef.current = url;
+      audio.onended = () => {
+        if (qwenPreviewUrlRef.current === url) qwenPreviewUrlRef.current = null;
+        URL.revokeObjectURL(url);
+        setQwenPreviewingVoice(null);
+      };
+      await audio.play();
+    } catch (error: any) {
+      addToast(`试听失败：${error?.message || '未知错误'}`, 'error');
+      setQwenPreviewingVoice(null);
+    }
+  };
+
+  const selectQwenModel = (model: string) => {
+    setLocalQwenModel(model);
+    const voices = getQwenTtsVoices(model);
+    if (voices.length && !voices.some(voice => voice.id === localQwenVoice)) {
+      setLocalQwenVoice(voices[0].id);
+      setShowCustomQwenVoice(false);
+    }
+  };
+
+  const handleSaveImageGenerationApi = () => {
+    const next = currentImageApiConfig();
     setLocalImageGenUrl(next.baseUrl);
     setLocalImageGenKey(next.apiKey);
     setLocalImageGenModel(next.model);
     updateApiConfig({ imageGenerationApi: next });
     addToast('生图 API 配置已保存', 'success');
+  };
+
+  const fetchImageGenerationModels = async () => {
+    const baseUrl = normalizeApiBaseUrl(localImageGenUrl);
+    const apiKey = normalizeApiCredential(localImageGenKey);
+    if (!baseUrl || !apiKey) { setImageGenTestResult('❌ 请先填写生图连接和秘钥'); return; }
+    setTestingImageGenApi(true);
+    setImageGenTestResult(null);
+    try {
+      const response = await fetch(`${baseUrl}/models`, { method: 'GET', headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' } });
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      const models = extractModelIds(await safeResponseJson(response));
+      if (!models.length) throw new Error('模型列表为空或格式不兼容');
+      setAvailableImageGenModels(models);
+      localStorage.setItem(IMAGE_MODEL_LIST_STORAGE_KEY, JSON.stringify(models));
+      void snapshotLocalStorageMirror();
+      setImageModelFilter('');
+      setShowImageModelModal(true);
+      setImageGenTestResult(`✅ 获取到 ${models.length} 个生图模型`);
+    } catch (error: any) {
+      setImageGenTestResult(`❌ 拉取模型失败：${error?.message || '未知错误'}`);
+    } finally {
+      setTestingImageGenApi(false);
+    }
   };
 
   const handleTestImageGenerationApi = async () => {
@@ -1131,7 +1403,12 @@ const Settings: React.FC = () => {
       const models = Array.isArray(payload?.data)
         ? payload.data.map((item: any) => typeof item === 'string' ? item : item?.id).filter((id: any): id is string => !!id)
         : [];
-      if (models.length) setAvailableImageGenModels([...new Set(models)]);
+      if (models.length) {
+        const nextModels = normalizeModelIds([...new Set(models)]);
+        setAvailableImageGenModels(nextModels);
+        localStorage.setItem(IMAGE_MODEL_LIST_STORAGE_KEY, JSON.stringify(nextModels));
+        void snapshotLocalStorageMirror();
+      }
       setImageGenTestResult(`✅ 连接成功，模型「${model}」可用`);
       trackEvent('测试生图 API', { result: '成功' });
     } catch (error: any) {
@@ -1142,6 +1419,48 @@ const Settings: React.FC = () => {
     }
   };
 
+  const fetchSpeechRecognitionModels = async () => {
+    const baseUrl = normalizeApiBaseUrl(localSttUrl);
+    const apiKey = normalizeApiCredential(localSttKey);
+    if (!baseUrl || !apiKey) { setSttStatus('请先填写硅基流动连接和 Key'); return; }
+    setTestingStt(true); setSttStatus('正在获取语音识别模型…');
+    try {
+      const response = await fetch(`${baseUrl}/models`, { headers: { Authorization: `Bearer ${apiKey}` } });
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      const models = extractModelIds(await safeResponseJson(response));
+      const sttModels = models.filter(model => /sensevoice|whisper|audio|speech/i.test(model));
+      setAvailableSttModels(sttModels.length ? sttModels : models);
+      setSttStatus(`✅ 获取到 ${sttModels.length || models.length} 个模型`);
+    } catch (error: any) {
+      setSttStatus(`❌ 获取模型失败：${error?.message || '无法连接'}`);
+    } finally { setTestingStt(false); }
+  };
+
+  const handleTestSpeechRecognition = async () => {
+    if (localSttProvider === 'browser') { setSttStatus('✅ 系统网页识别无需 API，当前设备支持后即可使用'); return; }
+    setTestingStt(true); setSttStatus('正在测试硅基流动连接…');
+    try {
+      await testSiliconFlowSttConnection({ baseUrl: localSttUrl.trim(), apiKey: localSttKey.trim(), model: localSttModel.trim() });
+      setSttStatus(`✅ 连接成功，模型「${localSttModel.trim()}」可用`);
+    } catch (error: any) {
+      setSttStatus(`❌ 测试失败：${error?.message || '无法连接'}`);
+    } finally { setTestingStt(false); }
+  };
+
+  const handleSaveSpeechRecognition = () => {
+    const next = {
+      provider: localSttProvider,
+      baseUrl: normalizeApiBaseUrl(localSttUrl),
+      apiKey: normalizeApiCredential(localSttKey),
+      model: normalizeApiModel(localSttModel) || DEFAULT_SILICONFLOW_STT_MODEL,
+      language: localSttLanguage || 'zh-CN',
+      cleanEmotionEmoji: localSttCleanEmoji,
+    } as const;
+    setLocalSttUrl(next.baseUrl); setLocalSttKey(next.apiKey); setLocalSttModel(next.model);
+    updateApiConfig({ speechRecognition: next });
+    setSttStatus(`已保存：${next.provider === 'browser' ? '系统网页识别' : next.model}`);
+  };
+
   const handleSaveOtherApis = () => {
     updateApiConfig({
       minimaxApiKey: localMiniMaxKey,
@@ -1149,11 +1468,25 @@ const Settings: React.FC = () => {
       minimaxRegion: localMiniMaxRegion,
       aceStepApiKey: localAceStepKey,
       ttsProvider: localTtsProvider,
+      readerTtsProvider: localReaderTtsProvider,
       fishAudioApiKey: localFishKey,
       fishAudioModel: localFishModel,
+      qwenTtsApiKey: localQwenKey,
+      qwenTtsWorkspaceId: localQwenWorkspace,
+      qwenTtsRegion: localQwenRegion,
+      qwenTtsModel: localQwenModel,
+      qwenTtsVoice: localQwenVoice,
+      qwenTtsAudioFormat: localQwenFormat,
+      qwenTtsEndpoint: localQwenEndpoint,
+      xiaomiTtsApiKey: localXiaomiKey,
+      xiaomiTtsBaseUrl: localXiaomiBaseUrl,
+      xiaomiTtsModel: localXiaomiModel,
+      xiaomiTtsVoice: localXiaomiVoice,
       voicePrompts: {
         minimax: localVoicePromptMinimax.trim() ? localVoicePromptMinimax : undefined,
         fishaudio: localVoicePromptFish.trim() ? localVoicePromptFish : undefined,
+        qwen: localVoicePromptQwen.trim() ? localVoicePromptQwen : undefined,
+        xiaomi: undefined,
         dateVoice: localVoicePromptDate.trim() ? localVoicePromptDate : undefined,
       },
     });
@@ -1161,45 +1494,14 @@ const Settings: React.FC = () => {
     setTimeout(() => setOtherStatusMsg(''), 2000);
   };
 
-  // 选「谁来做语音生成」立即落库——不需要再点下面的保存。
-  // 连同当前「其他 API」草稿一起提交（与保存按钮同一份 payload）：一是即时生效，
-  // 二是避免 [apiConfig] 同步 effect 把刚填、还没保存的 Key 草稿冲掉。
-  const selectTtsProvider = (provider: 'minimax' | 'fishaudio') => {
+  const selectTtsProvider = (provider: 'minimax' | 'fishaudio' | 'qwen' | 'xiaomi') => {
     setLocalTtsProvider(provider);
-    updateApiConfig({
-      minimaxApiKey: localMiniMaxKey,
-      minimaxGroupId: localMiniMaxGroupId,
-      minimaxRegion: localMiniMaxRegion,
-      aceStepApiKey: localAceStepKey,
-      fishAudioApiKey: localFishKey,
-      fishAudioModel: localFishModel,
-      voicePrompts: {
-        minimax: localVoicePromptMinimax.trim() ? localVoicePromptMinimax : undefined,
-        fishaudio: localVoicePromptFish.trim() ? localVoicePromptFish : undefined,
-        dateVoice: localVoicePromptDate.trim() ? localVoicePromptDate : undefined,
-      },
-      ttsProvider: provider,
-    });
-    addToast(provider === 'fishaudio' ? '语音生成已切到鱼声 Fish' : '语音生成已切到 MiniMax', 'success');
+    setOtherStatusMsg('已选择角色说话引擎，点击“保存当前设置”后生效');
   };
 
-  // 选鱼声模型：立即落库（同上，连带草稿一起提交，避免被同步 effect 冲掉）。
   const selectFishModel = (model: string) => {
     setLocalFishModel(model);
-    updateApiConfig({
-      minimaxApiKey: localMiniMaxKey,
-      minimaxGroupId: localMiniMaxGroupId,
-      minimaxRegion: localMiniMaxRegion,
-      aceStepApiKey: localAceStepKey,
-      fishAudioApiKey: localFishKey,
-      ttsProvider: localTtsProvider,
-      fishAudioModel: model,
-      voicePrompts: {
-        minimax: localVoicePromptMinimax.trim() ? localVoicePromptMinimax : undefined,
-        fishaudio: localVoicePromptFish.trim() ? localVoicePromptFish : undefined,
-        dateVoice: localVoicePromptDate.trim() ? localVoicePromptDate : undefined,
-      },
-    });
+    setOtherStatusMsg('模型已选择，点击“保存当前设置”后生效');
   };
 
   const fetchModels = async () => {
@@ -1258,6 +1560,44 @@ const Settings: React.FC = () => {
           addToast('清理失败，请重试', 'error');
       } finally {
           setIsCleaningResidue(false);
+      }
+  };
+
+  // 只清各角色单聊中最新 1000 条以前的记录。保留最新上下文、角色档案/记忆、
+  // 群聊和书库；同时删掉这些旧消息产生过的本地语音缓存，避免只删文字不腾空间。
+  const handleTrimOldChatCache = async () => {
+      if (isTrimmingChatCache) return;
+      setIsTrimmingChatCache(true);
+      try {
+          const counts = await Promise.all(characters.map(async character => ({
+              character,
+              count: await DB.countPrivateMessagesByCharId(character.id),
+          })));
+          const candidates = counts.filter(item => item.count > 1000);
+          const total = candidates.reduce((sum, item) => sum + item.count - 1000, 0);
+          if (!candidates.length) {
+              addToast('每个角色的私聊都没有超过 1000 条，无需清理', 'success');
+              return;
+          }
+          const details = candidates.slice(0, 12).map(item => `• ${item.character.name}：保留最新 1000 条，删除 ${item.count - 1000} 条旧消息`).join('\n');
+          const more = candidates.length > 12 ? `\n• 另外 ${candidates.length - 12} 个角色也会按同样规则清理` : '';
+          const confirmed = window.confirm(`将清理 ${total} 条较早的私聊记录：\n\n${details}${more}\n\n会同时删除这些消息里的图片、表情、文字和已缓存语音；角色记忆、最新 1000 条、群聊、书库和备份文件不会删除。\n\n此操作不可撤销。建议先导出完整备份后再继续。`);
+          if (!confirmed) return;
+          const secondConfirmed = window.confirm('再确认一次：现在开始永久清理旧私聊记录吗？');
+          if (!secondConfirmed) return;
+          let deleted = 0;
+          for (const item of candidates) {
+              const result = await DB.trimPrivateMessages(item.character.id, 1000);
+              deleted += result.deletedCount;
+          }
+          trackEvent('清理旧聊天缓存', { result: 'success' });
+          addToast(`清理完成：删除 ${deleted} 条旧私聊记录，已保留每个角色最新 1000 条`, 'success');
+      } catch (error) {
+          console.error('[Settings] 清理旧聊天缓存失败', error);
+          trackEvent('清理旧聊天缓存', { result: 'failed' });
+          addToast('清理中断，未完成的角色不会受影响；请稍后重试', 'error');
+      } finally {
+          setIsTrimmingChatCache(false);
       }
   };
 
@@ -1809,7 +2149,7 @@ const Settings: React.FC = () => {
                     <div className="p-2 bg-white rounded-lg text-amber-500 shadow-sm"><SpeakerHigh size={18} weight="fill" /></div>
                     <span className="flex-1 min-w-0">
                         <span className="block text-xs font-bold text-slate-700">后台保活</span>
-                        <span className="block text-[10px] text-slate-400 leading-relaxed mt-0.5">循环播放 10 秒静音音频，尽量减少浏览器切到后台后被暂停。</span>
+                        <span className="block text-[10px] text-slate-400 leading-relaxed mt-0.5">循环播放 10 秒极低音量音频；暂停、切回前台或重新打开时会自动尝试恢复。</span>
                     </span>
                     <input
                         type="checkbox"
@@ -1984,6 +2324,13 @@ const Settings: React.FC = () => {
             </button>
             <p className="text-[10px] text-slate-400 px-1 mb-4 leading-relaxed">
                 清理已删除角色遗留的「幽灵表情包」：专属分类的角色没了之后，单聊表情面板看不到它、群聊面板却还冒出来。先扫描列出结果，确认后才会删除。
+            </p>
+
+            <button onClick={handleTrimOldChatCache} disabled={isTrimmingChatCache} className="w-full py-3 mb-2 bg-orange-50 border border-orange-100 text-orange-600 rounded-xl text-xs font-bold flex items-center justify-center gap-2 active:scale-95 transition-all disabled:opacity-50">
+                {isTrimmingChatCache ? '正在清理旧聊天…' : '清理超过 1000 条的旧私聊'}
+            </button>
+            <p className="text-[10px] text-slate-400 px-1 mb-4 leading-relaxed">
+                每个角色只保留最新 1000 条私聊，删除更早的文字、图片、表情和缓存语音来缩小后续备份。不会清理角色记忆、群聊、书库或最新 1000 条；点击后会先列出并要求两次确认。
             </p>
 
             <button onClick={() => setShowResetConfirm(true)} className="w-full py-3 bg-red-50 border border-red-100 text-red-500 rounded-xl text-xs font-bold flex items-center justify-center gap-2">
@@ -2508,6 +2855,9 @@ const Settings: React.FC = () => {
         >
             <div className="space-y-3">
                 <p className="text-[10px] text-slate-400 leading-relaxed">填写 OpenAI 兼容的生图接口。这里的配置会用于后续角色生图，并与聊天 API 分开保存。</p>
+                {imageGenPresets.length > 0 && <div className="flex gap-2 flex-wrap">
+                    {imageGenPresets.map(preset => <button key={preset.id} type="button" onClick={() => loadImageGenerationPreset(preset)} className="px-3 py-1.5 rounded-lg border border-slate-200 bg-white text-[11px] text-slate-600">{preset.name}</button>)}
+                </div>}
                 <div>
                     <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1.5 block pl-1">连接</label>
                     <input type="text" value={localImageGenUrl} onChange={e => { setLocalImageGenUrl(e.target.value); setImageGenTestResult(null); }} placeholder="https://.../v1" className="w-full bg-white/60 border border-slate-200/60 rounded-xl px-4 py-2.5 text-sm font-mono focus:bg-white transition-all" />
@@ -2517,7 +2867,7 @@ const Settings: React.FC = () => {
                     <input type="password" value={localImageGenKey} onChange={e => { setLocalImageGenKey(e.target.value); setImageGenTestResult(null); }} placeholder="sk-..." className="w-full bg-white/60 border border-slate-200/60 rounded-xl px-4 py-2.5 text-sm font-mono focus:bg-white transition-all" />
                 </div>
                 <div>
-                    <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1.5 block pl-1">模型</label>
+                    <div className="flex items-center justify-between mb-1.5"><label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest pl-1">模型</label><span className="flex items-center gap-2"><button type="button" onClick={() => { void fetchImageGenerationModels(); }} disabled={testingImageGenApi || !localImageGenUrl.trim() || !localImageGenKey.trim()} className="text-[10px] text-pink-600 font-bold disabled:text-slate-300">刷新模型列表</button><button type="button" onClick={() => setShowImageModelModal(true)} disabled={!availableImageGenModels.length} className="text-[10px] text-pink-600 font-bold disabled:text-slate-300">选择模型</button></span></div>
                     <input list="image-generation-models" type="text" value={localImageGenModel} onChange={e => { setLocalImageGenModel(e.target.value); setImageGenTestResult(null); }} placeholder="例如 dall-e-3 / flux" className="w-full bg-white/60 border border-slate-200/60 rounded-xl px-4 py-2.5 text-sm font-mono focus:bg-white transition-all" />
                     <datalist id="image-generation-models">{availableImageGenModels.map(model => <option key={model} value={model} />)}</datalist>
                 </div>
@@ -2539,6 +2889,7 @@ const Settings: React.FC = () => {
                     <button type="button" onClick={handleTestImageGenerationApi} disabled={testingImageGenApi || !localImageGenUrl.trim() || !localImageGenKey.trim() || !localImageGenModel.trim()} className="py-3 rounded-2xl font-bold text-pink-600 border border-pink-200 bg-pink-50 active:scale-95 transition-all disabled:opacity-40">{testingImageGenApi ? '测试中…' : '测试连接'}</button>
                     <button type="button" onClick={handleSaveImageGenerationApi} className="py-3 rounded-2xl font-bold text-white bg-pink-500 shadow-lg shadow-pink-500/20 active:scale-95 transition-all">保存生图 API</button>
                 </div>
+                <div className="flex gap-2"><input value={newImagePresetName} onChange={e => setNewImagePresetName(e.target.value)} placeholder="预设名称" className="min-w-0 flex-1 bg-white/60 border border-slate-200/60 rounded-xl px-3 py-2 text-xs" /><button type="button" onClick={saveImageGenerationPreset} className="shrink-0 rounded-xl border border-pink-200 bg-pink-50 px-3 py-2 text-xs font-bold text-pink-600">保存预设</button></div>
                 {imageGenTestResult && <div className={`text-xs px-3 py-2 rounded-xl leading-relaxed ${imageGenTestResult.startsWith('✅') ? 'bg-emerald-50 text-emerald-700' : 'bg-red-50 text-red-600'}`}>{imageGenTestResult}</div>}
             </div>
         </SettingsSection>
@@ -2580,10 +2931,16 @@ const Settings: React.FC = () => {
 
             <div className="space-y-4">
                 <p className="text-[11px] text-slate-400 -mt-1 pl-1 leading-relaxed">
-                    🎙️ 语音生成支持 <span className="font-semibold text-slate-500">MiniMax</span> 和 <span className="font-semibold text-slate-500">鱼声 Fish</span> 两家——下面两边都可以填，最后在底部「当前语音引擎」里二选一。
+                    🎙️ 语音生成支持 <span className="font-semibold text-slate-500">MiniMax</span>、<span className="font-semibold text-slate-500">鱼声 Fish</span>、<span className="font-semibold text-slate-500">通义千问</span> 和 <span className="font-semibold text-slate-500">小米 MiMo</span>。每项默认收起，配置都会保留。
                 </p>
 
-                <div className="group">
+                {otherApiPresets.length > 0 && <div className="flex gap-2 flex-wrap">
+                    {otherApiPresets.map(preset => <button key={preset.id} type="button" onClick={() => loadOtherApiPreset(preset)} className="px-3 py-1.5 rounded-lg border border-slate-200 bg-white text-[11px] text-slate-600">{preset.name}</button>)}
+                </div>}
+
+                <div className="group rounded-2xl border border-slate-200/70 bg-white/50 p-3">
+                    <button type="button" onClick={() => setOtherApiOpen(prev => ({ ...prev, minimax: !prev.minimax }))} className="w-full flex items-center justify-between text-left"><span className="text-[12px] font-bold text-slate-600">MiniMax</span><span className="text-[11px] text-slate-400">{otherApiOpen.minimax ? '收起' : localMiniMaxKey ? '已配置 · 展开' : '展开配置'}</span></button>
+                    {otherApiOpen.minimax && <div className="mt-3 space-y-3">
                     <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1.5 block pl-1">MiniMax 服务器</label>
                     <div className="flex bg-white/50 border border-slate-200/60 rounded-xl p-1 gap-1">
                         <button
@@ -2606,22 +2963,69 @@ const Settings: React.FC = () => {
                             ? '海外站（api.minimax.io）— 请使用海外账号签发的 Key。'
                             : '国服（api.minimaxi.com）— 默认，适配国内账号。'}
                     </p>
+                    <div>
+                        <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1.5 block pl-1">MiniMax Key（可选）</label>
+                        <input type="password" name="minimax-api-secret" autoComplete="new-password" spellCheck={false} value={localMiniMaxKey} onChange={(e) => setLocalMiniMaxKey(e.target.value)} placeholder="MiniMax API Secret（留空则复用聊天 Key）" className="w-full bg-white/50 border border-slate-200/60 rounded-xl px-4 py-2.5 text-sm font-mono focus:bg-white transition-all" />
+                    </div>
+                    <div>
+                        <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1.5 block pl-1">MiniMax Group ID（可选）</label>
+                        <input type="text" value={localMiniMaxGroupId} onChange={(e) => setLocalMiniMaxGroupId(e.target.value)} placeholder="group_id（部分账号/模型需要）" className="w-full bg-white/50 border border-slate-200/60 rounded-xl px-4 py-2.5 text-sm font-mono focus:bg-white transition-all" />
+                    </div>
+                    <button type="button" onClick={() => { void testOtherApis(); }} disabled={testingOtherApis} className="w-full rounded-xl border border-amber-200 bg-amber-50 px-3 py-2.5 text-xs font-bold text-amber-700 active:scale-95 disabled:opacity-50">{testingOtherApis ? '测试中…' : '测试连接'}</button>
+                    </div>}
                 </div>
 
-                <div className="group">
-                    <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1.5 block pl-1">MiniMax Key (可选)</label>
-                    <input type="password" name="minimax-api-secret" autoComplete="new-password" spellCheck={false} value={localMiniMaxKey} onChange={(e) => setLocalMiniMaxKey(e.target.value)} placeholder="MiniMax API Secret（留空则复用 Key）" className="w-full bg-white/50 border border-slate-200/60 rounded-xl px-4 py-2.5 text-sm font-mono focus:bg-white transition-all" />
-                    <p className="text-[11px] text-slate-400 mt-1 pl-1">电话 / 音色查询优先使用这个 Key，空着时回退通用 Key。</p>
+                {/* 阿里云 Qwen-Audio-TTS / CosyVoice */}
+                <div className="group rounded-2xl border border-slate-200/70 bg-white/50 p-3">
+                    <button type="button" onClick={() => setOtherApiOpen(prev => ({ ...prev, qwen: !prev.qwen }))} className="w-full flex items-center justify-between text-left"><span className="text-[12px] font-bold text-slate-600">通义千问 TTS</span><span className="text-[11px] text-slate-400">{otherApiOpen.qwen ? '收起' : localQwenKey ? '已配置 · 展开' : '展开配置'}</span></button>
+                    {otherApiOpen.qwen && <div className="mt-3"><label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-1.5 block pl-1">Qwen TTS（阿里云百炼）</label>
+                    <input type="password" name="qwen-tts-api-key" autoComplete="new-password" spellCheck={false} value={localQwenKey} onChange={e => setLocalQwenKey(e.target.value)} placeholder="DashScope API Key" className="w-full bg-white/70 border border-slate-200/60 rounded-xl px-4 py-2.5 text-sm font-mono focus:bg-white transition-all" />
+                    <input type="text" value={localQwenWorkspace} onChange={e => setLocalQwenWorkspace(e.target.value)} placeholder="Workspace ID（业务空间 ID）" className="w-full mt-2 bg-white/70 border border-slate-200/60 rounded-xl px-4 py-2.5 text-sm font-mono focus:bg-white transition-all" />
+                    <div className="grid grid-cols-2 gap-2 mt-2">
+                        <select value={localQwenRegion} onChange={e => setLocalQwenRegion(e.target.value as 'beijing' | 'singapore')} className="w-full bg-white/70 border border-slate-200/60 rounded-xl px-3 py-2.5 text-sm focus:bg-white transition-all">
+                            <option value="beijing">华北 2（北京）</option>
+                            <option value="singapore">新加坡</option>
+                        </select>
+                        <select value={localQwenFormat} onChange={e => setLocalQwenFormat(e.target.value as 'mp3' | 'wav' | 'pcm' | 'opus')} className="w-full bg-white/70 border border-slate-200/60 rounded-xl px-3 py-2.5 text-sm focus:bg-white transition-all">
+                            <option value="mp3">MP3</option><option value="wav">WAV</option><option value="pcm">PCM（自动封装 WAV）</option><option value="opus">Opus</option>
+                        </select>
+                    </div>
+                    <div className="mt-2">
+                        <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1 block pl-1">模型</label>
+                        <select value={localQwenModel} onChange={e => selectQwenModel(e.target.value)} className="w-full bg-white/70 border border-slate-200/60 rounded-xl px-3 py-2.5 text-sm focus:bg-white transition-all">
+                            {qwenModelOptions.map(option => <option key={option.id} value={option.id}>{option.name} · {option.description}</option>)}
+                        </select>
+                    </div>
+                    <div className="mt-2">
+                        <div className="flex items-center justify-between gap-2 mb-1 pl-1">
+                            <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">音色</label>
+                            <span className="text-[10px] text-slate-400">随模型自动筛选</span>
+                        </div>
+                        <div className="flex gap-2">
+                            <select value={showCustomQwenVoice ? '__custom__' : localQwenVoice} onChange={e => {
+                                if (e.target.value === '__custom__') { setShowCustomQwenVoice(true); return; }
+                                setShowCustomQwenVoice(false); setLocalQwenVoice(e.target.value);
+                            }} className="min-w-0 flex-1 bg-white/70 border border-slate-200/60 rounded-xl px-3 py-2.5 text-sm focus:bg-white transition-all">
+                                {!qwenVoiceOptions.some(voice => voice.id === localQwenVoice) && !showCustomQwenVoice && <option value={localQwenVoice}>{localQwenVoice}（自定义）</option>}
+                                {qwenVoiceOptions.map(voice => <option key={voice.id} value={voice.id}>{voice.name} · {voice.description}</option>)}
+                                <option value="__custom__">自定义 / 复刻音色…</option>
+                            </select>
+                            <button type="button" onClick={() => { void previewQwenVoice(localQwenVoice); }} disabled={qwenPreviewingVoice !== null || !localQwenVoice.trim()} className="shrink-0 rounded-xl border border-sky-200 bg-sky-50 px-3 text-xs font-bold text-sky-700 active:scale-95 disabled:opacity-50">
+                                {qwenPreviewingVoice === localQwenVoice ? '试听中…' : '试听'}
+                            </button>
+                        </div>
+                        {showCustomQwenVoice && <input type="text" value={localQwenVoice} onChange={e => setLocalQwenVoice(e.target.value)} placeholder="填写你的复刻音色 ID" className="w-full mt-2 bg-white/70 border border-slate-200/60 rounded-xl px-4 py-2.5 text-sm font-mono focus:bg-white transition-all" />}
+                        {qwenVoiceOptions.find(voice => voice.id === localQwenVoice) && <p className="text-[11px] text-slate-400 mt-1 pl-1">{qwenVoiceOptions.find(voice => voice.id === localQwenVoice)?.description}</p>}
+                    </div>
+                    <input type="text" value={localQwenEndpoint} onChange={e => setLocalQwenEndpoint(e.target.value)} placeholder="自建 WebSocket 中转地址（可选，留空用项目 Worker）" className="w-full mt-2 bg-white/70 border border-slate-200/60 rounded-xl px-4 py-2.5 text-xs font-mono focus:bg-white transition-all" />
+                    <p className="text-[11px] text-slate-400 mt-1 pl-1 leading-relaxed">浏览器不能直接给 WebSocket 加鉴权请求头，留空会使用项目 Worker 转发到阿里云。Worker 只转发，不保存你的 Key。</p>
+                    <button type="button" onClick={() => { void testQwenApi(); }} disabled={testingOtherApis} className="w-full mt-2 rounded-xl border border-sky-200 bg-sky-50 px-3 py-2.5 text-xs font-bold text-sky-700 active:scale-95 disabled:opacity-50">{testingOtherApis ? '测试中…' : '测试连接'}</button>
+                    </div>}
                 </div>
 
-                <div className="group">
-                    <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1.5 block pl-1">MiniMax Group ID (可选)</label>
-                    <input type="text" value={localMiniMaxGroupId} onChange={(e) => setLocalMiniMaxGroupId(e.target.value)} placeholder="group_id（部分账号/模型需要）" className="w-full bg-white/50 border border-slate-200/60 rounded-xl px-4 py-2.5 text-sm font-mono focus:bg-white transition-all" />
-                    <p className="text-[11px] text-slate-400 mt-1 pl-1">如控制台给了 group_id，请填这里；会透传到 TTS 请求体和代理日志。</p>
-                </div>
-
-                {/* 鱼声 Fish Audio —— 与 MiniMax 对等的另一套语音系统，中性样式、不做视觉偏向 */}
-                <div className="group">
+                <div className="group rounded-2xl border border-slate-200/70 bg-white/50 p-3">
+                    <button type="button" onClick={() => setOtherApiOpen(prev => ({ ...prev, fish: !prev.fish }))} className="w-full flex items-center justify-between text-left"><span className="text-[12px] font-bold text-slate-600">鱼声 Fish Audio</span><span className="text-[11px] text-slate-400">{otherApiOpen.fish ? '收起' : localFishKey ? '已配置 · 展开' : '展开配置'}</span></button>
+                    {otherApiOpen.fish && <div className="mt-3">
                     <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1.5 block pl-1">鱼声 Fish Audio Key</label>
                     <input type="password" name="fish-api-key" autoComplete="new-password" spellCheck={false} value={localFishKey} onChange={(e) => setLocalFishKey(e.target.value)} placeholder="Fish Audio API Key（fish.audio 控制台签发）" className="w-full bg-white/50 border border-slate-200/60 rounded-xl px-4 py-2.5 text-sm font-mono focus:bg-white transition-all" />
                     <p className="text-[11px] text-slate-400 mt-1 pl-1">在 <a href="https://fish.audio/zh-CN/developers/" target="_blank" rel="noopener noreferrer" className="text-primary hover:underline font-semibold">fish.audio 开发者页</a> 拿 Key（<span className="text-amber-600 font-medium">需梯子</span>）。角色音色在「角色 → 语音」里填 reference_id。</p>
@@ -2642,16 +3046,31 @@ const Settings: React.FC = () => {
                             ? '免费版：和 s2.1-pro 同一个模型、$0，但不保证 TTFA / DPA，适合自用测试。选了立即生效。'
                             : '切换立即生效。角色也可在「角色 → 语音」单独覆盖模型（留空则用这里的全局默认）。'}
                     </p>
+                    </div>}
                 </div>
 
-                {/* 底部：当前语音引擎二选一 —— radio 样式（不是 tab 切换，配置都在上面，这里只挑用哪家） */}
+                <div className="group rounded-2xl border border-slate-200/70 bg-white/50 p-3">
+                    <button type="button" onClick={() => setOtherApiOpen(prev => ({ ...prev, xiaomi: !prev.xiaomi }))} className="w-full flex items-center justify-between text-left"><span className="text-[12px] font-bold text-slate-600">小米 MiMo TTS</span><span className="text-[11px] text-slate-400">{otherApiOpen.xiaomi ? '收起' : localXiaomiKey ? '已配置 · 展开' : '展开配置'}</span></button>
+                    {otherApiOpen.xiaomi && <div className="mt-3 space-y-2">
+                        <input type="password" name="xiaomi-mimo-api-key" autoComplete="new-password" spellCheck={false} value={localXiaomiKey} onChange={e => setLocalXiaomiKey(e.target.value)} placeholder="小米 MiMo API Key" className="w-full bg-white/70 border border-slate-200/60 rounded-xl px-4 py-2.5 text-sm font-mono focus:bg-white transition-all" />
+                        <input type="url" value={localXiaomiBaseUrl} onChange={e => setLocalXiaomiBaseUrl(e.target.value)} placeholder="https://api.xiaomimimo.com/v1" className="w-full bg-white/70 border border-slate-200/60 rounded-xl px-4 py-2.5 text-xs font-mono focus:bg-white transition-all" />
+                        <select value={localXiaomiModel} onChange={e => setLocalXiaomiModel(e.target.value)} className="w-full bg-white/70 border border-slate-200/60 rounded-xl px-3 py-2.5 text-sm focus:bg-white transition-all">{XIAOMI_TTS_MODELS.map(model => <option key={model.id} value={model.id}>{model.name} · {model.description}</option>)}</select>
+                        <div className="flex gap-2"><select value={localXiaomiVoice} onChange={e => setLocalXiaomiVoice(e.target.value)} className="min-w-0 flex-1 bg-white/70 border border-slate-200/60 rounded-xl px-3 py-2.5 text-sm focus:bg-white transition-all">{XIAOMI_TTS_VOICES.map(voice => <option key={voice.id} value={voice.id}>{voice.name} · {voice.description}</option>)}</select><button type="button" onClick={() => { void previewXiaomiVoice(localXiaomiVoice); }} disabled={xiaomiPreviewingVoice !== null} className="shrink-0 rounded-xl border border-orange-200 bg-orange-50 px-3 text-xs font-bold text-orange-700 disabled:opacity-50">{xiaomiPreviewingVoice === localXiaomiVoice ? '试听中…' : '试听'}</button></div>
+                        <button type="button" onClick={() => { void testXiaomiApi(); }} disabled={testingOtherApis} className="w-full rounded-xl border border-orange-200 bg-orange-50 px-3 py-2.5 text-xs font-bold text-orange-700 active:scale-95 disabled:opacity-50">{testingOtherApis ? '测试中…' : '测试连接'}</button>
+                        <p className="text-[11px] text-slate-400 leading-relaxed">默认使用小米官方 `mimo-v2.5-tts` 内置音色。小米的 Key 只在本机保存，并由 Worker 单次转发，不会被保存到服务器。</p>
+                    </div>}
+                </div>
+
+                {/* 底部：当前语音引擎 —— radio 样式（配置都在上面，这里只挑用哪家） */}
                 <div className="group rounded-2xl border border-slate-200/70 bg-slate-50/60 p-3">
-                    <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-0.5 block">当前语音引擎（二选一）</label>
-                    <p className="text-[11px] text-slate-400 mb-2.5">聊天语音条 / 约会 / 电话用哪一家。上面两边的 Key 都会保留，这里只切换当前生效的。</p>
+                    <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-0.5 block">角色说话引擎</label>
+                    <p className="text-[11px] text-slate-400 mb-2.5">只决定角色在聊天语音和视频通话里说话用哪一家。书库朗读在书内的“音效”单独选择，不会影响这里。</p>
                     <div className="space-y-2">
                         {([
                             ['minimax', 'MiniMax', '国内可直连，默认推荐'],
                             ['fishaudio', '鱼声 Fish', '需科学上网（梯子 / 魔法），否则一直合成失败'],
+                            ['qwen', 'Qwen TTS', '阿里云百炼，使用 WebSocket 实时合成'],
+                            ['xiaomi', '小米 MiMo', '免费额度友好，适合长篇朗读'],
                         ] as const).map(([key, name, desc]) => {
                             const active = localTtsProvider === key;
                             return (
@@ -2698,6 +3117,7 @@ const Settings: React.FC = () => {
                             {([
                                 ['minimax', 'MiniMax 语音指南', localVoicePromptMinimax, setLocalVoicePromptMinimax, VOICE_ACTING_GUIDE, '聊天 + 电话 · MiniMax 引擎时生效'] as const,
                                 ['fishaudio', '鱼声 Fish 语音指南', localVoicePromptFish, setLocalVoicePromptFish, FISH_VOICE_ACTING_GUIDE, '聊天 + 电话 · 鱼声引擎时生效'] as const,
+                                ['qwen', 'Qwen TTS 语音指南', localVoicePromptQwen, setLocalVoicePromptQwen, QWEN_VOICE_ACTING_GUIDE, '聊天 + 电话 · Qwen 引擎时生效'] as const,
                                 ['dateVoice', '见面（约会）语音情绪', localVoicePromptDate, setLocalVoicePromptDate, DATE_VOICE_GUIDE, '见面专用 [v:xxx] 规则 · 角色开了见面语音时生效，与引擎无关'] as const,
                             ]).map(([key, title, value, setValue, def, hint]) => {
                                 const active = localTtsProvider === key;
@@ -2824,9 +3244,56 @@ const Settings: React.FC = () => {
                     )}
                 </div>
 
-                <button onClick={handleSaveOtherApis} className="w-full py-3 rounded-2xl font-bold text-white shadow-lg shadow-amber-500/20 bg-amber-500 active:scale-95 transition-all mt-2">
-                    {otherStatusMsg || '保存其他 API'}
+                <div className="flex gap-2 mt-2"><input value={newOtherPresetName} onChange={e => setNewOtherPresetName(e.target.value)} placeholder="其他 API 预设名称" className="min-w-0 flex-1 bg-white/60 border border-slate-200/60 rounded-xl px-3 py-2 text-xs" /><button type="button" onClick={saveOtherApiPreset} className="shrink-0 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-bold text-amber-600">保存预设</button></div>
+                <button onClick={handleSaveOtherApis} className="w-full mt-2 py-3 rounded-2xl font-bold text-white shadow-lg shadow-amber-500/20 bg-amber-500 active:scale-95 transition-all">
+                    {otherStatusMsg || '保存当前设置'}
                 </button>
+            </div>
+        </SettingsSection>
+
+        <SettingsSection
+            title="语音识别"
+            icon={<div className="p-2 bg-emerald-100 rounded-xl text-emerald-600"><Microphone size={18} weight="fill" /></div>}
+            badge={<span className={`text-[9px] font-bold px-2 py-1 rounded-full ${localSttProvider === 'siliconflow' ? 'bg-emerald-100 text-emerald-600' : 'bg-slate-100 text-slate-500'}`}>{localSttProvider === 'siliconflow' ? '硅基流动' : '系统网页'}</span>}
+        >
+            <div className="space-y-3 py-1">
+                <p className="text-[10px] text-slate-400 leading-relaxed">视频通话的麦克风识别服务。系统网页识别不需要 Key；硅基流动模式默认沿用向量配置里的连接和 Key，也可以在这里单独修改。</p>
+                <div className="grid grid-cols-2 gap-2">
+                    {([
+                        ['browser', '系统网页识别', '浏览器自带 SpeechRecognition'],
+                        ['siliconflow', '硅基流动', 'SenseVoiceSmall 等模型'],
+                    ] as const).map(([value, title, desc]) => (
+                        <button key={value} type="button" onClick={() => setLocalSttProvider(value)} className={`text-left rounded-2xl border px-3 py-3 transition-all ${localSttProvider === value ? 'border-emerald-400 bg-emerald-50 shadow-sm' : 'border-slate-200 bg-white/60'}`}>
+                            <div className="text-xs font-bold text-slate-700">{title}</div>
+                            <div className="text-[10px] text-slate-400 mt-1">{desc}</div>
+                        </button>
+                    ))}
+                </div>
+                {localSttProvider === 'siliconflow' && <>
+                    <div>
+                        <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1.5 block pl-1">连接</label>
+                        <input type="text" value={localSttUrl} onChange={e => { setLocalSttUrl(e.target.value); setSttStatus(''); }} placeholder={DEFAULT_SILICONFLOW_STT_URL} className="w-full bg-white/60 border border-slate-200/60 rounded-xl px-4 py-2.5 text-sm font-mono focus:bg-white transition-all" />
+                    </div>
+                    <div>
+                        <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1.5 block pl-1">秘钥</label>
+                        <input type="password" value={localSttKey} onChange={e => { setLocalSttKey(e.target.value); setSttStatus(''); }} placeholder="sk-..." className="w-full bg-white/60 border border-slate-200/60 rounded-xl px-4 py-2.5 text-sm font-mono focus:bg-white transition-all" />
+                    </div>
+                    <div>
+                        <div className="flex items-center justify-between mb-1.5"><label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest pl-1">模型</label><button type="button" onClick={() => { void fetchSpeechRecognitionModels(); }} disabled={testingStt} className="text-[10px] text-emerald-600 font-bold disabled:text-slate-300">刷新模型列表</button></div>
+                        {availableSttModels.length > 0 && <div className="flex gap-2 mb-2"><input value={sttModelFilter} onChange={e => setSttModelFilter(e.target.value)} placeholder="搜索模型" className="min-w-0 flex-1 bg-white/60 border border-slate-200/60 rounded-xl px-3 py-2 text-xs" /><select value={localSttModel} onChange={e => setLocalSttModel(e.target.value)} className="min-w-0 flex-1 bg-white/60 border border-slate-200/60 rounded-xl px-3 py-2 text-xs"><option value="">选择模型</option>{availableSttModels.filter(model => !sttModelFilter.trim() || model.toLowerCase().includes(sttModelFilter.trim().toLowerCase())).map(model => <option key={model} value={model}>{model}</option>)}</select></div>}
+                        <input list="speech-recognition-models" type="text" value={localSttModel} onChange={e => { setLocalSttModel(e.target.value); setSttStatus(''); }} placeholder={DEFAULT_SILICONFLOW_STT_MODEL} className="w-full bg-white/60 border border-slate-200/60 rounded-xl px-4 py-2.5 text-sm font-mono focus:bg-white transition-all" />
+                        <datalist id="speech-recognition-models">{availableSttModels.map(model => <option key={model} value={model} />)}</datalist>
+                    </div>
+                </>}
+                <div>
+                    <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1.5 block pl-1">语言</label>
+                    <select value={localSttLanguage} onChange={e => setLocalSttLanguage(e.target.value)} className="w-full bg-white/60 border border-slate-200/60 rounded-xl px-4 py-2.5 text-sm focus:bg-white transition-all">
+                        <option value="zh-CN">中文（简体）</option><option value="zh-TW">中文（繁体）</option><option value="en-US">English</option><option value="ja-JP">日本語</option><option value="ko-KR">한국어</option><option value="auto">自动识别</option>
+                    </select>
+                </div>
+                {localSttProvider === 'siliconflow' && <label className="flex items-center gap-3 rounded-xl border border-emerald-100 bg-emerald-50/60 px-3 py-3 cursor-pointer"><span className="flex-1"><span className="block text-xs font-bold text-slate-700">清理自动情绪 emoji</span><span className="block text-[10px] text-slate-400 mt-1">去掉 SenseVoice 追加在识别文字末尾的情绪表情。</span></span><input type="checkbox" checked={localSttCleanEmoji} onChange={e => setLocalSttCleanEmoji(e.target.checked)} className="sr-only peer" /><span className="w-10 h-6 bg-slate-200 rounded-full relative transition-colors peer-checked:bg-emerald-500 after:content-[''] after:absolute after:w-4 after:h-4 after:bg-white after:rounded-full after:left-1 after:top-1 after:transition-transform peer-checked:after:translate-x-4" /></label>}
+                <div className="grid grid-cols-2 gap-2"><button type="button" onClick={() => { void handleTestSpeechRecognition(); }} disabled={testingStt} className="py-3 rounded-2xl font-bold text-emerald-700 border border-emerald-200 bg-emerald-50 active:scale-95 transition-all disabled:opacity-50">{testingStt ? '测试中…' : '测试连接'}</button><button type="button" onClick={handleSaveSpeechRecognition} className="py-3 rounded-2xl font-bold text-white bg-emerald-500 shadow-lg shadow-emerald-500/20 active:scale-95 transition-all">保存语音识别</button></div>
+                {sttStatus && <div className={`text-[11px] text-center px-3 py-2 rounded-xl ${sttStatus.startsWith('✅') || sttStatus.startsWith('已保存') ? 'bg-emerald-50 text-emerald-700' : sttStatus.startsWith('❌') ? 'bg-rose-50 text-rose-600' : 'bg-slate-100 text-slate-500'}`}>{sttStatus}</div>}
             </div>
         </SettingsSection>
 
@@ -3650,6 +4117,17 @@ const Settings: React.FC = () => {
                     </div>
                 </div>
             );
+        })()}
+      </Modal>
+
+      <Modal isOpen={showImageModelModal} title="选择生图模型" onClose={() => setShowImageModelModal(false)}>
+        {(() => {
+            const { filtered, commonPrefix } = imageModelPickerView;
+            return <div className="space-y-3 p-1">
+                <div className="flex gap-2"><input value={localImageGenModel} onChange={e => setLocalImageGenModel(e.target.value)} placeholder="手动输入模型名称..." className="min-w-0 flex-1 bg-white/50 border border-slate-200/60 rounded-xl px-4 py-2.5 text-sm font-mono" /><button type="button" onClick={() => setShowImageModelModal(false)} className="px-4 py-2.5 bg-pink-500 text-white text-sm font-bold rounded-xl">确定</button></div>
+                <input value={imageModelFilter} onChange={e => setImageModelFilter(e.target.value)} placeholder={`搜索 ${availableImageGenModels.length} 个模型...`} className="w-full bg-slate-50 border border-slate-200/60 rounded-xl px-4 py-2 text-xs" />
+                <div className="max-h-[40vh] overflow-y-auto no-scrollbar space-y-2">{filtered.length ? filtered.map(model => <button key={model} type="button" onClick={() => { setLocalImageGenModel(model); setShowImageModelModal(false); }} className={`w-full text-left px-4 py-3 rounded-xl text-sm font-mono ${model === localImageGenModel ? 'bg-pink-50 text-pink-600 font-bold' : 'bg-slate-50 text-slate-600'}`}>{commonPrefix && model.startsWith(commonPrefix) ? <><span className="text-slate-400">{commonPrefix}</span>{model.slice(commonPrefix.length)}</> : model}</button>) : <div className="text-center text-slate-400 py-8 text-xs">没有匹配的模型</div>}</div>
+            </div>;
         })()}
       </Modal>
 

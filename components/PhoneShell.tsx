@@ -20,6 +20,7 @@ const lazyApp = (factory: () => Promise<{ default: React.ComponentType<any> }>):
   Comp.preload = factory;
   return Comp;
 };
+const CompanionHome = lazyApp(() => import('./os/CompanionHome'));
 
 // 预热 React.lazy 的「负载」本身：不仅下载模块，还把 lazy 内部状态推进到 resolved，
 // 使首次渲染该 App 时不再 suspend —— 杜绝切换瞬间露出外壳粉紫底色（深色 App 上尤其扎眼）的那一帧闪烁。
@@ -876,7 +877,7 @@ const PhoneShell: React.FC = () => {
       case AppID.WorldHome: return <WorldHomeApp />;
       case AppID.CharCreatorDev: return <CharCreatorDevApp />;
       case AppID.Launcher:
-      default: return <Launcher />;
+      default: return theme.skin === 'companion' ? <CompanionHome /> : <Launcher />;
     }
   };
 

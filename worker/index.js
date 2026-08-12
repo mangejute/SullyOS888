@@ -15,7 +15,7 @@ function corsHeaders(origin) {
   return {
     "Access-Control-Allow-Origin": origin || "*",
     "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
-    "Access-Control-Allow-Headers": "Content-Type, Authorization, Depth, X-Brave-API-Key, X-Notion-API-Key, X-Feishu-Token, X-Xhs-Cookie, X-Xhs-Platform, X-Rnote-API-Key, X-Xhs-Experiment-Ack, X-Netease-Cookie, X-WebDAV-Method, X-WebDAV-Depth, X-WebDAV-Range, X-GitHub-Method, X-GitHub-Api-Version, X-CF-Method, Mcp-Session-Id, Accept, Range",
+    "Access-Control-Allow-Headers": "Content-Type, Authorization, Depth, X-Brave-API-Key, X-Notion-API-Key, X-Feishu-Token, X-Xhs-Cookie, X-Xhs-Platform, X-Rnote-API-Key, X-Xhs-Experiment-Ack, X-Netease-Cookie, X-WebDAV-Method, X-WebDAV-Depth, X-WebDAV-Range, X-GitHub-Method, X-GitHub-Api-Version, X-CF-Method, X-Xiaomi-TTS-Base-Url, Mcp-Session-Id, Accept, Range",
     "Access-Control-Expose-Headers": "Mcp-Session-Id",
     "Access-Control-Max-Age": "86400",
   };
@@ -3763,6 +3763,71 @@ export default {
       }
     }
 
+    // ========== Qwen-Audio-TTS / CosyVoice WebSocket 代理 ==========
+    // 浏览器 WebSocket API 不能在握手中附加 Authorization；前端把 API Key 经 WSS
+    // 子协议临时带到这里，本 Worker 将它仅用于本次上游握手，不记录、不存储。
+    // 前端连接：wss://<worker>/qwen-tts/ws?workspace=<id>&region=cn-beijing
+    if (url.pathname === '/qwen-tts/ws') {
+      if (request.headers.get('Upgrade')?.toLowerCase() !== 'websocket') {
+        return jsonResponse({ error: 'WebSocket upgrade required' }, { status: 426, origin });
+      }
+      const workspace = (url.searchParams.get('workspace') || '').trim();
+      const region = (url.searchParams.get('region') || 'cn-beijing').trim();
+      if (!/^[A-Za-z0-9-]{1,128}$/.test(workspace)) {
+        return jsonResponse({ error: 'Invalid Workspace ID' }, { status: 400, origin });
+      }
+      if (region !== 'cn-beijing' && region !== 'ap-southeast-1') {
+        return jsonResponse({ error: 'Unsupported region' }, { status: 400, origin });
+      }
+      const protocols = (request.headers.get('Sec-WebSocket-Protocol') || '')
+        .split(',').map(item => item.trim()).filter(Boolean);
+      const authProtocol = protocols.find(item => item.startsWith('sully-qwen-auth.'));
+      if (!authProtocol) {
+        return jsonResponse({ error: 'Missing Qwen API key' }, { status: 401, origin });
+      }
+      let apiKey = '';
+      try {
+        const encoded = authProtocol.slice('sully-qwen-auth.'.length).replace(/-/g, '+').replace(/_/g, '/');
+        apiKey = atob(encoded + '='.repeat((4 - encoded.length % 4) % 4));
+      } catch {
+        return jsonResponse({ error: 'Invalid Qwen API key encoding' }, { status: 400, origin });
+      }
+      if (!apiKey) return jsonResponse({ error: 'Missing Qwen API key' }, { status: 401, origin });
+      try {
+        const upstream = await fetch(`wss://${workspace}.${region}.maas.aliyuncs.com/api-ws/v1/inference`, {
+          headers: {
+            Upgrade: 'websocket',
+            Connection: 'Upgrade',
+            Authorization: `Bearer ${apiKey}`,
+            'X-DashScope-WorkSpace': workspace,
+            'User-Agent': 'SullyOS-Qwen-TTS-Proxy/1.0',
+          },
+        });
+        if (!upstream.webSocket) {
+          const detail = await upstream.text().catch(() => '');
+          return jsonResponse({ error: 'Qwen upstream WebSocket failed', detail: detail.slice(0, 240) }, { status: upstream.status || 502, origin });
+        }
+        const pair = new WebSocketPair();
+        const client = pair[0];
+        const server = pair[1];
+        const upstreamSocket = upstream.webSocket;
+        server.accept();
+        upstreamSocket.accept();
+        const closeQuietly = (socket, code, reason) => {
+          try { socket.close(code, reason); } catch { try { socket.close(); } catch {} }
+        };
+        server.addEventListener('message', event => { try { upstreamSocket.send(event.data); } catch { closeQuietly(server, 1011, 'Upstream send failed'); } });
+        upstreamSocket.addEventListener('message', event => { try { server.send(event.data); } catch { closeQuietly(upstreamSocket, 1011, 'Client send failed'); } });
+        server.addEventListener('close', event => closeQuietly(upstreamSocket, event.code, event.reason));
+        upstreamSocket.addEventListener('close', event => closeQuietly(server, event.code, event.reason));
+        server.addEventListener('error', () => closeQuietly(upstreamSocket, 1011, 'Client socket error'));
+        upstreamSocket.addEventListener('error', () => closeQuietly(server, 1011, 'Upstream socket error'));
+        return new Response(null, { status: 101, webSocket: client });
+      } catch (e) {
+        return jsonResponse({ error: 'Qwen WebSocket proxy failed', detail: String(e && e.message || e) }, { status: 502, origin });
+      }
+    }
+
     // ========== 鱼声 Fish Audio TTS 代理 (静态部署绕 CORS, 纯透传) ==========
     // 前端 POST /fishaudio/tts?model=s2.1-pro  + Authorization: Bearer <fish key>
     // body = { text, reference_id, format, ... }；返回二进制音频(mp3)。
@@ -3793,6 +3858,32 @@ export default {
         return new Response(upstream.body, { status: upstream.status, headers: respHeaders });
       } catch (e) {
         return jsonResponse({ error: 'Fish Audio upstream fetch failed', detail: String(e && e.message || e) }, { status: 502, origin });
+      }
+    }
+
+    // ========== 小米 MiMo TTS 代理（OpenAI 兼容 chat/completions 音频模式） ==========
+    // 前端只把用户自己的 Key 用在本次 Authorization 透传；Worker 不记录、不保存该 Key。
+    if (url.pathname === '/xiaomi-tts') {
+      if (request.method !== 'POST') return jsonResponse({ error: 'Method not allowed' }, { status: 405, origin });
+      const auth = request.headers.get('Authorization');
+      if (!auth) return jsonResponse({ error: 'Missing Xiaomi MiMo API key' }, { status: 401, origin });
+      const configuredBase = (request.headers.get('X-Xiaomi-TTS-Base-Url') || 'https://api.xiaomimimo.com/v1').replace(/\/+$/, '');
+      let target;
+      try { target = new URL(`${configuredBase}/chat/completions`); } catch { return jsonResponse({ error: 'Invalid Xiaomi MiMo base URL' }, { status: 400, origin }); }
+      // 仅允许官方小米域名或用户自己的 HTTPS 兼容中转，阻断 Worker 被用作任意内网代理。
+      if (target.protocol !== 'https:' || (!/\.xiaomimimo\.com$/i.test(target.hostname) && !/\.xiaomi\.com$/i.test(target.hostname))) {
+        return jsonResponse({ error: 'Unsupported Xiaomi MiMo endpoint' }, { status: 400, origin });
+      }
+      try {
+        const upstream = await fetch(target.toString(), {
+          method: 'POST',
+          headers: { 'Authorization': auth, 'Content-Type': 'application/json', 'Accept': 'application/json' },
+          body: await request.text(),
+        });
+        const text = await upstream.text();
+        return new Response(text, { status: upstream.status, headers: { 'Content-Type': upstream.headers.get('Content-Type') || 'application/json; charset=utf-8', ...corsHeaders(origin) } });
+      } catch (e) {
+        return jsonResponse({ error: 'Xiaomi MiMo upstream fetch failed', detail: String(e && e.message || e) }, { status: 502, origin });
       }
     }
 

@@ -35,6 +35,7 @@ interface ChatInputAreaProps {
     /** 提供时整体替换内置 actions 双页网格——群聊传自己的功能格。不传 = 原行为 */
     actionsContent?: React.ReactNode;
     onPanelAction: (type: string, payload?: any) => void;
+    /** 选图后立即作为聊天气泡发送；是否请求角色回复由右侧发送按钮决定。 */
     onImageSelect: (file: File) => void | Promise<void>;
     isSummarizing: boolean;
     // Categories Support
@@ -149,6 +150,7 @@ const ChatInputArea: React.FC<ChatInputAreaProps> = ({
         // 先清空 input，方便用户随后再次选择同一张图。
         e.target.value = '';
         for (const file of files) {
+            // 图片照常立即展示在聊天里；右侧发送按钮才触发角色针对这一组图片回复。
             await onImageSelect(file);
         }
     };
@@ -701,6 +703,10 @@ const ChatInputArea: React.FC<ChatInputAreaProps> = ({
                                     white-space: nowrap;
                                 }
                                 .sully-action-popover .sully-action-list > button::after { content: '›'; margin-left: auto; color: #8e8e93; font-size: 16px; line-height: 1; }
+                                .sully-action-popover .sully-action-list + .sully-action-list {
+                                    border-top: 1px solid rgba(60, 60, 67, 0.10);
+                                    padding-top: 0 !important;
+                                }
                             `}</style>
                             <div className="flex shrink-0 items-center justify-between border-b border-black/[0.07] px-3 py-2">
                                 <span className="text-[11px] font-semibold text-[#1c1c1e]">快捷功能</span>
@@ -756,15 +762,6 @@ const ChatInputArea: React.FC<ChatInputAreaProps> = ({
                                     <CalendarBlank className="w-6 h-6" weight="bold" />
                                 </div>)}
                                 <span className="text-xs font-bold">日程/情绪</span>
-                            </button>
-
-                            {/* 重新生成 */}
-                            <button onClick={onReroll} disabled={!canReroll} className={`flex flex-col items-center gap-2 active:scale-95 transition-transform ${isDiscordStyle ? 'text-slate-200' : 'text-slate-600'}`}>
-                                {acnh ? <AcnhActionTile kind="regenerate" /> : (
-                                <div className={`w-14 h-14 rounded-2xl flex items-center justify-center shadow-sm border ${isDiscordStyle ? 'bg-slate-800 text-slate-300 border-white/10' : 'bg-slate-50 text-slate-500 border-slate-100'}`}>
-                                    <ArrowsClockwise className="w-6 h-6" weight="bold" />
-                                </div>)}
-                                <span className="text-xs font-bold">重新生成</span>
                             </button>
 
                             {/* 直接打开家园，和聊天里的家园生活卡片使用同一个入口。 */}

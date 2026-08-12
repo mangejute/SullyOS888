@@ -27,7 +27,8 @@ const DB_NAME = 'AetherOS_Data';
 // v69：见面·剧情条目与糯米机原生预设。正文继续复用 messages 表，避免再造会话存储。
 // v70：剧场面具箱（原创人物面具）；角色面具仍只存 characterId，不复制神经链接资料。
 // v71：提示词历史，保留每轮实际发送给 AI 的聊天与日程提示词。
-const DB_VERSION = 71;
+// v72：阅读器按屏幕实际排版的本机缓存；不参与备份，避免把各设备的版式带来带去。
+const DB_VERSION = 72;
 
 const STORE_CHARACTERS = 'characters';
 const STORE_CHAR_GROUPS = 'character_groups'; // 角色分组定义（角色通过 groupId 指向；与群聊 groups 无关）
@@ -75,6 +76,7 @@ const STORE_VR_PLAYS = 'vr_plays';                // 剧院·历史舞台剧（�
 const STORE_VR_PRESETS = 'vr_presets';            // 剧院·用户自定义写作风格预设（key 为主键）
 const STORE_VR_LETTERS = 'vr_letters';            // 邮局信件（本地存档 + 待寄出/待回复队列）
 const STORE_VR_SETTINGS = 'vr_settings';          // 彼方设置单例：独立 API（id='api'）+ 调用记录（id='apilog'）
+const STORE_READER_PAGE_CACHE = 'reader_page_cache'; // 阅读器本机分页缓存（书 + 屏幕 + 字体）
 const STORE_API_CALL_LOG = 'api_call_log';        // 全局 API 调用记录单例（id='log'，保留近 5 天）
 const STORE_WORLDS = 'worlds';                    // 家园·世界定义（成员/NPC/居住/关系/模式）
 const STORE_WORLD_EPISODES = 'world_episodes';    // 家园·演绎历史（每轮一条，index worldId）
@@ -305,6 +307,7 @@ export const openDB = (): Promise<IDBDatabase> => {
           ltStore.createIndex('box', 'box', { unique: false });
       }
       createStore(STORE_VR_SETTINGS, { keyPath: 'id' });
+      createStore(STORE_READER_PAGE_CACHE, { keyPath: 'id' });
       createStore(STORE_API_CALL_LOG, { keyPath: 'id' });
 
       // v63: 家园（同世界观多角色大世界）
@@ -624,6 +627,24 @@ export const DB = {
     });
   },
 
+  /** 私聊消息数。与 countMessagesByCharId 不同：不把带同一 charId 的群聊镜像算进来。 */
+  countPrivateMessagesByCharId: async (charId: string): Promise<number> => {
+    const db = await openDB();
+    return new Promise((resolve, reject) => {
+      const transaction = db.transaction(STORE_MESSAGES, 'readonly');
+      const index = transaction.objectStore(STORE_MESSAGES).index('charId');
+      let count = 0;
+      const request = index.openCursor(IDBKeyRange.only(charId));
+      request.onsuccess = () => {
+        const cursor = request.result;
+        if (!cursor) { resolve(count); return; }
+        if (!(cursor.value as Message).groupId) count += 1;
+        cursor.continue();
+      };
+      request.onerror = () => reject(request.error);
+    });
+  },
+
   // Performance: Load only the most recent N messages for a character
   getRecentMessagesByCharId: async (charId: string, limit: number, includeProcessed: boolean = false): Promise<Message[]> => {
     const db = await openDB();
@@ -811,12 +832,14 @@ export const DB = {
             if (data) {
                 data.content = content;
                 store.put(data);
-                resolve();
             } else {
                 reject(new Error('Message not found'));
             }
         };
         req.onerror = () => reject(req.error);
+        transaction.oncomplete = () => resolve();
+        transaction.onerror = () => reject(transaction.error);
+        transaction.onabort = () => reject(transaction.error || new Error('Message update aborted'));
     });
   },
 
@@ -832,12 +855,14 @@ export const DB = {
             if (data) {
                 (data as any).metadata = updater((data as any).metadata);
                 store.put(data);
-                resolve();
             } else {
                 reject(new Error('Message not found'));
             }
         };
         req.onerror = () => reject(req.error);
+        transaction.oncomplete = () => resolve();
+        transaction.onerror = () => reject(transaction.error);
+        transaction.onabort = () => reject(transaction.error || new Error('Message metadata update aborted'));
     });
   },
 
@@ -855,6 +880,45 @@ export const DB = {
       return new Promise((resolve) => {
           transaction.oncomplete = () => resolve();
       });
+  },
+
+  /**
+   * 清理一个角色较早的私聊记录，同时删除这些消息对应的已缓存语音。
+   * 倒序游标只保留最近 keep 条，不会先把包含图片的大量历史整段读进内存；群聊、
+   * 角色记忆、书库和其它应用数据均不涉及。该操作不可撤销，调用方必须先让用户确认。
+   */
+  trimPrivateMessages: async (charId: string, keep: number = 1000): Promise<{ deletedCount: number; keptCount: number }> => {
+    const db = await openDB();
+    const retain = Math.max(0, Math.floor(keep));
+    return new Promise((resolve, reject) => {
+      const transaction = db.transaction([STORE_MESSAGES, STORE_ASSETS], 'readwrite');
+      const messageStore = transaction.objectStore(STORE_MESSAGES);
+      const assetStore = transaction.objectStore(STORE_ASSETS);
+      const index = messageStore.index('charId');
+      let keptCount = 0;
+      let deletedCount = 0;
+      const request = index.openCursor(IDBKeyRange.only(charId), 'prev');
+      request.onsuccess = () => {
+        const cursor = request.result;
+        if (!cursor) return;
+        const message = cursor.value as Message;
+        // 同一角色名可能也出现在群聊里；这里只处理私聊，不动群聊历史。
+        if (!message.groupId) {
+          if (keptCount < retain) {
+            keptCount += 1;
+          } else {
+            cursor.delete();
+            assetStore.delete(`voice_msg_${message.id}`);
+            deletedCount += 1;
+          }
+        }
+        cursor.continue();
+      };
+      request.onerror = () => reject(request.error);
+      transaction.oncomplete = () => resolve({ deletedCount, keptCount });
+      transaction.onerror = () => reject(transaction.error);
+      transaction.onabort = () => reject(transaction.error || new Error('trimPrivateMessages aborted'));
+    });
   },
 
   clearMessages: async (charId: string): Promise<void> => {
@@ -2470,6 +2534,25 @@ export const DB = {
       const db = await openDB();
       const tx = db.transaction(STORE_VR_SETTINGS, 'readwrite');
       tx.objectStore(STORE_VR_SETTINGS).put({ id: 'apilog', entries: [] });
+  },
+
+  // --- 阅读器本机分页缓存（不导出）---
+  getReaderPageCache: async (id: string): Promise<any | null> => {
+      const db = await openDB();
+      if (!db.objectStoreNames.contains(STORE_READER_PAGE_CACHE)) return null;
+      return new Promise((resolve) => {
+          const tx = db.transaction(STORE_READER_PAGE_CACHE, 'readonly');
+          const req = tx.objectStore(STORE_READER_PAGE_CACHE).get(id);
+          req.onsuccess = () => resolve(req.result ?? null);
+          req.onerror = () => resolve(null);
+      });
+  },
+
+  saveReaderPageCache: async (record: any): Promise<void> => {
+      const db = await openDB();
+      if (!db.objectStoreNames.contains(STORE_READER_PAGE_CACHE)) return;
+      const tx = db.transaction(STORE_READER_PAGE_CACHE, 'readwrite');
+      tx.objectStore(STORE_READER_PAGE_CACHE).put(record);
   },
 
   // --- 全局 API 调用记录（api_call_log 单例 store，id='log'）---

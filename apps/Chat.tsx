@@ -4,6 +4,7 @@ import { useOS } from '../context/OSContext';
 import { DB } from '../utils/db';
 import { AppID, Message, MessageType, MemoryFragment, Emoji, EmojiCategory, DailySchedule, ScheduleSlot } from '../types';
 import { processImage } from '../utils/file';
+import { deleteBlobRef, putImageBlob } from '../utils/blobRef';
 import { safeResponseJson, extractContent } from '../utils/safeApi';
 import { buildChatFineTuneCss, mergeChatFineTune } from '../utils/chatFineTuneCss';
 import ChatFineTunePanel from '../components/chat/ChatFineTunePanel';
@@ -168,6 +169,7 @@ const Chat: React.FC = () => {
     const [settingsHideSysLogs, setSettingsHideSysLogs] = useState(false);
     const [settingsReplyMinCount, setSettingsReplyMinCount] = useState(1);
     const [settingsReplyMaxCount, setSettingsReplyMaxCount] = useState(6);
+    const [settingsEmojiReplyProbability, setSettingsEmojiReplyProbability] = useState(40);
     const [settingsHtmlModeCustomPrompt, setSettingsHtmlModeCustomPrompt] = useState('');
     const [preserveContext, setPreserveContext] = useState(true);
     const [isVectorizing, setIsVectorizing] = useState(false);
@@ -182,6 +184,7 @@ const Chat: React.FC = () => {
         waterlineAlreadyAhead: boolean;
     } | null>(null);
     const [selectedMessage, setSelectedMessage] = useState<Message | null>(null);
+    const [messageActionRect, setMessageActionRect] = useState<{ top: number; left: number; right: number; bottom: number } | null>(null);
     const [selectedEmoji, setSelectedEmoji] = useState<Emoji | null>(null);
     const [selectedCategory, setSelectedCategory] = useState<EmojiCategory | null>(null); // For deletion modal
     const [editContent, setEditContent] = useState('');
@@ -390,6 +393,8 @@ const Chat: React.FC = () => {
     const isMinimaxReady = useCallback(() => {
         if (!characterHasVoice(char, apiConfig)) return false;
         if (resolveTtsProvider(apiConfig) === 'fishaudio') return !!resolveFishAudioApiKey(apiConfig);
+        if (resolveTtsProvider(apiConfig) === 'qwen') return !!apiConfig.qwenTtsApiKey && !!apiConfig.qwenTtsWorkspaceId;
+        if (resolveTtsProvider(apiConfig) === 'xiaomi') return !!apiConfig.xiaomiTtsApiKey;
         return !!resolveMiniMaxApiKey(apiConfig);
     }, [char, apiConfig]);
 
@@ -510,7 +515,11 @@ const Chat: React.FC = () => {
                 minimaxWarnedRef.current = true;
                 const tip = resolveTtsProvider(apiConfig) === 'fishaudio'
                     ? '该角色未配置鱼声音色或缺少 Fish API Key，无法播放真实语音，可点「转文字」查看内容'
-                    : '该角色未配置 MiniMax 语音，无法播放真实语音，可点「转文字」查看内容';
+                    : resolveTtsProvider(apiConfig) === 'qwen'
+                        ? '未配置 Qwen TTS API Key / Workspace ID，无法播放真实语音，可点「转文字」查看内容'
+                        : resolveTtsProvider(apiConfig) === 'xiaomi'
+                            ? '未配置小米 MiMo API Key，无法播放真实语音，可点「转文字」查看内容'
+                        : '该角色未配置 MiniMax 语音，无法播放真实语音，可点「转文字」查看内容';
                 addToast(tip, 'info');
             }
             return;
@@ -946,6 +955,7 @@ const Chat: React.FC = () => {
         setSettingsHideSysLogs(char.hideSystemLogs || false);
         setSettingsReplyMinCount(Math.max(1, Math.min(20, Math.floor(char.replyMessageMinCount ?? 1))));
         setSettingsReplyMaxCount(Math.max(1, Math.min(20, Math.floor(char.replyMessageMaxCount ?? 6))));
+        setSettingsEmojiReplyProbability(Math.max(0, Math.min(100, Math.floor(char.emojiReplyProbability ?? 40))));
         setSettingsHtmlModeCustomPrompt((char as any).htmlModeCustomPrompt || '');
     }, [modalType, char?.id]);
 
@@ -1318,7 +1328,8 @@ const Chat: React.FC = () => {
 
         // 私聊的屏幕发送按钮会明确请求 AI 回复；键盘回车仍只发送。
         // triggerAI 内部从 DB 读取完整历史，因此这里的 messages 闭包尚未包含新消息也没关系。
-        // 仅文本消息触发；图片和各类卡片消息仍只保存，避免改变现有附加内容的行为。
+        // 图片选择只负责把图片正常显示在聊天里；右侧发送按钮会走 handleManualTrigger，
+        // 从数据库读取这一组最新图片并请求角色回复。
         const instantCfg = loadInstantConfig();
         const shouldTriggerReply = type === 'text'
             && (triggerReply || (isInstantConfigReady(instantCfg) && instantCfg.autoTriggerOnSend));
@@ -1392,19 +1403,22 @@ const Chat: React.FC = () => {
         void triggerAI(latestMessages, undefined, () => setInstantSendingActive(false), { manualNudge: true });
     };
 
-    const handleReroll = async () => {
+    const handleReroll = async (targetMessage?: Message) => {
         if (isTyping || messages.length === 0) return;
 
-        const lastMsg = messages[messages.length - 1];
-        if (lastMsg.role !== 'assistant') return;
+        // 未指定目标时兼容“最新一轮重回”；指定历史 assistant 消息时，
+        // 从该轮开始回溯并删除后续对话，让 AI 在同一上下文节点重新接着聊。
+        const target = targetMessage || messages[messages.length - 1];
+        if (target.role !== 'assistant') return;
+        const targetIndex = messages.findIndex(m => m.id === target.id);
+        if (targetIndex < 0) return;
 
-        const toDeleteIds: number[] = [];
-        let index = messages.length - 1;
-        while (index >= 0 && messages[index].role === 'assistant') {
-            toDeleteIds.push(messages[index].id);
-            index--;
-        }
-
+        let roundStart = targetIndex;
+        while (roundStart > 0 && messages[roundStart - 1].role === 'assistant') roundStart--;
+        let userIndex = roundStart - 1;
+        while (userIndex >= 0 && messages[userIndex].role !== 'user') userIndex--;
+        const historyEnd = userIndex >= 0 ? userIndex + 1 : roundStart;
+        const toDeleteIds = messages.slice(historyEnd).map(m => m.id);
         if (toDeleteIds.length === 0) return;
 
         await DB.deleteMessages(toDeleteIds);
@@ -1412,13 +1426,13 @@ const Chat: React.FC = () => {
         // 重 roll 也删了消息：正常路径下这轮生成结束会再打脏一次，这里先打是兜住
         // 「触发失败没走到生成收尾」的路径，云端 fire_pack 不能停在删除前。
         markAmsgStateDirty({ char, userProfile, groups, realtimeConfig });
-        const newHistory = messages.slice(0, index + 1);
+        const newHistory = messages.slice(0, historyEnd);
         setMessages(newHistory);
         addToast('回溯对话中...', 'info');
         trackEvent('重新生成回复');
 
         // 重 roll：不注入上一轮残留的情绪 buff 与意识流（innerState），两边独立重新生成。
-        triggerAI(newHistory, undefined, undefined, { skipEmotionInjection: true });
+        void triggerAI(newHistory, undefined, undefined, { skipEmotionInjection: true });
     };
 
     const handleImageSelect = async (file: File) => {
@@ -1853,28 +1867,26 @@ const Chat: React.FC = () => {
         if (!targetChar || isScheduleGenerating) return;
         setIsScheduleGenerating(true);
         try {
-            // 用户主动点「重新生成」时，联动家园先观测一段真实事件，再以最新生活状态重建日程。
-            // 已经演到当前现实段则保留原剧情，只重新生成日程，避免同一段被重复推进。
+            // 日程与家园共享一把真实时间的钟：每次准备生成/重生成日程前，先让落后现实的家园
+            // 观测推进到当前时段。runWorldEpisode 自带 caught-up 判断，已追上时不会重复调用 API。
             let linkedWorldId: string | undefined;
             let observedBeats: import('../types').WorldCharBeat[] | undefined;
-            if (forceRegenerate) {
-                const linkedWorld = await getLinkedWorldForCharacter(targetChar.id);
-                if (linkedWorld) {
-                    linkedWorldId = linkedWorld.id;
-                    const observed = await runWorldEpisode({
-                        world: linkedWorld,
-                        characters,
-                        apiConfig,
-                        userProfile,
-                        groups,
-                        realtimeConfig,
-                        memoryPalaceConfig,
-                        trigger: 'observe',
-                    });
-                    if (observed.ok && observed.episode) {
-                        observedBeats = observed.episode.beats;
-                        await reloadMessages(visibleCountRef.current);
-                    }
+            const linkedWorld = await getLinkedWorldForCharacter(targetChar.id);
+            if (linkedWorld) {
+                linkedWorldId = linkedWorld.id;
+                const observed = await runWorldEpisode({
+                    world: linkedWorld,
+                    characters,
+                    apiConfig,
+                    userProfile,
+                    groups,
+                    realtimeConfig,
+                    memoryPalaceConfig,
+                    trigger: 'observe',
+                });
+                if (observed.ok && observed.episode) {
+                    observedBeats = observed.episode.beats;
+                    await reloadMessages(visibleCountRef.current);
                 }
             }
             const result = await generateDailyScheduleForChar(targetChar, userProfile, apiConfig, forceRegenerate);
@@ -1886,7 +1898,7 @@ const Chat: React.FC = () => {
                     if (refreshedWorld) {
                         await Promise.all(observedBeats.map(beat => syncWorldBeatToSchedule(refreshedWorld, beat)));
                     }
-                    addToast('家园已观测更新，日程已按最新事件重生成', 'success');
+                    if (forceRegenerate) addToast('家园已观测更新，日程已按最新事件重生成', 'success');
                 }
                 // 跨天后台重新生成也要刷云端：不刷的话角色到点照着昨天的作息表说话
                 markAmsgStateDirty({ char: targetChar, userProfile, groups, realtimeConfig });
@@ -2113,6 +2125,7 @@ const Chat: React.FC = () => {
             hideSystemLogs: settingsHideSysLogs,
             replyMessageMinCount: Math.max(1, Math.min(settingsReplyMaxCount, settingsReplyMinCount)),
             replyMessageMaxCount: Math.max(settingsReplyMinCount, Math.min(20, settingsReplyMaxCount)),
+            emojiReplyProbability: Math.max(0, Math.min(100, Math.floor(settingsEmojiReplyProbability))),
             htmlModeCustomPrompt: settingsHtmlModeCustomPrompt,
         } as any);
         setModalType('none');
@@ -2678,6 +2691,9 @@ const Chat: React.FC = () => {
     // Memoized callbacks for MessageItem to avoid busting React.memo
     const handleMessageLongPress = useCallback((msg: Message) => {
         setSelectedMessage(msg);
+        const node = document.getElementById(`chat-msg-${msg.id}`);
+        const rect = node?.getBoundingClientRect();
+        if (rect) setMessageActionRect({ top: rect.top, left: rect.left, right: rect.right, bottom: rect.bottom });
         setModalType('message-options');
     }, []);
 
@@ -3205,6 +3221,7 @@ const Chat: React.FC = () => {
                 settingsHideSysLogs={settingsHideSysLogs} setSettingsHideSysLogs={setSettingsHideSysLogs}
                 settingsReplyMinCount={settingsReplyMinCount} setSettingsReplyMinCount={setSettingsReplyMinCount}
                 settingsReplyMaxCount={settingsReplyMaxCount} setSettingsReplyMaxCount={setSettingsReplyMaxCount}
+                settingsEmojiReplyProbability={settingsEmojiReplyProbability} setSettingsEmojiReplyProbability={setSettingsEmojiReplyProbability}
                 preserveContext={preserveContext} setPreserveContext={setPreserveContext}
                 editContent={editContent} setEditContent={setEditContent}
                 archivePrompts={archivePrompts} selectedPromptId={selectedPromptId} setSelectedPromptId={(id: string) => {
@@ -3214,6 +3231,7 @@ const Chat: React.FC = () => {
                 }}
                 editingPrompt={editingPrompt} setEditingPrompt={setEditingPrompt} isSummarizing={isSummarizing} archiveProgress={archiveProgress}
                 selectedMessage={selectedMessage} selectedEmoji={selectedEmoji} activeCharacter={char} messages={messages}
+                messageActionRect={messageActionRect} onCloseMessageActions={() => { setModalType('none'); setSelectedMessage(null); setMessageActionRect(null); }}
                 allHistoryMessages={allHistoryMessages}
                 contextRangeSnapshot={historyContextRange}
                 
@@ -3229,6 +3247,7 @@ const Chat: React.FC = () => {
                 onCreatePrompt={createNewPrompt} onEditPrompt={editSelectedPrompt} onSavePrompt={handleSavePrompt} onDeletePrompt={handleDeletePrompt}
                 onSetHistoryStart={handleSetHistoryStart} onRestoreAdaptiveContext={restoreAdaptiveContext} onJumpToMessageInChat={handleJumpToMessageInChat} onEnterSelectionMode={handleEnterSelectionMode}
                 onReplyMessage={handleReplyMessage} onEditMessageStart={() => { if (selectedMessage) { setEditContent(selectedMessage.content); setModalType('edit-message'); } }}
+                onRerollMessage={() => { const target = selectedMessage; setModalType('none'); setSelectedMessage(null); setMessageActionRect(null); void handleReroll(target || undefined); }}
                 onConfirmEditMessage={confirmEditMessage} onDeleteMessage={handleDeleteMessage} onCopyMessage={handleCopyMessage} onDeleteEmoji={handleDeleteEmoji} onDeleteCategory={handleDeleteCategory}
                 allCharacters={characters} onSaveCategoryVisibility={handleSaveCategoryVisibility}
                 translationEnabled={translationEnabled}
@@ -3249,6 +3268,30 @@ const Chat: React.FC = () => {
                 onToggleChatVoiceAutoPlay={() => updateCharacter(char.id, { chatVoiceAutoPlay: !char.chatVoiceAutoPlay })}
                 chatVoiceLang={char.chatVoiceLang || ''}
                 onSetChatVoiceLang={(lang: string) => updateCharacter(char.id, { chatVoiceLang: lang })}
+                callDreamTalkEnabled={char.callSettings?.dreamTalkEnabled !== false}
+                onToggleCallDreamTalk={() => updateCharacter(char.id, { callSettings: { ...char.callSettings, dreamTalkEnabled: !(char.callSettings?.dreamTalkEnabled !== false) } })}
+                callSleepNoiseId={char.callSettings?.sleepNoiseId || 'none'}
+                callCustomSleepNoises={char.callSettings?.customSleepNoises || []}
+                onSelectCallSleepNoise={(id: string) => updateCharacter(char.id, { callSettings: { ...char.callSettings, sleepNoiseId: id } })}
+                onAddCallSleepNoise={(file: File) => { void (async () => {
+                    const extension = file.name.split('.').pop()?.toLowerCase() || '';
+                    const mimeType = file.type || ({ mp3: 'audio/mpeg', m4a: 'audio/mp4', wav: 'audio/wav', ogg: 'audio/ogg', aac: 'audio/aac', flac: 'audio/flac' } as Record<string, string>)[extension] || '';
+                    if (!mimeType.startsWith('audio/')) { addToast('请选择 MP3、M4A、WAV、OGG、AAC 或 FLAC 音频', 'error'); return; }
+                    if (file.size > 25 * 1024 * 1024) { addToast('音频请控制在 25 MB 以内', 'error'); return; }
+                    const audioBlob = file.type === mimeType ? file : new Blob([file], { type: mimeType });
+                    const audioRef = await putImageBlob(audioBlob);
+                    const current = char.callSettings?.customSleepNoises || [];
+                    const noise = { id: `sleep-noise-${Date.now()}`, name: file.name.replace(/\.[^.]+$/, '') || '自定义白噪音', audioRef, mimeType };
+                    updateCharacter(char.id, { callSettings: { ...char.callSettings, sleepNoiseId: noise.id, customSleepNoises: [...current, noise] } });
+                    addToast('白噪音已添加，会保存在这台设备', 'success');
+                })()}}
+                onRemoveCallSleepNoise={(id: string) => { void (async () => {
+                    const current = char.callSettings?.customSleepNoises || [];
+                    const removed = current.find(item => item.id === id);
+                    updateCharacter(char.id, { callSettings: { ...char.callSettings, sleepNoiseId: char.callSettings?.sleepNoiseId === id ? 'none' : char.callSettings?.sleepNoiseId, customSleepNoises: current.filter(item => item.id !== id) } });
+                    if (removed?.audioRef) await deleteBlobRef(removed.audioRef);
+                    addToast('白噪音已删除', 'success');
+                })()}}
                 voiceAvailable={characterHasVoice(char, apiConfig)}
                 onGenerateVoice={selectedMessage ? () => handleManualTts(selectedMessage) : undefined}
                 voiceDownloadable={!!(selectedMessage?.id && voiceDataMap[selectedMessage.id])}
@@ -3321,7 +3364,10 @@ const Chat: React.FC = () => {
                  showTrigger={false}
                 onShowCharsPanel={() => setShowPanel('chars')}
                 topActions={[
-                    { label: '电话（即将上线）', icon: <Phone className="w-5 h-5" weight="regular" />, onClick: () => addToast('电话功能即将上线', 'info') },
+                    { label: '视频通话', icon: <Phone className="w-5 h-5" weight="regular" />, onClick: () => {
+                        try { localStorage.setItem('sully-call-direct-video-intent-v1', JSON.stringify({ charId: char.id, at: Date.now(), returnTo: 'chat' })); } catch { /* private WebView */ }
+                        openApp(AppID.Call);
+                    } },
                     { label: '聊天设置', icon: <GearSix className="w-5 h-5" weight="regular" />, onClick: () => setModalType('chat-settings') },
                 ]}
                 onDeleteBuff={(buffId) => {

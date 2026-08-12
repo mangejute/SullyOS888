@@ -29,6 +29,8 @@ interface ChatModalsProps {
     setSettingsReplyMinCount: (v: number) => void;
     settingsReplyMaxCount: number;
     setSettingsReplyMaxCount: (v: number) => void;
+    settingsEmojiReplyProbability: number;
+    setSettingsEmojiReplyProbability: (v: number) => void;
     preserveContext: boolean;
     setPreserveContext: (v: boolean) => void;
     editContent: string;
@@ -55,6 +57,7 @@ interface ChatModalsProps {
 
     // Selection Props
     selectedMessage: Message | null;
+    messageActionRect?: { top: number; left: number; right: number; bottom: number } | null;
     selectedEmoji: {name: string, url: string} | null;
     selectedCategory: EmojiCategory | null;
     activeCharacter: CharacterProfile;
@@ -84,6 +87,8 @@ interface ChatModalsProps {
     onConfirmEditMessage: () => void;
     onDeleteMessage: () => void;
     onCopyMessage: () => void;
+    onRerollMessage?: () => void;
+    onCloseMessageActions?: () => void;
     onDeleteEmoji: () => void;
     onDeleteCategory: () => void;
     // Category Visibility
@@ -111,6 +116,14 @@ interface ChatModalsProps {
     onToggleChatVoiceAutoPlay?: () => void;
     chatVoiceLang?: string;
     onSetChatVoiceLang?: (lang: string) => void;
+    // 电话 / 陪睡设置
+    callDreamTalkEnabled?: boolean;
+    onToggleCallDreamTalk?: () => void;
+    callSleepNoiseId?: string;
+    callCustomSleepNoises?: Array<{ id: string; name: string; audioRef: string; mimeType?: string }>;
+    onSelectCallSleepNoise?: (id: string) => void;
+    onAddCallSleepNoise?: (file: File) => void;
+    onRemoveCallSleepNoise?: (id: string) => void;
     // Voice generation from long-press
     onGenerateVoice?: () => void;
     voiceAvailable?: boolean; // true if char has voiceProfile configured
@@ -239,24 +252,26 @@ const ChatModals: React.FC<ChatModalsProps> = ({
     settingsHideSysLogs, setSettingsHideSysLogs,
     settingsReplyMinCount, setSettingsReplyMinCount,
     settingsReplyMaxCount, setSettingsReplyMaxCount,
+    settingsEmojiReplyProbability, setSettingsEmojiReplyProbability,
     preserveContext, setPreserveContext,
     editContent, setEditContent,
     newCategoryName, setNewCategoryName, onAddCategory,
     newEmojiName, setNewEmojiName, onRenameEmoji,
     archivePrompts, selectedPromptId, setSelectedPromptId,
     editingPrompt, setEditingPrompt, isSummarizing, archiveProgress,
-    selectedMessage, selectedEmoji, selectedCategory, activeCharacter, messages,
+    selectedMessage, selectedEmoji, selectedCategory, activeCharacter, messages, messageActionRect,
     allHistoryMessages = [],
     contextRangeSnapshot,
     onTransfer, onImportEmoji, onSaveSettings,
     onBgUpload, onRemoveBg, onSaveImageReferences, onClearHistory,
     onArchive, onCreatePrompt, onEditPrompt, onSavePrompt, onDeletePrompt,
-    onSetHistoryStart, onRestoreAdaptiveContext, onJumpToMessageInChat, onEnterSelectionMode, onReplyMessage, onEditMessageStart, onConfirmEditMessage, onDeleteMessage, onCopyMessage, onDeleteEmoji, onDeleteCategory,
+    onSetHistoryStart, onRestoreAdaptiveContext, onJumpToMessageInChat, onEnterSelectionMode, onReplyMessage, onEditMessageStart, onConfirmEditMessage, onDeleteMessage, onCopyMessage, onRerollMessage, onCloseMessageActions, onDeleteEmoji, onDeleteCategory,
     allCharacters = [], onSaveCategoryVisibility,
     translationEnabled, onToggleTranslation, translateSourceLang, translateTargetLang, onSetTranslateSourceLang, onSetTranslateLang,
     xhsEnabled, onToggleXhs,
     htmlModeEnabled, onToggleHtmlMode, htmlModeCustomPrompt, setHtmlModeCustomPrompt,
     chatVoiceEnabled, onToggleChatVoice, chatVoiceAutoPlay, onToggleChatVoiceAutoPlay, chatVoiceLang, onSetChatVoiceLang,
+    callDreamTalkEnabled, onToggleCallDreamTalk, callSleepNoiseId, callCustomSleepNoises = [], onSelectCallSleepNoise, onAddCallSleepNoise, onRemoveCallSleepNoise,
     onGenerateVoice, voiceAvailable, onDownloadVoice, voiceDownloadable,
     scheduleData, isScheduleGenerating, onScheduleEdit, onScheduleDelete, onScheduleReroll, onScheduleCoverChange,
     onScheduleStyleChange, onPlayTheater,
@@ -267,6 +282,7 @@ const ChatModals: React.FC<ChatModalsProps> = ({
 }) => {
     const bgInputRef = useRef<HTMLInputElement>(null);
     const referenceInputRef = useRef<HTMLInputElement>(null);
+    const sleepNoiseInputRef = useRef<HTMLInputElement>(null);
     const [imageReferences, setImageReferences] = useState<string[]>(activeCharacter.imageGenerationReferences || []);
     React.useEffect(() => {
         setImageReferences(activeCharacter.imageGenerationReferences || []);
@@ -564,6 +580,18 @@ const ChatModals: React.FC<ChatModalsProps> = ({
                              </label>
                          </div>
                          <p className="text-[10px] text-slate-400 mt-2 leading-relaxed">AI 会按这个范围发送气泡。超过上限会自动合并；内容太短时不会凭空重复文字。</p>
+                         <label className="mt-3 block text-[11px] text-slate-500">
+                             发送表情包概率（0–100%）
+                             <input
+                                 type="number"
+                                 min={0}
+                                 max={100}
+                                 value={settingsEmojiReplyProbability}
+                                 onChange={e => setSettingsEmojiReplyProbability(Math.max(0, Math.min(100, Number(e.target.value) || 0)))}
+                                 className="w-full mt-1 bg-slate-100 rounded-xl px-3 py-2 text-sm font-bold text-slate-700"
+                             />
+                             <span className="mt-1 block text-[10px] text-slate-400 leading-relaxed">100% 每轮必发，0% 每轮不发，其余数值由 AI 每轮独立抽取一次决定。</span>
+                         </label>
                      </div>
 
                      <div className="pt-2 border-t border-slate-100">
@@ -689,6 +717,26 @@ const ChatModals: React.FC<ChatModalsProps> = ({
                                  {chatVoiceLang && <p className="text-[10px] text-emerald-600/70 mt-1.5">选择非默认语种时，AI 台词会先翻译再生成语音。</p>}
                              </div>
                          )}
+                     </div>
+
+                     <div className="pt-2 border-t border-slate-100">
+                         <div className="flex justify-between items-center cursor-pointer" onClick={onToggleCallDreamTalk}>
+                             <label className="text-xs font-bold text-slate-400 uppercase pointer-events-none">电话设置 · 关闭梦话</label>
+                             <div className={`w-10 h-6 rounded-full p-1 transition-colors flex items-center ${!callDreamTalkEnabled ? 'bg-slate-700' : 'bg-slate-200'}`}>
+                                 <div className={`w-4 h-4 bg-white rounded-full shadow-sm transition-transform ${!callDreamTalkEnabled ? 'translate-x-4' : ''}`}></div>
+                             </div>
+                         </div>
+                         <p className="text-[10px] text-slate-400 mt-2 leading-relaxed">打开“关闭梦话”后，陪睡时角色不会偶尔说简短梦话；关闭时才会在长时间安静后低频呢喃，不会连续打扰你。</p>
+                         <div className="mt-4">
+                             <label className="text-xs font-bold text-slate-400 uppercase block">🌙 陪睡白噪音</label>
+                             <p className="text-[10px] text-slate-400 mt-1 leading-relaxed">选择后会在陪睡模式里循环播放。内置白噪音位置先保留；你上传的音频可以直接使用并保存在本机。</p>
+                             <div className="mt-2 flex flex-wrap gap-1.5">
+                                 <button type="button" onClick={() => onSelectCallSleepNoise?.('none')} className={`rounded-full border px-2.5 py-1 text-[11px] ${!callSleepNoiseId || callSleepNoiseId === 'none' ? 'border-primary bg-primary/10 text-primary' : 'border-slate-200 text-slate-500'}`}>无</button>
+                                 {callCustomSleepNoises.map(noise => <span key={noise.id} className={`inline-flex items-center overflow-hidden rounded-full border ${callSleepNoiseId === noise.id ? 'border-primary bg-primary/10 text-primary' : 'border-slate-200 text-slate-500'}`}><button type="button" onClick={() => onSelectCallSleepNoise?.(noise.id)} className="px-2.5 py-1 text-[11px]">{noise.name}</button><button type="button" onClick={() => onRemoveCallSleepNoise?.(noise.id)} className="border-l border-current/15 px-2 py-1 text-[11px]" aria-label={`删除 ${noise.name}`}>×</button></span>)}
+                             </div>
+                             <input ref={sleepNoiseInputRef} type="file" accept="audio/*" className="hidden" onChange={event => { const file = event.target.files?.[0]; event.target.value = ''; if (file) onAddCallSleepNoise?.(file); }} />
+                             <button type="button" onClick={() => sleepNoiseInputRef.current?.click()} className="mt-3 w-full rounded-xl border border-dashed border-slate-300 py-2.5 text-xs font-bold text-slate-500 active:scale-[.98]">＋ 添加自定义白噪音</button>
+                         </div>
                      </div>
 
                      {/* 时间感知 / 自定义时区 / 线下时间感知 已统一迁移至「神经链接」角色设定页 */}
@@ -1015,41 +1063,42 @@ const ChatModals: React.FC<ChatModalsProps> = ({
                 </div>
             </Modal>
 
-            <Modal isOpen={modalType === 'message-options'} title="消息操作" onClose={() => setModalType('none')}>
-                <div className="space-y-3">
-                    <button onClick={onEnterSelectionMode} className="w-full py-3 bg-slate-50 text-slate-700 font-medium rounded-2xl active:bg-slate-100 transition-colors flex items-center justify-center gap-2">
-                        多选 / 批量删除
+            {modalType === 'message-options' && selectedMessage && (() => {
+                const rect = messageActionRect;
+                const viewportWidth = typeof window !== 'undefined' ? window.innerWidth : 390;
+                const popoverWidth = Math.min(360, Math.max(220, viewportWidth - 16));
+                const left = rect ? Math.max(8, Math.min(rect.left, viewportWidth - popoverWidth - 8)) : 8;
+                const placeBelow = !rect || rect.top < 170;
+                const top = rect ? (placeBelow ? rect.bottom + 8 : rect.top - 8) : 80;
+                const actionButton = (label: string, onClick: () => void) => (
+                    <button type="button" onClick={onClick} className="shrink-0 rounded-xl bg-[#f2f2f7] px-3 py-2 text-[12px] font-semibold text-[#1c1c1e] active:bg-[#e5e5ea] active:scale-[0.97] transition-transform">
+                        {label}
                     </button>
-                    <button onClick={onReplyMessage} className="w-full py-3 bg-slate-50 text-slate-700 font-medium rounded-2xl active:bg-slate-100 transition-colors flex items-center justify-center gap-2">
-                        引用 / 回复
-                    </button>
-                    {selectedMessage?.type === 'text' && (
-                        <button onClick={onEditMessageStart} className="w-full py-3 bg-slate-50 text-slate-700 font-medium rounded-2xl active:bg-slate-100 transition-colors flex items-center justify-center gap-2">
-                            编辑内容
-                        </button>
-                    )}
-                    {selectedMessage?.type === 'text' && (
-                        <button onClick={onCopyMessage} className="w-full py-3 bg-slate-50 text-slate-700 font-medium rounded-2xl active:bg-slate-100 transition-colors flex items-center justify-center gap-2">
-                            复制文字
-                        </button>
-                    )}
-                    {voiceAvailable && selectedMessage?.role === 'assistant' && selectedMessage?.type === 'text' && onGenerateVoice && (
-                        <button onClick={() => { onGenerateVoice(); setModalType('none'); }} className="w-full py-3 bg-emerald-50 text-emerald-600 font-medium rounded-2xl active:bg-emerald-100 transition-colors flex items-center justify-center gap-2">
-                            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-4 h-4"><path strokeLinecap="round" strokeLinejoin="round" d="M19.114 5.636a9 9 0 0 1 0 12.728M16.463 8.288a5.25 5.25 0 0 1 0 7.424M6.75 8.25l4.72-4.72a.75.75 0 0 1 1.28.53v15.88a.75.75 0 0 1-1.28.53l-4.72-4.72H4.51c-.88 0-1.704-.507-1.938-1.354A9.009 9.009 0 0 1 2.25 12c0-.83.112-1.633.322-2.396C2.806 8.756 3.63 8.25 4.51 8.25H6.75Z" /></svg>
-                            转换语音
-                        </button>
-                    )}
-                    {voiceDownloadable && onDownloadVoice && (
-                        <button onClick={() => { onDownloadVoice(); setModalType('none'); }} className="w-full py-3 bg-sky-50 text-sky-600 font-medium rounded-2xl active:bg-sky-100 transition-colors flex items-center justify-center gap-2">
-                            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-4 h-4"><path strokeLinecap="round" strokeLinejoin="round" d="M3 16.5v2.25A2.25 2.25 0 0 0 5.25 21h13.5A2.25 2.25 0 0 0 21 18.75V16.5M16.5 12 12 16.5m0 0L7.5 12m4.5 4.5V3" /></svg>
-                            下载语音
-                        </button>
-                    )}
-                    <button onClick={onDeleteMessage} className="w-full py-3 bg-red-50 text-red-500 font-medium rounded-2xl active:bg-red-100 transition-colors flex items-center justify-center gap-2">
-                        删除消息
-                    </button>
-                </div>
-            </Modal>
+                );
+                return (
+                    <div
+                        className="fixed inset-0 z-[120]"
+                        onPointerDown={() => { setModalType('none'); onCloseMessageActions?.(); }}
+                    >
+                        <div
+                            className="fixed w-fit max-w-[calc(100vw-16px)] rounded-2xl border border-black/[0.08] bg-white/70 p-2 shadow-[0_10px_35px_rgba(0,0,0,0.16)] backdrop-blur-md"
+                            style={{ top, left, width: 'max-content', maxWidth: `calc(100vw - 16px)`, transform: placeBelow ? 'none' : 'translateY(-100%)' }}
+                            onPointerDown={e => e.stopPropagation()}
+                        >
+                            <div className="flex max-w-full flex-nowrap gap-1.5 overflow-x-auto no-scrollbar">
+                                {actionButton('多选', () => { onEnterSelectionMode(); onCloseMessageActions?.(); })}
+                                {actionButton('引用', () => { onReplyMessage(); onCloseMessageActions?.(); })}
+                                {selectedMessage.role === 'assistant' && onRerollMessage && actionButton('重回', onRerollMessage)}
+                                {selectedMessage.type === 'text' && actionButton('编辑', onEditMessageStart)}
+                                {selectedMessage.type === 'text' && actionButton('复制', () => { onCopyMessage(); onCloseMessageActions?.(); })}
+                                {voiceAvailable && selectedMessage.role === 'assistant' && selectedMessage.type === 'text' && onGenerateVoice && actionButton('转语音', () => { onGenerateVoice(); onCloseMessageActions?.(); })}
+                                {voiceDownloadable && onDownloadVoice && actionButton('下载语音', () => { onDownloadVoice(); onCloseMessageActions?.(); })}
+                                {actionButton('删除', () => { onDeleteMessage(); onCloseMessageActions?.(); })}
+                            </div>
+                        </div>
+                    </div>
+                );
+            })()}
             
              <Modal
                 isOpen={modalType === 'delete-emoji'} title="删除表情包" onClose={() => setModalType('none')}

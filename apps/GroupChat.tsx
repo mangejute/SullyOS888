@@ -25,7 +25,7 @@ import { completeGroupChatWithMcp } from '../utils/groupChat/mcp';
 import { CharacterGroupFilterBar, filterCharactersByGroup, GROUP_FILTER_ALL } from '../components/character/CharacterGroupFilter';
 // 群聊输入区/表情面板已改用共享 ChatInputArea（其表情网格自带 useIncrementalReveal 增量渲染），
 // master 上给旧内联表情抽屉加的增量渲染随旧抽屉一并退役。
-import { UsersThree, Camera, Phone, Money, GearSix, Image as ImageIcon, ArrowsClockwise, PaintBrush, BellSimpleRinging, Code, Question } from '@phosphor-icons/react';
+import { UsersThree, Camera, Phone, Money, GearSix, Image as ImageIcon, PaintBrush, BellSimpleRinging, Code, Question } from '@phosphor-icons/react';
 import ChatHeaderShell from '../components/chat/ChatHeaderShell';
 import ChatInputArea from '../components/chat/ChatInputArea';
 import ChromeCssEditor from '../components/chat/ChromeCssEditor';
@@ -307,6 +307,7 @@ const GroupMessageItem = React.memo(({
 
     return (
         <div
+            id={`chat-msg-${msg.id}`}
             className={`flex gap-3 mb-4 w-full relative ${isUser ? 'justify-end' : 'justify-start'} ${selectionMode ? 'pl-8' : ''}`}
             style={{
                 transform: `translateX(${replyOffset}px)`,
@@ -411,6 +412,7 @@ const GroupChat: React.FC = () => {
     const [modalType, setModalType] = useState<'none' | 'create' | 'settings' | 'transfer' | 'member_select' | 'message-options' | 'edit-message' | 'packet-detail' | 'chrome-css' | 'chrome-sound' | 'html-prompt' | 'help'>('none');
     const [tempHtmlPrompt, setTempHtmlPrompt] = useState('');
     const [selectedMessage, setSelectedMessage] = useState<Message | null>(null);
+    const [messageActionRect, setMessageActionRect] = useState<{ top: number; left: number; right: number; bottom: number } | null>(null);
     const [replyTarget, setReplyTarget] = useState<Message | null>(null);
     const [editContent, setEditContent] = useState('');
     const [preserveContext, setPreserveContext] = useState(true);
@@ -574,6 +576,9 @@ const GroupChat: React.FC = () => {
         const msg = messagesRef.current.find(m => m.id === id);
         if (msg) {
             setSelectedMessage(msg);
+            const node = document.getElementById(`chat-msg-${id}`);
+            const rect = node?.getBoundingClientRect();
+            if (rect) setMessageActionRect({ top: rect.top, left: rect.left, right: rect.right, bottom: rect.bottom });
             setModalType('message-options');
         }
         setShowPanel('none');
@@ -641,24 +646,24 @@ const GroupChat: React.FC = () => {
         addToast(`已删除 ${selectedMsgIds.size} 条消息`, 'success');
     };
 
-    const handleReroll = async () => {
-        if (!canReroll) return;
-        
-        const lastMsg = messages[messages.length - 1];
-        if (lastMsg.role !== 'assistant') return;
+    const handleReroll = async (targetMessage?: Message) => {
+        if (isTyping || messages.length === 0) return;
 
-        // Find all contiguous assistant messages at the end
-        const toDeleteIds: number[] = [];
-        let index = messages.length - 1;
-        while (index >= 0 && messages[index].role === 'assistant') {
-            toDeleteIds.push(messages[index].id);
-            index--;
-        }
+        const target = targetMessage || messages[messages.length - 1];
+        if (target.role !== 'assistant') return;
+        const targetIndex = messages.findIndex(m => m.id === target.id);
+        if (targetIndex < 0) return;
+        let roundStart = targetIndex;
+        while (roundStart > 0 && messages[roundStart - 1].role === 'assistant') roundStart--;
+        let userIndex = roundStart - 1;
+        while (userIndex >= 0 && messages[userIndex].role !== 'user') userIndex--;
+        const historyEnd = userIndex >= 0 ? userIndex + 1 : roundStart;
+        const toDeleteIds = messages.slice(historyEnd).map(m => m.id);
 
         if (toDeleteIds.length === 0) return;
 
         await DB.deleteMessages(toDeleteIds);
-        const newHistory = messages.slice(0, index + 1);
+        const newHistory = messages.slice(0, historyEnd);
         setMessages(newHistory);
         addToast('回溯对话中...', 'info');
         trackEvent('重新生成群聊回复');
@@ -1737,17 +1742,6 @@ ${memberTimeline || '(暂无互动记录)'}
                             <span className="text-xs font-bold">红包</span>
                         </button>
 
-                        <button
-                            onClick={() => { if (canReroll) { setShowPanel('none'); handleReroll(); } }}
-                            disabled={!canReroll}
-                            className={`flex flex-col items-center gap-2 active:scale-95 transition-transform ${canReroll ? 'text-slate-600' : 'text-slate-300 opacity-50'}`}
-                        >
-                            <div className={`w-14 h-14 rounded-2xl flex items-center justify-center shadow-sm border ${canReroll ? 'bg-emerald-50 text-emerald-400 border-emerald-100' : 'bg-slate-50 text-slate-300 border-slate-100'}`}>
-                                <ArrowsClockwise className="w-6 h-6" weight="bold" />
-                            </div>
-                            <span className="text-xs font-bold">重新生成</span>
-                        </button>
-
                         <button onClick={() => { setModalType('chrome-css'); setShowPanel('none'); }} className="flex flex-col items-center gap-2 active:scale-95 transition-transform text-slate-600">
                             <div className="w-14 h-14 rounded-2xl flex items-center justify-center shadow-sm border bg-sky-50 text-sky-500 border-sky-100">
                                 <PaintBrush className="w-6 h-6" weight="bold" />
@@ -1991,37 +1985,32 @@ ${memberTimeline || '(暂无互动记录)'}
                 </div>
             </Modal>
 
-            {/* Message Options Modal */}
-            <Modal isOpen={modalType === 'message-options'} title="消息操作" onClose={() => { setModalType('none'); setSelectedMessage(null); }}>
-                <div className="space-y-3">
-                    <button
-                        onClick={() => {
-                            if (selectedMessage) setReplyTarget(selectedMessage);
-                            setModalType('none');
-                            setSelectedMessage(null);
-                        }}
-                        className="w-full py-3 bg-violet-50 text-violet-600 font-medium rounded-2xl active:bg-violet-100 transition-colors flex items-center justify-center gap-2"
-                    >
-                        引用 / 回复
-                    </button>
-                    <button onClick={handleEnterSelectionMode} className="w-full py-3 bg-slate-50 text-slate-700 font-medium rounded-2xl active:bg-slate-100 transition-colors flex items-center justify-center gap-2">
-                        多选 / 批量删除
-                    </button>
-                    {selectedMessage?.type === 'text' && (
-                        <button onClick={handleCopyMessage} className="w-full py-3 bg-slate-50 text-slate-700 font-medium rounded-2xl active:bg-slate-100 transition-colors flex items-center justify-center gap-2">
-                            复制文字
-                        </button>
-                    )}
-                    {selectedMessage?.type === 'text' && (
-                        <button onClick={handleStartEditMessage} className="w-full py-3 bg-slate-50 text-slate-700 font-medium rounded-2xl active:bg-slate-100 transition-colors flex items-center justify-center gap-2">
-                            修改内容
-                        </button>
-                    )}
-                    <button onClick={handleDeleteSingleMessage} className="w-full py-3 bg-red-50 text-red-500 font-medium rounded-2xl active:bg-red-100 transition-colors flex items-center justify-center gap-2">
-                        删除消息
-                    </button>
-                </div>
-            </Modal>
+            {/* Message actions: small popover anchored to the long-pressed bubble. */}
+            {modalType === 'message-options' && selectedMessage && (() => {
+                const rect = messageActionRect;
+                const viewportWidth = typeof window !== 'undefined' ? window.innerWidth : 390;
+                const popoverWidth = Math.min(360, Math.max(220, viewportWidth - 16));
+                const left = rect ? Math.max(8, Math.min(rect.left, viewportWidth - popoverWidth - 8)) : 8;
+                const placeBelow = !rect || rect.top < 170;
+                const top = rect ? (placeBelow ? rect.bottom + 8 : rect.top - 8) : 80;
+                const actionButton = (label: string, onClick: () => void) => (
+                    <button type="button" onClick={onClick} className="shrink-0 rounded-xl bg-[#f2f2f7] px-3 py-2 text-[12px] font-semibold text-[#1c1c1e] active:bg-[#e5e5ea] active:scale-[0.97] transition-transform">{label}</button>
+                );
+                return (
+                    <div className="fixed inset-0 z-[120]" onPointerDown={() => { setModalType('none'); setSelectedMessage(null); setMessageActionRect(null); }}>
+                        <div className="fixed w-fit max-w-[calc(100vw-16px)] rounded-2xl border border-black/[0.08] bg-white/70 p-2 shadow-[0_10px_35px_rgba(0,0,0,0.16)] backdrop-blur-md" style={{ top, left, width: 'max-content', maxWidth: 'calc(100vw - 16px)', transform: placeBelow ? 'none' : 'translateY(-100%)' }} onPointerDown={e => e.stopPropagation()}>
+                            <div className="flex max-w-full flex-nowrap gap-1.5 overflow-x-auto no-scrollbar">
+                                {actionButton('引用', () => { if (selectedMessage) setReplyTarget(selectedMessage); setModalType('none'); setSelectedMessage(null); setMessageActionRect(null); })}
+                                {actionButton('多选', handleEnterSelectionMode)}
+                                {selectedMessage.role === 'assistant' && actionButton('重回', () => { const target = selectedMessage; setModalType('none'); setSelectedMessage(null); setMessageActionRect(null); void handleReroll(target); })}
+                                {selectedMessage.type === 'text' && actionButton('复制', handleCopyMessage)}
+                                {selectedMessage.type === 'text' && actionButton('编辑', handleStartEditMessage)}
+                                {actionButton('删除', handleDeleteSingleMessage)}
+                            </div>
+                        </div>
+                    </div>
+                );
+            })()}
 
             {/* Edit Message Modal */}
             <Modal

@@ -12,6 +12,8 @@ import { RealtimeContextManager, NotionManager, FeishuManager, defaultRealtimeCo
 import { isScheduleFeatureOn } from './scheduleFeature';
 import { VOICE_ACTING_GUIDE } from './minimaxTts';
 import { FISH_VOICE_ACTING_GUIDE } from './fishAudioTts';
+import { QWEN_VOICE_ACTING_GUIDE } from './qwenTts';
+import { XIAOMI_VOICE_ACTING_GUIDE } from './xiaomiTts';
 import { getTtsProvider, getVoicePromptOverride } from './ttsProvider';
 import { resolveCharTimeZone, nowInTimeZone } from './timezone';
 import { buildLifeRecordInjection } from './lifeRecords';
@@ -22,13 +24,14 @@ import { getLocalDateKey } from './localDate';
 import { getDailyScheduleForChar } from './dailySchedule';
 import { formatRelativeAge } from './groupChat/relativeTime';
 
-// 语音格式指导按当前 TTS 服务商二选一：用 MiniMax 才注入 MiniMax 那套（含 <#秒#> 停顿标记），
-// 用鱼声则注入鱼声版（去掉 MiniMax 专属标记，改用标点 / 省略号控制停顿）。
+// 语音格式指导按当前 TTS 服务商选择：MiniMax / Fish 使用各自标记，Qwen 直接输出自然文本。
 // 用户在「设置 → 其他 API → 语音提示词」里自定义过该服务商的指南时，优先用用户那份；留空则回退内置默认。
 const voiceActingGuide = (): string => {
   const provider = getTtsProvider();
   const custom = getVoicePromptOverride(provider);
   if (custom) return custom;
+  if (provider === 'qwen') return QWEN_VOICE_ACTING_GUIDE;
+  if (provider === 'xiaomi') return XIAOMI_VOICE_ACTING_GUIDE;
   return provider === 'fishaudio' ? FISH_VOICE_ACTING_GUIDE : VOICE_ACTING_GUIDE;
 };
 
@@ -583,6 +586,7 @@ ${uname} 的化身正挂在《彼方》的【${roomName}】${act ? `，状态写
             && !(timelyByWorker && isAmsg2EnabledForChar(char));
         const replyMaxCount = Math.max(1, Math.min(20, Math.floor(char.replyMessageMaxCount ?? 6)));
         const replyMinCount = Math.max(1, Math.min(replyMaxCount, Math.floor(char.replyMessageMinCount ?? 1)));
+        const emojiReplyProbability = Math.max(0, Math.min(100, Math.floor(char.emojiReplyProbability ?? 40)));
 
         baseSystemPrompt += `### 聊天 App 行为规范 (Chat App Rules)
             **严格注意，你正在手机聊天，无论之前是什么模式，哪怕上一句话你们还面对面在一起，当前，你都是已经处于线上聊天状态了，请不要输出你的行为**
@@ -605,8 +609,8 @@ ${uname} 的化身正挂在《彼方》的【${roomName}】${act ? `，状态写
    - **生成前自检**: 先决定本次需要几条气泡，再输出对应数量的行。若设为最多 ${replyMaxCount} 条，你的最终回复不得超过 ${replyMaxCount} 个非空行；不要把原本应分开的多条话塞进最后一行，也不要用一条超长消息代替多条短消息。
    - 【严禁】在输出中包含时间戳、名字前缀或"[角色名]:"。
    - **【严禁】模仿历史记录中的系统日志格式（如"[你 发送了...]"）。**
-   - **发送表情包（严格概率）**: 每一轮回复开始前，在心里独立抽取一次 0～99 的随机数；只有抽到 0～39（40%）时，才允许在本轮发送 **1 个**表情包，并且必须且只能使用命令: \`[[SEND_EMOJI: 表情名称]]\`。抽到 40～99 时，本轮严禁输出任何 \`[[SEND_EMOJI:...]]\` 命令；不要因为回复到了最后一句、觉得缺少收尾或看见合适的表情就临时补发。不要向用户展示抽到的数字，也不要把一次抽样重复应用到下一轮。
-   - **发送真实图片**: 只有用户明确要求你发图片、照片、生图或“给我看看图片”时，才可以使用命令 \`[[GENERATE_IMAGE: 图片描述]]\`。命令中的内容只写要生成的画面描述，不要写图片 URL，不要伪造“已发送图片”的文字。先正常发送你想说的文字，再单独输出该命令；客户端会异步生成真实图片并把它显示在聊天中。没有明确要求图片时，禁止输出该命令。
+   - **发送表情包（每轮独立概率，严格遵守）**: 当前角色设置的发送概率是 **${emojiReplyProbability}%**。每一轮回复开始前，只抽取一次 0～99 的随机数，并把这次结果只用于本轮：若概率为 100%，本轮必须发送且只能发送 1 个表情包；若概率为 0%，本轮绝对禁止发送表情包；若概率为其他数值，只有随机数小于 ${emojiReplyProbability} 时才发送 1 个表情包，否则不发送。发送时必须且只能使用命令：\`[[SEND_EMOJI: 表情名称]]\`。这个决定与回复内容、条数、语气和是否觉得“需要收尾”完全无关；未抽中时严禁为了装饰、收尾或补充情绪而发送。不要向用户展示随机数，不要把一次抽样重复应用到下一轮，也不要在同一轮重复抽取或发送多个表情包。**这只是发送概率规则，不得因此截断、合并、删减或改写正常文字消息。**
+   - **发送真实图片**: 只有用户明确要求你发图片、照片、生图或“给我看看图片”时，才可以使用命令 \`[[GENERATE_IMAGE: 图片描述]]\`。命令中的内容只写要生成的画面描述，必须使用中文，禁止输出英文内部提示词、图片 URL或伪造“已发送图片”的文字。先正常发送你想说的文字，再单独输出该命令；客户端会异步生成真实图片并把它显示在聊天中。没有明确要求图片时，禁止输出该命令。
    - **可用表情库 (按分类)**:
      ${emojiContextStr}
    - **理解对方发的表情包**: 你看到的 \`[发送了表情包: xx]\` 只是图的名字。表情包是从有限图库里挑的，名字描述的是**图上画了什么**，不是**ta在做什么**，也不是"ta有这层意思"。按这个顺序读：
@@ -1024,7 +1028,7 @@ ${userProfile.name} 给你反馈时，别当成约束，当成信任——ta 在
         userProfile: UserProfile,
         emojis: Emoji[],
         processedExcludeIds?: Set<number>,
-        options?: { useVisionDescriptions?: boolean },
+        options?: { useVisionDescriptions?: boolean; onlyCurrentTurnImages?: boolean },
     ) => {
         // Filter Logic
         // 新版上下文范围由 chatContextRange 先按「自适应/拉杆最大范围」取窗；
@@ -1039,6 +1043,11 @@ ${userProfile.name} 给你反馈时，别当成约束，当成信任——ta 在
         }
         const historySlice = effectiveHistory.slice(-limit);
         const charTz = resolveCharTimeZone(char);
+        // 图片只在发送它的这一轮进入视觉上下文。角色已经回复后，旧图片可能来自
+        // 临时图床/已过期 URL；继续把它作为 image_url 发给 API 会让整个请求因 404 失败。
+        const lastAssistantIndex = historySlice.reduce((last, message, index) => (
+            message.role === 'assistant' ? index : last
+        ), -1);
 
         let timeGapHint = "";
         if (historySlice.length >= 2) {
@@ -1093,7 +1102,10 @@ ${userProfile.name} 给你反馈时，别当成约束，当成信任——ta 在
                 }
                 
                 if (m.type === 'image') {
+                     const imageIsCurrentTurn = !options?.onlyCurrentTurnImages
+                         || (m.role === 'user' && index > lastAssistantIndex);
                      const visionDescription = options?.useVisionDescriptions
+                         && imageIsCurrentTurn
                          && typeof m.metadata?.visionDescription === 'string'
                          ? m.metadata.visionDescription.trim()
                          : '';
@@ -1103,7 +1115,9 @@ ${userProfile.name} 给你反馈时，别当成约束，当成信任——ta 在
                          return { role: m.role, content: textPart };
                      }
                      // 向下兼容：如果图片数据缺失（例如只导入了文字备份），不要把空 URL 发给 API，否则会报错无法回应
-                     const hasImageData = typeof m.content === 'string' && (m.content.startsWith('data:') || m.content.startsWith('http'));
+                     const hasImageData = imageIsCurrentTurn
+                         && typeof m.content === 'string'
+                         && (m.content.startsWith('data:') || m.content.startsWith('http'));
                      let textPart = hasImageData
                          ? `${timeStr} [User sent an image]`
                          : `${timeStr} [User sent an image, but the image data is no longer available]`;

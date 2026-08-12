@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { querySwVersion } from '../../utils/swVersion';
 import { APP_VERSION, BUILD_LABEL, BUILD_TIME_LABEL } from '../../utils/buildInfo';
+import { refreshServiceWorker } from '../../utils/keepAlive';
 import { isDevDebugAvailable, subscribeDevDebugAvailability, unlockDevDebug } from '../../utils/devDebug';
 import { trackEvent } from '../../utils/analytics';
 
@@ -89,25 +90,28 @@ const VersionInfo: React.FC = () => {
         if (checkingUpdate) return;
         setCheckingUpdate(true);
         try {
-            const response = await fetch('https://api.github.com/repos/mangejute/SullyOS888/commits/customization?per_page=1', {
+            // 版本文件与网页一同部署。时间参数 + no-store 让浏览器、手机 WebView
+            // 以及 GitHub Pages 的中间缓存都把它当作一次新的检查，而不是读旧页面的缓存。
+            const versionUrl = new URL('version.json', document.baseURI);
+            versionUrl.searchParams.set('check', String(Date.now()));
+            const response = await fetch(versionUrl.toString(), {
                 cache: 'no-store',
-                headers: { Accept: 'application/vnd.github+json' },
+                headers: { Accept: 'application/json' },
             });
             if (!response.ok) throw new Error(`HTTP ${response.status}`);
-            const latest = String((await response.json())?.sha || '').slice(0, 7);
-            const current = String(BUILD_LABEL.split('@').pop() || '').slice(0, 7);
-            if (!latest || !current) {
+            const latest = String((await response.json())?.version || '').trim();
+            if (!latest) {
                 showHint('暂时无法读取最新版本', 3000);
-            } else if (latest === current) {
+            } else if (latest === APP_VERSION) {
                 showHint('已经是最新版本', 3000);
             } else {
                 showHint('发现新版本，正在刷新…', 2200);
-                try {
-                    const keys = await caches.keys();
-                    await Promise.all(keys.map(key => caches.delete(key)));
-                } catch { /* 缓存 API 不可用时仍继续刷新 */ }
+                // 主动拉取最新 SW；旧版网页也能借此换掉已缓存的 worker 脚本。
+                await refreshServiceWorker();
                 window.setTimeout(() => {
                     const url = new URL(window.location.href);
+                    // 新 URL 避开旧 index.html 的本地缓存。只需这一次跳转，不会反复刷新。
+                    url.searchParams.set('version', latest);
                     url.searchParams.set('refresh', String(Date.now()));
                     window.location.replace(url.toString());
                 }, 350);

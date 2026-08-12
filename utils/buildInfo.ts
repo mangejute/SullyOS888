@@ -13,13 +13,17 @@ export const BUILD_LABEL = `${__BUILD_BRANCH__}@${__BUILD_COMMIT__}`;
 /** 构建时间标签，固定由 Vite 按 UTC+8 注入，避免受用户本机时区影响。 */
 export const BUILD_TIME_LABEL = __BUILD_TIME__;
 
-/** 设置页底部的版本名：构建日期 + 产品版本号，用户一眼就能判断是否已更新。 */
-const buildDateMatch = BUILD_TIME_LABEL.match(/^(\d{4})-(\d{2})-(\d{2})/);
-const buildDateLabel = buildDateMatch ? `${Number(buildDateMatch[2])}月${Number(buildDateMatch[3])}日` : '未知日期';
-export const APP_VERSION = `${buildDateLabel}-1.1`;
+/**
+ * 设置页显示给用户的发布版本号。
+ *
+ * 每次交付一个可上传的新版本时，手动把最后的数字加一，例如：
+ * 8月12日-7、8月12日-8。它不依赖构建机器时间，因此手机上看到的号码
+ * 能直接和本次交付的版本对上。
+ */
+export const APP_VERSION = '8月13日-4';
 
 /**
- * 版本号那半截（`v3.0`）。统计给每条记录打的标签用它，面板里按版本切分数据时
- * 标签越短越好筛，代号留给设置页展示。跟着 APP_VERSION 走，改一处就够。
+ * 统计给每条记录打的内部版本标签。页面发布版本使用上面的中文日期号；统计字段
+ * 仍保持机器可识别的 vX.Y 格式，避免分析记录被日期文字拆坏。
  */
-export const APP_VERSION_TAG = APP_VERSION.split(' ')[0];
+export const APP_VERSION_TAG = 'v3.0';

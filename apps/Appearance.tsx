@@ -104,6 +104,7 @@ const ACNH_WALLPAPER = 'linear-gradient(180deg, #F8F4E8 0%, #F3EFDD 58%, #E6EECE
 const MOBILEGAME_WALLPAPER = 'radial-gradient(95% 55% at 85% 0%, #fdeef7 0%, transparent 50%), radial-gradient(85% 55% at 6% 10%, #f6f2fc 0%, transparent 55%), linear-gradient(180deg, #fdfbff 0%, #f9f6fd 55%, #f4f0fa 100%)';
 // 电子宠物主题壁纸：薰衣草奶油（照抄参考稿——柔紫底衬奶油卡片与紫描边）。
 const TAMAGOTCHI_WALLPAPER = 'radial-gradient(85% 50% at 80% 0%, #e6dcf8 0%, transparent 55%), radial-gradient(75% 45% at 12% 10%, #f4edfb 0%, transparent 55%), linear-gradient(180deg, #ded4f4 0%, #d6cbf0 55%, #cfc3ec 100%)';
+const COMPANION_WALLPAPER = 'linear-gradient(180deg, #202947 0%, #4d5f89 48%, #d9a49b 100%)';
 
 type DesktopSkinOption = { id: string; name: string; desc: string; swatch: string; config: Partial<OSTheme> };
 
@@ -160,6 +161,19 @@ const DESKTOP_SKINS: DesktopSkinOption[] = [
       chatHeaderStyle: 'default', chatInputStyle: 'rounded',
       chatChromeStyle: 'soft', chatBackgroundStyle: 'paper',
       chatShowTimestamp: 'always',
+    },
+  },
+  {
+    id: 'companion',
+    name: '触感陪伴',
+    desc: '角色模型常驻主屏 · 与视频通话共用同一形象',
+    swatch: 'linear-gradient(135deg,#202947 0%,#4d5f89 55%,#d9a49b 100%)',
+    config: {
+      skin: 'companion',
+      desktopVariant: 'paper',
+      hue: 224, saturation: 38, lightness: 54,
+      contentColor: '#ffffff',
+      wallpaper: COMPANION_WALLPAPER,
     },
   },
   {

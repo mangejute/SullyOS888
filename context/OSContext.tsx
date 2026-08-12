@@ -28,7 +28,15 @@ import { buildFetchFailureDetail, classifyFetchFailure, describeReachabilityProb
 import { INSTALLED_APPS, HIDDEN_APP_NAMES } from '../constants';
 import { isAnalyticsRequestUrl, trackEvent, trackDataScaleOnce, trackCurrentAppearanceOnce, trackCurrentCharSettingsOnce, trackCurrentFeaturesOnce } from '../utils/analytics';
 import { collectAppearance, collectCharSettings, collectDataScale, collectFeatureFlagsAsync } from '../utils/analyticsSnapshot';
-import { normalizeApiConfig, normalizeApiPreset } from '../utils/apiConfigNormalize';
+import {
+  loadStoredSpeechRecognitionConfig,
+  normalizeApiConfig,
+  normalizeApiPreset,
+  saveStoredSpeechRecognitionConfig,
+  MINIMAX_CONFIG_STORAGE_KEY,
+  loadStoredOtherApiConfig,
+  saveStoredOtherApiConfig,
+} from '../utils/apiConfigNormalize';
 import { markBackupDone } from '../utils/backupReminder';
 import { normalizeCharacterImpression, normalizeCharacterDefaults } from '../utils/impression';
 import { normalizeModelIds } from '../utils/modelList';
@@ -42,6 +50,18 @@ import { isScheduleFeatureOn } from '../utils/scheduleGenerator';
 import { evaluateEmotionBackground } from '../hooks/useChatAI';
 import { CHAT_GEN_EVENTS, setChatViewSnapshot } from '../utils/chatGenEvents';
 import { buildChatRequestPayload } from '../utils/chatRequestPayload';
+
+// 移动浏览器的 localStorage 可能已经满了（尤其是旧版缓存过大时）。缓存写入失败
+// 不能阻断角色、聊天记录等 IndexedDB 数据的启动，因此所有非关键镜像写入都走这里。
+const safeSetLocalStorage = (key: string, value: string): boolean => {
+  try {
+    localStorage.setItem(key, value);
+    return true;
+  } catch (error) {
+    console.warn(`[storage] 写入 ${key} 失败，继续启动`, error);
+    return false;
+  }
+};
 import { ChatPrompts } from '../utils/chatPrompts';
 import { extractHtmlBlocks } from '../utils/htmlPrompt';
 import { mergePalaceFragmentsIntoMemories } from '../utils/memoryPalace/pipeline';
@@ -64,7 +84,7 @@ import { Capacitor } from '@capacitor/core';
 import { formatBytes } from '../utils/format';
 import { isEmotionEvalSkipped } from '../utils/devDebug';
 import { toMountedWorldbook } from '../utils/worldbook';
-import { initLocalStorageMirror } from '../utils/lsMirror';
+import { initLocalStorageMirror, snapshotLocalStorageMirror } from '../utils/lsMirror';
 // 备份用：把存在 localStorage 的本机配置随导出一起带走（键名须与 importFullData 对齐）
 import { exportPostOfficeLocal } from '../utils/vrWorld/postOffice';
 import { exportSignalLocal } from '../utils/vrWorld/signal';
@@ -408,8 +428,8 @@ interface OSContextType {
   handleBack: () => void;
 
   // Call Suspend
-  suspendedCall: { charId: string; charName: string; charAvatar?: string; startedAt: number; bubbles?: any[]; sessionId?: string; elapsedSeconds?: number; voiceLang?: string } | null;
-  suspendCall: (info: { charId: string; charName: string; charAvatar?: string; startedAt: number; bubbles?: any[]; sessionId?: string; elapsedSeconds?: number; voiceLang?: string }) => void;
+  suspendedCall: { charId: string; charName: string; charAvatar?: string; startedAt: number; bubbles?: any[]; sessionId?: string; elapsedSeconds?: number; voiceLang?: string; returnToChat?: boolean } | null;
+  suspendCall: (info: { charId: string; charName: string; charAvatar?: string; startedAt: number; bubbles?: any[]; sessionId?: string; elapsedSeconds?: number; voiceLang?: string; returnToChat?: boolean }) => void;
   resumeCall: () => void;
   clearSuspendedCall: () => void;
 
@@ -915,7 +935,7 @@ export const OSProvider: React.FC<{ children: React.ReactNode }> = ({ children }
   const backHandlerRef = useRef<(() => boolean) | null>(null);
 
   // Call Suspend
-  const [suspendedCall, setSuspendedCall] = useState<{ charId: string; charName: string; charAvatar?: string; startedAt: number; bubbles?: any[]; sessionId?: string; elapsedSeconds?: number; voiceLang?: string } | null>(null);
+  const [suspendedCall, setSuspendedCall] = useState<{ charId: string; charName: string; charAvatar?: string; startedAt: number; bubbles?: any[]; sessionId?: string; elapsedSeconds?: number; voiceLang?: string; returnToChat?: boolean } | null>(null);
   // 聊天「见面」按钮 → 见面：记录目标角色，DateApp 挂载后消费一次并自动进入见面
   const [dateAutoStartCharId, setDateAutoStartCharId] = useState<string | null>(null);
 
@@ -1341,9 +1361,50 @@ export const OSProvider: React.FC<{ children: React.ReactNode }> = ({ children }
         }
         
         if (savedApi) {
-            const normalizedApi = normalizeApiConfig({ ...defaultApiConfig, ...JSON.parse(savedApi) });
+            const savedSpeechRecognition = loadStoredSpeechRecognitionConfig();
+            let savedMiniMax: Partial<APIConfig> = {};
+            try {
+              const rawMiniMax = localStorage.getItem(MINIMAX_CONFIG_STORAGE_KEY);
+              if (rawMiniMax) {
+                const parsed = JSON.parse(rawMiniMax) as Partial<APIConfig>;
+                // 旧包会把空 MiniMax 兜底记录写回；空值绝不能覆盖用户已保存的总配置。
+                savedMiniMax = Object.fromEntries(Object.entries(parsed).filter(([, value]) => typeof value !== 'string' || value.trim())) as Partial<APIConfig>;
+              }
+            } catch { /* ignore malformed legacy cache */ }
+            const savedOtherApis = loadStoredOtherApiConfig();
+            const normalizedApi = normalizeApiConfig({
+                ...defaultApiConfig,
+                ...JSON.parse(savedApi),
+                ...savedMiniMax,
+                ...savedOtherApis,
+                // This separate record intentionally wins: it is written only when the user
+                // saves the recognition settings, whereas old builds may rewrite the general
+                // API object without knowing this field exists.
+                ...(savedSpeechRecognition ? { speechRecognition: savedSpeechRecognition } : {}),
+            });
             setApiConfig(normalizedApi);
-            localStorage.setItem('os_api_config', JSON.stringify(normalizedApi));
+            safeSetLocalStorage('os_api_config', JSON.stringify(normalizedApi));
+            safeSetLocalStorage(MINIMAX_CONFIG_STORAGE_KEY, JSON.stringify({ minimaxApiKey: normalizedApi.minimaxApiKey || '', minimaxGroupId: normalizedApi.minimaxGroupId || '', minimaxRegion: normalizedApi.minimaxRegion || 'domestic' }));
+            saveStoredOtherApiConfig(normalizedApi);
+            saveStoredSpeechRecognitionConfig(normalizedApi.speechRecognition);
+        } else {
+            const savedSpeechRecognition = loadStoredSpeechRecognitionConfig();
+            let savedMiniMax: Partial<APIConfig> = {};
+            try {
+              const rawMiniMax = localStorage.getItem(MINIMAX_CONFIG_STORAGE_KEY);
+              if (rawMiniMax) {
+                const parsed = JSON.parse(rawMiniMax) as Partial<APIConfig>;
+                savedMiniMax = Object.fromEntries(Object.entries(parsed).filter(([, value]) => typeof value !== 'string' || value.trim())) as Partial<APIConfig>;
+              }
+            } catch { /* ignore malformed legacy cache */ }
+            const savedOtherApis = loadStoredOtherApiConfig();
+            if (savedSpeechRecognition || Object.keys(savedMiniMax).length || Object.keys(savedOtherApis).length) {
+                const normalizedApi = normalizeApiConfig({ ...defaultApiConfig, ...savedMiniMax, ...savedOtherApis, ...(savedSpeechRecognition ? { speechRecognition: savedSpeechRecognition } : {}) });
+                setApiConfig(normalizedApi);
+                safeSetLocalStorage('os_api_config', JSON.stringify(normalizedApi));
+                safeSetLocalStorage(MINIMAX_CONFIG_STORAGE_KEY, JSON.stringify({ minimaxApiKey: normalizedApi.minimaxApiKey || '', minimaxGroupId: normalizedApi.minimaxGroupId || '', minimaxRegion: normalizedApi.minimaxRegion || 'domestic' }));
+                saveStoredOtherApiConfig(normalizedApi);
+            }
         }
         if (savedModels) {
             try { setAvailableModels(normalizeModelIds(JSON.parse(savedModels))); }
@@ -1352,7 +1413,7 @@ export const OSProvider: React.FC<{ children: React.ReactNode }> = ({ children }
         if (savedPresets) {
             const normalizedPresets = (JSON.parse(savedPresets) as ApiPreset[]).map(normalizeApiPreset);
             setApiPresets(normalizedPresets);
-            localStorage.setItem('os_api_presets', JSON.stringify(normalizedPresets));
+            safeSetLocalStorage('os_api_presets', JSON.stringify(normalizedPresets));
         }
 
         // 加载实时配置
@@ -2845,7 +2906,42 @@ export const OSProvider: React.FC<{ children: React.ReactNode }> = ({ children }
         addToast('主题没能保存到本地（存储空间可能已满），重启后可能会还原', 'error');
     }
   };
-  const updateApiConfig = (updates: Partial<APIConfig>) => { const newConfig = normalizeApiConfig({ ...apiConfig, ...updates }); setApiConfig(newConfig); localStorage.setItem('os_api_config', JSON.stringify(newConfig)); };
+  const updateApiConfig = (updates: Partial<APIConfig>) => {
+    // localStorage is the last successfully saved complete config. Reading it here avoids a
+    // stale Settings panel overwriting a newer API subsection while React state is catching up.
+    let storedConfig: Partial<APIConfig> = {};
+    try {
+      const raw = localStorage.getItem('os_api_config');
+      if (raw) storedConfig = JSON.parse(raw) as Partial<APIConfig>;
+    } catch { /* malformed old data falls back to current state */ }
+    const preservedSpeechRecognition = updates.speechRecognition
+      ?? loadStoredSpeechRecognitionConfig()
+      ?? storedConfig.speechRecognition
+      ?? apiConfig.speechRecognition;
+    const newConfig = normalizeApiConfig({
+      ...defaultApiConfig,
+      ...apiConfig,
+      ...storedConfig,
+      ...updates,
+      ...(preservedSpeechRecognition ? { speechRecognition: preservedSpeechRecognition } : {}),
+    });
+    setApiConfig(newConfig);
+    try {
+      localStorage.setItem('os_api_config', JSON.stringify(newConfig));
+      localStorage.setItem(MINIMAX_CONFIG_STORAGE_KEY, JSON.stringify({
+        minimaxApiKey: newConfig.minimaxApiKey || '',
+        minimaxGroupId: newConfig.minimaxGroupId || '',
+        minimaxRegion: newConfig.minimaxRegion || 'domestic',
+      }));
+      saveStoredOtherApiConfig(newConfig);
+      saveStoredSpeechRecognitionConfig(newConfig.speechRecognition);
+    } catch (error) {
+      console.warn('[API] 写入 localStorage 失败，将依赖 IndexedDB 镜像保存', error);
+    }
+    // 立即写入 IndexedDB 镜像，不等 5 分钟定时器或 pagehide。
+    // 手机浏览器更新/清理网页数据时可能只丢 localStorage；下次启动会从镜像恢复。
+    void snapshotLocalStorageMirror();
+  };
   const updateRealtimeConfig = (updates: Partial<RealtimeConfig>) => { const newConfig = { ...realtimeConfig, ...updates }; setRealtimeConfig(newConfig); localStorage.setItem('os_realtime_config', JSON.stringify(newConfig)); };
 
   // Cloud Backup functions
@@ -2970,10 +3066,15 @@ export const OSProvider: React.FC<{ children: React.ReactNode }> = ({ children }
       setAvailableModels(safeModels);
       localStorage.setItem('os_available_models', JSON.stringify(safeModels));
   };
-  const addApiPreset = (name: string, config: APIConfig) => { setApiPresets(prev => { const next = [...prev, normalizeApiPreset({ id: Date.now().toString(), name, config })]; localStorage.setItem('os_api_presets', JSON.stringify(next)); return next; }); };
-  const updateApiPreset = (id: string, name: string, config: APIConfig) => { setApiPresets(prev => { const next = prev.map(p => p.id === id ? normalizeApiPreset({ ...p, name, config }) : p); localStorage.setItem('os_api_presets', JSON.stringify(next)); return next; }); };
-  const removeApiPreset = (id: string) => { setApiPresets(prev => { const next = prev.filter(p => p.id !== id); localStorage.setItem('os_api_presets', JSON.stringify(next)); return next; }); };
-  const savePresets = (presets: ApiPreset[]) => { const normalized = presets.map(normalizeApiPreset); setApiPresets(normalized); localStorage.setItem('os_api_presets', JSON.stringify(normalized)); };
+  const persistApiPresets = (presets: ApiPreset[]) => {
+    try { localStorage.setItem('os_api_presets', JSON.stringify(presets)); } catch { /* 镜像仍会尽力保存 */ }
+    // 预设和 MiniMax 配置一样，保存后立即写入 IndexedDB 镜像，避免网页更新时丢失。
+    void snapshotLocalStorageMirror();
+  };
+  const addApiPreset = (name: string, config: APIConfig) => { setApiPresets(prev => { const next = [...prev, normalizeApiPreset({ id: Date.now().toString(), name, config })]; persistApiPresets(next); return next; }); };
+  const updateApiPreset = (id: string, name: string, config: APIConfig) => { setApiPresets(prev => { const next = prev.map(p => p.id === id ? normalizeApiPreset({ ...p, name, config }) : p); persistApiPresets(next); return next; }); };
+  const removeApiPreset = (id: string) => { setApiPresets(prev => { const next = prev.filter(p => p.id !== id); persistApiPresets(next); return next; }); };
+  const savePresets = (presets: ApiPreset[]) => { const normalized = presets.map(normalizeApiPreset); setApiPresets(normalized); persistApiPresets(normalized); };
   const addCharacter = async () => {
     const name = 'New Character';
     // 默认开启 emotionConfig.enabled，让"开日程 = 开情绪"这条隐含约定对新角色也成立。
@@ -3723,6 +3824,12 @@ export const OSProvider: React.FC<{ children: React.ReactNode }> = ({ children }
               apiConfig: (mode === 'text_only' || mode === 'full') ? apiConfig : undefined,
               apiPresets: (mode === 'text_only' || mode === 'full') ? apiPresets : undefined,
               availableModels: (mode === 'text_only' || mode === 'full') ? availableModels : undefined,
+              // These three lists are maintained by Settings rather than React context.
+              // Export them explicitly so a restore brings back API presets as well as
+              // the currently selected configuration and credentials.
+              imageGenerationModels: (mode === 'text_only' || mode === 'full') ? (() => { try { const raw = localStorage.getItem('os_image_generation_models'); return raw ? JSON.parse(raw) : undefined; } catch { return undefined; } })() : undefined,
+              imageGenerationPresets: (mode === 'text_only' || mode === 'full') ? (() => { try { const raw = localStorage.getItem('os_image_generation_presets'); return raw ? JSON.parse(raw) : undefined; } catch { return undefined; } })() : undefined,
+              otherApiPresets: (mode === 'text_only' || mode === 'full') ? (() => { try { const raw = localStorage.getItem('os_other_api_presets'); return raw ? JSON.parse(raw) : undefined; } catch { return undefined; } })() : undefined,
               realtimeConfig: (mode === 'text_only' || mode === 'full') ? realtimeConfig : undefined,
               memoryPalaceConfig: (mode === 'text_only' || mode === 'full') ? memoryPalaceConfig : undefined,
               theme: cloneForInPlace(theme), // Include theme in all modes (text/media)
@@ -3746,6 +3853,26 @@ export const OSProvider: React.FC<{ children: React.ReactNode }> = ({ children }
               // Study Room settings (localStorage)
               studyApiConfig: (mode === 'text_only' || mode === 'full') ? (() => { try { const s = localStorage.getItem('study_api_config'); return s ? JSON.parse(s) : undefined; } catch { return undefined; } })() : undefined,
               studyTutorPresets: (mode === 'text_only' || mode === 'full') ? (() => { try { const s = localStorage.getItem('study_tutor_presets'); return s ? JSON.parse(s) : undefined; } catch { return undefined; } })() : undefined,
+
+              // 书库进度和阅读器外观是按书保存的 localStorage。书籍、角色批注已经由
+              // IndexedDB 导出；这里补上用户自己的“看到哪里”和字体/背景等阅读偏好。
+              // 涂鸦是临时层，按退出阅读器即清除的约定，不写入备份。
+              vrReaderLocal: (mode === 'text_only' || mode === 'full') ? (() => {
+                  const readerLocal: Record<string, string> = {};
+                  for (let i = 0; i < localStorage.length; i++) {
+                      const key = localStorage.key(i);
+                      if (!key) continue;
+                      if (key.startsWith('vr_user_bm_')
+                          || key.startsWith('vr_reader_prefs_')
+                          || key === 'vr_reader_theme'
+                          || key === 'vr_reader_font'
+                          || key === 'vr_reader_style_presets') {
+                          const value = localStorage.getItem(key);
+                          if (value !== null) readerLocal[key] = value;
+                      }
+                  }
+                  return Object.keys(readerLocal).length > 0 ? readerLocal : undefined;
+              })() : undefined,
 
               // 云端配置
               cloudBackupConfig: (mode === 'text_only' || mode === 'full') ? (() => { try { const s = localStorage.getItem('os_cloud_backup_config'); return s ? JSON.parse(s) : undefined; } catch { return undefined; } })() : undefined,
@@ -3905,6 +4032,15 @@ export const OSProvider: React.FC<{ children: React.ReactNode }> = ({ children }
               if (backupData.roomCustomAssets) await resolveBlobRefsDeep(backupData.roomCustomAssets);
               if (backupData.customIcons) await resolveBlobRefsDeep(backupData.customIcons);
               if (backupData.appearancePresets) await resolveBlobRefsDeep(backupData.appearancePresets);
+              // 字体已经单独存放在 custom_font_data；不要把十几 MB 的 data:font
+              // 再复制进每一个外观预设，否则移动端导入会额外占用大量内存。
+              if (backupData.appearancePresets) {
+                  for (const preset of backupData.appearancePresets as AppearancePreset[]) {
+                      if (preset.theme?.customFont?.startsWith('data:')) {
+                          preset.theme = { ...preset.theme, customFont: undefined };
+                      }
+                  }
+              }
 
               if (backupData.socialAppData?.userProfile) processObject(backupData.socialAppData.userProfile);
               if (backupData.socialAppData?.userBg) processObject(backupData.socialAppData.userBg);
@@ -4540,6 +4676,12 @@ export const OSProvider: React.FC<{ children: React.ReactNode }> = ({ children }
           if (data.apiConfig) updateApiConfig(data.apiConfig);
           if (data.availableModels) saveModels(data.availableModels);
           if (data.apiPresets) savePresets(data.apiPresets);
+          // API preset lists use their own localStorage records. Keep restoring them
+          // separate from apiConfig so a backup cannot silently discard MiniMax/Qwen/
+          // Fish/Xiaomi presets that the user has already named and saved.
+          if (Array.isArray(data.imageGenerationModels)) safeSetLocalStorage('os_image_generation_models', JSON.stringify(data.imageGenerationModels));
+          if (Array.isArray(data.imageGenerationPresets)) safeSetLocalStorage('os_image_generation_presets', JSON.stringify(data.imageGenerationPresets));
+          if (Array.isArray(data.otherApiPresets)) safeSetLocalStorage('os_other_api_presets', JSON.stringify(data.otherApiPresets));
           if (data.realtimeConfig) updateRealtimeConfig(data.realtimeConfig); // 恢复实时感知配置
           if (data.memoryPalaceConfig) updateMemoryPalaceConfig(data.memoryPalaceConfig); // 恢复记忆宫殿全局配置
 
@@ -4568,6 +4710,12 @@ export const OSProvider: React.FC<{ children: React.ReactNode }> = ({ children }
                   const migratedPresets: AppearancePreset[] = [];
                   for (const preset of data.appearancePresets) {
                       const migrated = await migrateAppearancePresetBlobRefs(preset, cache);
+                      // 自定义字体可能是十几 MB 的 data URI。当前主题会由 updateTheme
+                      // 单独保存到 custom_font_data；外观预设不再重复存一份，避免手机导入时
+                      // 同时占用两份大字符串导致白屏或 QuotaExceededError。
+                      if (migrated.theme?.customFont?.startsWith('data:')) {
+                          migrated.theme = { ...migrated.theme, customFont: undefined };
+                      }
                       migratedPresets.push(migrated);
                       await DB.saveAsset(`appearance_preset_${migrated.id}`, JSON.stringify(migrated));
                   }
@@ -4576,23 +4724,38 @@ export const OSProvider: React.FC<{ children: React.ReactNode }> = ({ children }
           }
 
           // Restore Study Room settings
-          if (data.studyApiConfig) localStorage.setItem('study_api_config', JSON.stringify(data.studyApiConfig));
-          if (data.studyTutorPresets) localStorage.setItem('study_tutor_presets', JSON.stringify(data.studyTutorPresets));
+          if (data.studyApiConfig) safeSetLocalStorage('study_api_config', JSON.stringify(data.studyApiConfig));
+          if (data.studyTutorPresets) safeSetLocalStorage('study_tutor_presets', JSON.stringify(data.studyTutorPresets));
+
+          // Restore 彼方书库的用户进度和阅读器偏好。只接受预期的键名，避免导入文件
+          // 写入任意 localStorage；临时涂鸦从未进入此字段，也不会在导入后复活。
+          if (data.vrReaderLocal && typeof data.vrReaderLocal === 'object') {
+              for (const [key, value] of Object.entries(data.vrReaderLocal)) {
+                  const isReaderKey = key.startsWith('vr_user_bm_')
+                      || key.startsWith('vr_reader_prefs_')
+                      || key === 'vr_reader_theme'
+                      || key === 'vr_reader_font'
+                      || key === 'vr_reader_style_presets';
+                  if (isReaderKey && typeof value === 'string') {
+                      safeSetLocalStorage(key, value);
+                  }
+              }
+          }
 
           // Restore 云端配置
-          if (data.cloudBackupConfig) localStorage.setItem('os_cloud_backup_config', JSON.stringify(data.cloudBackupConfig));
-          if (data.remoteVectorConfig) localStorage.setItem('os_remote_vector_config', JSON.stringify(data.remoteVectorConfig));
+          if (data.cloudBackupConfig) safeSetLocalStorage('os_cloud_backup_config', JSON.stringify(data.cloudBackupConfig));
+          if (data.remoteVectorConfig) safeSetLocalStorage('os_remote_vector_config', JSON.stringify(data.remoteVectorConfig));
 
           // Restore Instant Push
-          if (data.instantPushConfig) localStorage.setItem('instant_push_config_v1', JSON.stringify(data.instantPushConfig));
-          if (data.pushVapid) localStorage.setItem('push_vapid_v1', JSON.stringify(data.pushVapid));
+          if (data.instantPushConfig) safeSetLocalStorage('instant_push_config_v1', JSON.stringify(data.instantPushConfig));
+          if (data.pushVapid) safeSetLocalStorage('push_vapid_v1', JSON.stringify(data.pushVapid));
 
 
           // Restore Memory Palace 水位线
           if (data.memoryPalaceHighWaterMarks) {
               for (const [charId, hwm] of Object.entries(data.memoryPalaceHighWaterMarks)) {
                   if (typeof hwm === 'number' && hwm > 0) {
-                      localStorage.setItem(`mp_lastMsgId_${charId}`, String(hwm));
+                      safeSetLocalStorage(`mp_lastMsgId_${charId}`, String(hwm));
                   }
               }
           }
@@ -4604,61 +4767,61 @@ export const OSProvider: React.FC<{ children: React.ReactNode }> = ({ children }
                       // 只允许恢复 mp_ 前缀的键，避免导入数据污染其它 localStorage
                       if (key.startsWith('mp_personality_tried_')
                           || key.startsWith('mp_first_archive_notice_')) {
-                          localStorage.setItem(key, val);
+                          safeSetLocalStorage(key, val);
                       }
                   }
               }
           }
 
           // Restore Chat 翻译 / 归档 / 润色设置
-          if (typeof data.chatTranslateSourceLang === 'string') localStorage.setItem('chat_translate_source_lang', data.chatTranslateSourceLang);
-          if (typeof data.chatTranslateTargetLang === 'string') localStorage.setItem('chat_translate_lang', data.chatTranslateTargetLang);
+          if (typeof data.chatTranslateSourceLang === 'string') safeSetLocalStorage('chat_translate_source_lang', data.chatTranslateSourceLang);
+          if (typeof data.chatTranslateTargetLang === 'string') safeSetLocalStorage('chat_translate_lang', data.chatTranslateTargetLang);
           if (data.chatTranslateEnabledByChar && typeof data.chatTranslateEnabledByChar === 'object') {
               for (const [charId, enabled] of Object.entries(data.chatTranslateEnabledByChar)) {
-                  localStorage.setItem(`chat_translate_enabled_${charId}`, enabled ? 'true' : 'false');
+                  safeSetLocalStorage(`chat_translate_enabled_${charId}`, enabled ? 'true' : 'false');
               }
           }
           if (data.chatTranslateSourceLangByChar && typeof data.chatTranslateSourceLangByChar === 'object') {
               for (const [charId, lang] of Object.entries(data.chatTranslateSourceLangByChar)) {
-                  if (typeof lang === 'string') localStorage.setItem(`chat_translate_source_lang_${charId}`, lang);
+                  if (typeof lang === 'string') safeSetLocalStorage(`chat_translate_source_lang_${charId}`, lang);
               }
           }
           if (data.chatTranslateTargetLangByChar && typeof data.chatTranslateTargetLangByChar === 'object') {
               for (const [charId, lang] of Object.entries(data.chatTranslateTargetLangByChar)) {
-                  if (typeof lang === 'string') localStorage.setItem(`chat_translate_lang_${charId}`, lang);
+                  if (typeof lang === 'string') safeSetLocalStorage(`chat_translate_lang_${charId}`, lang);
               }
           }
-          if (data.chatArchivePrompts !== undefined) localStorage.setItem('chat_archive_prompts', JSON.stringify(data.chatArchivePrompts));
-          if (typeof data.chatActiveArchivePromptId === 'string') localStorage.setItem('chat_active_archive_prompt_id', data.chatActiveArchivePromptId);
-          if (data.characterRefinePrompts !== undefined) localStorage.setItem('character_refine_prompts', JSON.stringify(data.characterRefinePrompts));
-          if (typeof data.characterActiveRefinePromptId === 'string') localStorage.setItem('character_active_refine_prompt_id', data.characterActiveRefinePromptId);
+          if (data.chatArchivePrompts !== undefined) safeSetLocalStorage('chat_archive_prompts', JSON.stringify(data.chatArchivePrompts));
+          if (typeof data.chatActiveArchivePromptId === 'string') safeSetLocalStorage('chat_active_archive_prompt_id', data.chatActiveArchivePromptId);
+          if (data.characterRefinePrompts !== undefined) safeSetLocalStorage('character_refine_prompts', JSON.stringify(data.characterRefinePrompts));
+          if (typeof data.characterActiveRefinePromptId === 'string') safeSetLocalStorage('character_active_refine_prompt_id', data.characterActiveRefinePromptId);
 
           // Restore UI / 偏好
-          if (typeof data.scheduleAppTheme === 'string') localStorage.setItem('schedule_app_theme', data.scheduleAppTheme);
-          if (typeof data.handbookLifestreamDepth === 'string') localStorage.setItem('handbook_lifestream_depth', data.handbookLifestreamDepth);
-          if (typeof data.groupchatContextLimit === 'number') localStorage.setItem('groupchat_context_limit', String(data.groupchatContextLimit));
+          if (typeof data.scheduleAppTheme === 'string') safeSetLocalStorage('schedule_app_theme', data.scheduleAppTheme);
+          if (typeof data.handbookLifestreamDepth === 'string') safeSetLocalStorage('handbook_lifestream_depth', data.handbookLifestreamDepth);
+          if (typeof data.groupchatContextLimit === 'number') safeSetLocalStorage('groupchat_context_limit', String(data.groupchatContextLimit));
           if (data.browserConfig && typeof data.browserConfig === 'object') {
-              if (typeof data.browserConfig.braveKey === 'string') localStorage.setItem('browser_brave_key', data.browserConfig.braveKey);
-              if (typeof data.browserConfig.useRealSearch === 'boolean') localStorage.setItem('browser_use_real_search', data.browserConfig.useRealSearch ? 'true' : 'false');
+              if (typeof data.browserConfig.braveKey === 'string') safeSetLocalStorage('browser_brave_key', data.browserConfig.braveKey);
+              if (typeof data.browserConfig.useRealSearch === 'boolean') safeSetLocalStorage('browser_use_real_search', data.browserConfig.useRealSearch ? 'true' : 'false');
           }
-          if (typeof data.bm25Mode === 'string') localStorage.setItem('bm25_mode', data.bm25Mode);
-          if (typeof data.lastActiveCharId === 'string') localStorage.setItem('os_last_active_char_id', data.lastActiveCharId);
+          if (typeof data.bm25Mode === 'string') safeSetLocalStorage('bm25_mode', data.bm25Mode);
+          if (typeof data.lastActiveCharId === 'string') safeSetLocalStorage('os_last_active_char_id', data.lastActiveCharId);
           restoreStoryTheaterAppearanceSetting(data.storyTheaterAppearance);
-          if (data.dreamCollection && typeof data.dreamCollection === 'object') localStorage.setItem('os_dream_collection', JSON.stringify(data.dreamCollection));
-          if (typeof data.gotchiAccentHue === 'string' && /^\d+$/.test(data.gotchiAccentHue)) localStorage.setItem('tama_accent_hue', data.gotchiAccentHue);
+          if (data.dreamCollection && typeof data.dreamCollection === 'object') safeSetLocalStorage('os_dream_collection', JSON.stringify(data.dreamCollection));
+          if (typeof data.gotchiAccentHue === 'string' && /^\d+$/.test(data.gotchiAccentHue)) safeSetLocalStorage('tama_accent_hue', data.gotchiAccentHue);
           if (data.eventNotifFlags && typeof data.eventNotifFlags === 'object') {
               for (const [key, val] of Object.entries(data.eventNotifFlags)) {
                   // 只允许 sullyos_ 前缀，避免污染其它键
                   if (typeof val === 'string' && key.startsWith('sullyos_')) {
-                      localStorage.setItem(key, val);
+                      safeSetLocalStorage(key, val);
                   }
               }
           }
           
           if (data.socialAppData) {
               await restoreAssetsInPlace(data.socialAppData, '动态设置');
-              if (data.socialAppData.charHandles) localStorage.setItem('spark_char_handles', JSON.stringify(data.socialAppData.charHandles));
-              if (data.socialAppData.userId) localStorage.setItem('spark_user_id', data.socialAppData.userId);
+              if (data.socialAppData.charHandles) safeSetLocalStorage('spark_char_handles', JSON.stringify(data.socialAppData.charHandles));
+              if (data.socialAppData.userId) safeSetLocalStorage('spark_user_id', data.socialAppData.userId);
               
               // Restore heavy assets to DB
               if (data.socialAppData.userProfile) await DB.saveAsset('spark_social_profile', JSON.stringify(data.socialAppData.userProfile));
@@ -4801,7 +4964,7 @@ export const OSProvider: React.FC<{ children: React.ReactNode }> = ({ children }
   const consumeDateAutoStart = () => setDateAutoStartCharId(null);
   const unlock = () => setIsLocked(false);
 
-  const suspendCall = (info: { charId: string; charName: string; charAvatar?: string; startedAt: number; bubbles?: any[]; sessionId?: string; elapsedSeconds?: number; voiceLang?: string }) => {
+  const suspendCall = (info: { charId: string; charName: string; charAvatar?: string; startedAt: number; bubbles?: any[]; sessionId?: string; elapsedSeconds?: number; voiceLang?: string; returnToChat?: boolean }) => {
     setSuspendedCall(info);
     setActiveApp(AppID.Launcher);
   };

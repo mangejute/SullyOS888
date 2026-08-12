@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach } from 'vitest';
-import { chunkNovelText, chunkNovelTextAsync, getReadingWindow, buildNovel } from './novel';
+import { chunkNovelText, chunkNovelTextAsync, getReadingWindow, buildNovel, detectNovelChapters } from './novel';
 import { parseVROutput, parseMusicOutput, parseGuestbookOutput, parseGymOutput, parsePostOfficeOutput, parsePostOfficeReadOutput, parseSignalOutput } from './prompts';
 import { rollPoemLines, SIGNAL_LINES_MIN, SIGNAL_LINES_MAX, signalActFor } from './constants';
 import { maskPen } from './postOffice';
@@ -11,6 +11,21 @@ import { rollRoom } from './runSession';
 const g = globalThis as any;
 if (typeof g.document === 'undefined') g.document = { visibilityState: 'hidden', addEventListener() {}, removeEventListener() {} };
 if (typeof g.window === 'undefined') g.window = { addEventListener() {}, removeEventListener() {} };
+
+describe('彼方书库真实目录', () => {
+    it('TXT 保留“部 + 章”的层级，并让章节不跨越段落边界', () => {
+        const raw = [
+            '第一部 黎明', '第一章 启程', '第一章的正文。', '',
+            '第二章 相遇', '第二章的正文。', '', '第二部 夜航', '第一章 回声', '新一部的正文。',
+        ].join('\n');
+        const source = detectNovelChapters(raw);
+        expect(source.map(c => c.title)).toEqual(['第一章 启程', '第二章 相遇', '第一章 回声']);
+        expect(source.map(c => c.partTitle)).toEqual(['第一部 黎明', '第一部 黎明', '第二部 夜航']);
+        const novel = buildNovel('目录测试', raw);
+        expect(novel.chapters?.map(c => c.title)).toEqual(['第一章 启程', '第二章 相遇', '第一章 回声']);
+        expect(novel.chapters?.[0].endSeg).toBe(novel.chapters?.[1].startSeg);
+    });
+});
 
 describe('VRScheduler.reconcile', () => {
     beforeEach(() => {

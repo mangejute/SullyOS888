@@ -17,7 +17,9 @@ async function ensureRegistered(): Promise<void> {
   try {
     const base = import.meta.env.BASE_URL || '/';
     const scriptUrl = base + 'sw-keep-alive.js';
-    const reg = await navigator.serviceWorker.register(scriptUrl, { scope: base });
+    // updateViaCache: 'none' 防止手机长期复用旧 sw-keep-alive.js。
+    // GitHub Pages 更新后，下次打开或点击“刷新版本”都会重新检查 worker 脚本。
+    const reg = await navigator.serviceWorker.register(scriptUrl, { scope: base, updateViaCache: 'none' });
     await navigator.serviceWorker.ready;
     registered = true;
     console.log('[KeepAlive] Service Worker registered', reg.scope);
@@ -56,3 +58,23 @@ export const KeepAlive = {
     await ensureRegistered();
   },
 };
+
+/**
+ * 设置页“刷新版本”调用：不清理用户数据，只请求浏览器重新检查当前站点的 Service Worker。
+ */
+export async function refreshServiceWorker(): Promise<void> {
+  if (typeof navigator === 'undefined' || !('serviceWorker' in navigator)) return;
+
+  try {
+    const base = import.meta.env.BASE_URL || '/';
+    const scriptUrl = base + 'sw-keep-alive.js';
+    const registration = await navigator.serviceWorker.register(scriptUrl, {
+      scope: base,
+      updateViaCache: 'none',
+    });
+    await registration.update();
+  } catch (error) {
+    // 页面资源仍会用 URL 缓存参数刷新；SW 更新失败不阻止用户拿到新页面。
+    console.warn('[KeepAlive] SW update check failed:', error);
+  }
+}

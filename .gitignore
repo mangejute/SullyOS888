@@ -57,6 +57,9 @@ xiaohongshu-skills/
 .claude/
 .pnpm-store/
 
+# Local browser verification output; it is not part of the app or deployment.
+chrome-check/
+
 # TIAO-Capacitor local Android toolchain and caches (D: only, never committed)
 .android-sdk/
 .gradle-user-home/

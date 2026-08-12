@@ -101,7 +101,7 @@ export interface OSTheme {
   /** 桌面整体皮肤。'animalcrossing' = 动森风格（NookPhone 彩色圆角图标 + 暖色界面）；
    *  'mobilegame' = 二次元手游首页风格（角色卡 + 等级经验条 + 货币栏 + 网格卡 + 罗盘 dock）；
    *  'tamagotchi' = 电子宠物养成机（桌面即角色的小屋舞台 + 四颗糖果实体键）。默认 'default'。 */
-  skin?: 'default' | 'animalcrossing' | 'mobilegame' | 'tamagotchi';
+  skin?: 'default' | 'animalcrossing' | 'mobilegame' | 'tamagotchi' | 'companion';
   /** 默认桌面的视觉版本：纸感是现行默认，nostalgia 是用户主动选择的最初粉绿白玻璃界面。 */
   desktopVariant?: 'paper' | 'nostalgia';
   /** 动森皮肤下，聊天 App 是否也跟随换成动森界面。默认 true（undefined 视为 true）。关掉则聊天保持原样式。 */
@@ -232,9 +232,8 @@ export interface VirtualTime {
 
 export type MinimaxRegion = 'domestic' | 'overseas';
 
-// 语音合成（TTS）服务商。'minimax'（默认）走 MiniMax T2A；'fishaudio' 走鱼声 Fish Audio。
-// 全局二选一：切换后所有语音场景（聊天语音条 / 约会 / 电话）统一用同一家。
-export type TtsProvider = 'minimax' | 'fishaudio';
+// 语音合成（TTS）服务商。切换后所有语音场景（聊天语音条 / 约会 / 电话）统一使用当前引擎。
+export type TtsProvider = 'minimax' | 'fishaudio' | 'qwen' | 'xiaomi';
 
 export interface VisionApiConfig {
   /** 开启后，聊天图片先由独立视觉模型转成文字，再交给主对话模型。 */
@@ -244,11 +243,23 @@ export interface VisionApiConfig {
   model: string;
 }
 
+export interface SpeechRecognitionConfig {
+  /** browser = 浏览器内置识别；siliconflow = 硅基流动 OpenAI 兼容语音转文字。 */
+  provider: 'browser' | 'siliconflow';
+  baseUrl: string;
+  apiKey: string;
+  model: string;
+  language: string;
+  cleanEmotionEmoji: boolean;
+}
+
 export interface APIConfig {
   baseUrl: string;
   apiKey: string;
   // 可选识图中转：给不支持 image_url 的主模型补视觉能力。
   visionApi?: VisionApiConfig;
+  /** 视频/语音通话的语音识别服务配置。秘钥只保存在本机配置中。 */
+  speechRecognition?: SpeechRecognitionConfig;
   /** 独立生图服务配置；与聊天/识图 API 分开保存。 */
   imageGenerationApi?: {
     baseUrl: string;
@@ -263,13 +274,29 @@ export interface APIConfig {
   // 'overseas' → https://api.minimax.io  (海外站)
   // Missing / unknown falls back to domestic.
   minimaxRegion?: MinimaxRegion;
-  // 语音服务商二选一。缺省 → 'minimax'。
+  // 语音服务商。缺省 → 'minimax'。
   ttsProvider?: TtsProvider;
+  /** 书库角色朗读专用引擎；不影响聊天语音和视频通话。 */
+  readerTtsProvider?: 'system' | 'minimax' | 'xiaomi';
   // 鱼声 Fish Audio API Key（https://fish.audio/）。仅 ttsProvider === 'fishaudio' 时使用。
   fishAudioApiKey?: string;
   // 鱼声默认模型（s2.1-pro / s2-pro / s1）。缺省 → 's2.1-pro'。
   // 角色 voiceProfile.fishModel 优先于这个全局默认。
   fishAudioModel?: string;
+  // 阿里云 Qwen-Audio-TTS / CosyVoice WebSocket 配置。
+  qwenTtsApiKey?: string;
+  qwenTtsWorkspaceId?: string;
+  qwenTtsRegion?: 'beijing' | 'singapore';
+  qwenTtsModel?: string;
+  qwenTtsVoice?: string;
+  qwenTtsAudioFormat?: 'mp3' | 'wav' | 'pcm' | 'opus';
+  /** 可选的自建 Qwen WebSocket 中转地址；留空使用当前代理 Worker。 */
+  qwenTtsEndpoint?: string;
+  // 小米 MiMo TTS（OpenAI 兼容接口）。默认使用官方 API 和 mimo-v2.5-tts 内置音色。
+  xiaomiTtsApiKey?: string;
+  xiaomiTtsBaseUrl?: string;
+  xiaomiTtsModel?: string;
+  xiaomiTtsVoice?: string;
   // 用户自定义「语音表演指南」——注入到角色 system prompt、教模型怎么写出有情绪的语音台词。
   // minimax / fishaudio：聊天 + 电话共用，按 TTS 服务商分别存（两家标记体系不同，不能共用一份）；
   //   留空 → 用内置默认（minimaxTts.VOICE_ACTING_GUIDE / fishAudioTts.FISH_VOICE_ACTING_GUIDE）。
@@ -279,6 +306,8 @@ export interface APIConfig {
   voicePrompts?: {
     minimax?: string;
     fishaudio?: string;
+    qwen?: string;
+    xiaomi?: string;
     dateVoice?: string;
   };
   // Replicate token (r8_xxx) for ACE-Step song generation in 写歌 App.
@@ -1163,10 +1192,29 @@ export interface VRWorldNovel {
     summary?: string;
     /** 原文按阅读单元切好的段落块（每块 ~数百字，便于定位批注与推进书签）。 */
     segments: VRNovelSegment[];
+    /**
+     * 原书章节目录。EPUB 保留真实 spine 章节，TXT 自动识别“第 X 部/第 X 章”；
+     * 老存档没有这一项时，阅读器会按段落生成兼容目录。
+     */
+    chapters?: VRNovelChapter[];
     /** 总字数（缓存，UI 展示用） */
     totalChars: number;
     createdAt: number;
     updatedAt: number;
+}
+
+/** 小说目录项。章节范围使用 segment 索引，既能稳定定位，也不破坏旧书签/批注。 */
+export interface VRNovelChapter {
+    id: string;
+    /** 目录顺序（0-based） */
+    index: number;
+    title: string;
+    /** “第一部”这类上级卷名，可选。 */
+    partTitle?: string;
+    /** 章节第一段，含。 */
+    startSeg: number;
+    /** 章节末后一段，不含。 */
+    endSeg: number;
 }
 
 /** 小说里的一个阅读单元（原文段落块）。 */
@@ -1194,6 +1242,12 @@ export interface VRNovelAnnotation {
     authorName: string;
     /** 批注/吐槽正文 */
     content: string;
+    /** 角色实际批注的原文短句。新批注用它定位波浪线，旧存档没有该字段仍可正常查看。 */
+    quote?: string;
+    /** 章节读后感与句子批注共用存储；读后感不画波浪线。 */
+    type?: 'annotation' | 'reflection';
+    /** 读后感所属章节，便于只展示在该章结尾。 */
+    chapterId?: string;
     /** 若是"吐槽别人的吐槽"，指向被吐槽的批注 id */
     targetAnnotationId?: string;
     createdAt: number;
@@ -1248,6 +1302,14 @@ export interface VRCardMeta {
     annotationExcerpts?: string[];
     /** 带段落锚点的批注引用（用于从动态点回原文跳转） */
     annotationRefs?: { segIdx: number; text: string }[];
+    /** 用户主动和角色共读完成的章节（与普通角色自主书库动态区分）。 */
+    coReadChapter?: string;
+    /** 共读完成后的本章感悟，用于聊天卡片与后续上下文。 */
+    coReadReflection?: string;
+    /** 用户主动在阅读器保存的阅读进度卡片。 */
+    readingProgress?: boolean;
+    /** 进度卡片对应的篇/部与章节。 */
+    progressChapter?: string;
     // --- 听歌房专用 ---
     /** 本次评/听的当前歌（名 - 歌手） */
     songLabel?: string;
@@ -2467,6 +2529,17 @@ export interface CharacterProfile {
   id: string;
   name: string;
   avatar: string;
+  /**
+   * 视频通话与主屏陪伴共用的本地动态形象配置。模型二进制保存在 IndexedDB，
+   * 这里仅保存轻量索引，避免将大型 VRM / Live2D 文件写入角色资料。
+   */
+  videoAvatar?: any;
+  /** 视频通话与主屏可选的静态陪伴立绘配置。 */
+  companionAvatar?: any;
+  /** 视频舞台和主屏陪伴的本地外观偏好。 */
+  videoCallBackground?: string;
+  companionBackground?: string;
+  videoCallPerformanceQuality?: 'basic' | 'high';
   /** 角色生图一致性参考图（最多 4 张 data URL）。 */
   imageGenerationReferences?: string[];
   description: string;
@@ -2495,6 +2568,8 @@ export interface CharacterProfile {
   /** 单次聊天回复的气泡数量范围（每个角色单独设置）。 */
   replyMessageMinCount?: number;
   replyMessageMaxCount?: number;
+  /** 每轮角色发送表情包的概率（0-100，默认 40）。 */
+  emojiReplyProbability?: number;
   contextLimit?: number;
   /**
    * AI 原文读取范围策略：
@@ -2584,6 +2659,10 @@ export interface CharacterProfile {
       fishReferenceId?: string;
       // 该角色单独指定的鱼声模型（覆盖全局 fishAudioModel）。
       fishModel?: string;
+      // Qwen-Audio-TTS / CosyVoice 音色；留空时使用系统设置中的全局音色。
+      qwenVoice?: string;
+      // 小米 MiMo 音色；留空时使用系统设置里的内置默认音色。
+      xiaomiVoice?: string;
       voiceName?: string;
       source?: 'system' | 'voice_cloning' | 'voice_generation' | 'custom';
       model?: string;
@@ -2631,6 +2710,12 @@ export interface CharacterProfile {
   dateVoiceLang?: string;
   // Call (voice phone) — remembered translation language for this character
   callVoiceLang?: string;
+  /** 视频/语音通话设置与陪睡模式（音频文件只保存本地 blob 引用）。 */
+  callSettings?: {
+    dreamTalkEnabled?: boolean;
+    sleepNoiseId?: string;
+    customSleepNoises?: Array<{ id: string; name: string; audioRef: string; mimeType?: string }>;
+  };
 
   // Cross-session guidebook insights: what char has discovered about user across games
   guidebookInsights?: string[];
@@ -3484,6 +3569,10 @@ export interface FullBackupData {
     version: number;
     theme?: OSTheme;
     apiConfig?: APIConfig;
+    /** API setting-page lists that live outside the main API object. */
+    imageGenerationModels?: string[];
+    imageGenerationPresets?: unknown[];
+    otherApiPresets?: unknown[];
     instantPushConfig?: InstantPushConfig;
     pushVapid?: { vapidPublicKey: string; vapidPrivateKey: string; vapidEmail?: string; updatedAt?: number; };
     /**
@@ -3534,6 +3623,8 @@ export interface FullBackupData {
     vrPresets?: { key: string; name: string; prompt: string; blurb?: string }[]; // 剧院·用户自定义写作风格预设
     vrLetters?: VRLetter[];                    // 邮局信件（本地存档+队列）
     vrSettings?: any[];                        // 彼方设置（独立 API + 调用记录）
+    /** 彼方书库的本机阅读进度与阅读器偏好（存 localStorage）。不包含退出阅读器即清除的涂鸦。 */
+    vrReaderLocal?: Record<string, string>;
     worlds?: WorldProfile[];                   // 家园·世界定义
     worldEpisodes?: WorldEpisode[];            // 家园·演绎历史
     vrPostOffice?: Record<string, string>;     // 邮局本机配置：身份 deviceId / 后端地址（存 localStorage）

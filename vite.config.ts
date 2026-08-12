@@ -128,6 +128,12 @@ export default defineConfig({
       output: {
         manualChunks(id) {
           if (id.includes('node_modules')) {
+            // The Cubism adapter throws during module initialization unless the
+            // proprietary Cubism Core has already been loaded. Keep it out of
+            // the startup vendor chunk; live2dCore loads it on demand.
+            if (id.includes('untitled-pixi-live2d-engine')) {
+              return 'live2d-runtime';
+            }
             if (id.includes('react') || id.includes('react-dom') || id.includes('scheduler')) {
               return 'vendor-react';
             }

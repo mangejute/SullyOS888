@@ -2,6 +2,7 @@
 
 
 import React, { useEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { Message, ChatTheme } from '../../types';
 import { phoneFieldToText } from '../../utils/phoneEvidence';
 import { tryParseLifeSimResetCard } from '../../utils/lifeSimChatCard';
@@ -9,6 +10,8 @@ import { VALID_INTERJECTION_TAGS, cleanVoiceMarkupForDisplay } from '../../utils
 import { stripFishCuesForDisplay } from '../../utils/fishAudioTts';
 import { formatStatCount } from '../../utils/videoParser';
 import { trackEvent } from '../../utils/analytics';
+import { DB } from '../../utils/db';
+import { cacheGeneratedImage } from '../../utils/imageGeneration';
 import McdCard from './McdCard';
 import HtmlCard from './HtmlCard';
 import LuckinCard from './LuckinCard';
@@ -1486,6 +1489,39 @@ const MessageItem = React.memo(({
     const replyGestureActiveRef = useRef(false);
     const replyReadyRef = useRef(false);
     const [imagePreviewOpen, setImagePreviewOpen] = useState(false);
+    const [loadedImageUrl, setLoadedImageUrl] = useState<string | null>(null);
+    const [imageLoadFailed, setImageLoadFailed] = useState(false);
+
+    // 先把图片完整下载并解码，再交给页面显示，避免浏览器把渐进式图片一截一截地绘制出来。
+    useEffect(() => {
+        let cancelled = false;
+        setLoadedImageUrl(null);
+        setImageLoadFailed(false);
+        if (m.type !== 'image' || !m.content) return () => { cancelled = true; };
+        const image = new Image();
+        image.onload = async () => {
+            try { await image.decode?.(); } catch { /* 某些图片格式不支持 decode，onload 已足够 */ }
+            if (!cancelled) setLoadedImageUrl(m.content);
+
+            // 旧版消息只存了生图服务的临时 URL。只要这次还打开得出来，
+            // 就顺手转成本地 data URL，之后切后台、刷新或链接过期也能保留。
+            const generation = (m.metadata as any)?.imageGeneration;
+            if (generation?.status === 'success' && !/^data:image\//i.test(m.content)) {
+                void cacheGeneratedImage(m.content).then(async (cached) => {
+                    if (cancelled || cached === m.content) return;
+                    await DB.updateMessage(m.id, cached);
+                    await DB.updateMessageMetadata(m.id, prev => ({
+                        ...(prev || {}),
+                        imageGeneration: { ...(prev?.imageGeneration || {}), url: cached, cached: true },
+                    }));
+                    window.dispatchEvent(new CustomEvent('active-msg-progress', { detail: { charId: m.charId } }));
+                }).catch(() => { /* 保留原链接，无法跨域读取时不影响本次显示 */ });
+            }
+        };
+        image.onerror = () => { if (!cancelled) { setLoadedImageUrl(null); setImageLoadFailed(true); } };
+        image.src = m.content;
+        return () => { cancelled = true; image.onload = null; image.onerror = null; };
+    }, [m.type, m.content]);
 
     const styleConfig = isUser ? activeTheme.user : activeTheme.ai;
     const [showVoiceText, setShowVoiceText] = useState(false);
@@ -2450,6 +2486,9 @@ const MessageItem = React.memo(({
         const roomInfo = { name: roomNameMap[md.room] || '彼方' };
         const activity: string = md.activity || '在彼方度过了一段时间。';
         const excerpts: string[] = Array.isArray(md.annotationExcerpts) ? md.annotationExcerpts : [];
+        const coReadChapter: string = typeof md.coReadChapter === 'string' ? md.coReadChapter : '';
+        const coReadReflection: string = typeof md.coReadReflection === 'string' ? md.coReadReflection : '';
+        const progressChapter: string = typeof md.progressChapter === 'string' ? md.progressChapter : '';
         const timeStr = new Date(m.timestamp).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' });
         const card = (
             <div className="w-64">
@@ -2473,6 +2512,18 @@ const MessageItem = React.memo(({
                                 ? activity
                                 : <><span className="font-bold text-amber-200">{charName || 'Ta'}</span> {activity}</>}
                         </p>
+                        {md.readingProgress && (
+                            <div className="mt-2.5 rounded-lg border border-indigo-200/20 bg-white/5 px-2.5 py-2">
+                                <div className="text-[9px] font-bold tracking-[0.14em] text-indigo-200/80">阅读进度已保存</div>
+                                <div className="mt-1 text-[11px] leading-[1.5] text-indigo-50/95">《{md.novelTitle || '这本书'}》{progressChapter || '正文'}</div>
+                            </div>
+                        )}
+                        {coReadReflection && (
+                            <div className="mt-2.5 rounded-lg border border-amber-200/20 bg-white/5 px-2.5 py-2">
+                                <div className="mb-1 text-[9px] font-bold tracking-[0.14em] text-amber-200/80">{coReadChapter ? `${coReadChapter} · 本章感悟` : '本章感悟'}</div>
+                                <p className="max-h-28 overflow-y-auto whitespace-pre-wrap text-[11px] leading-[1.55] text-indigo-100/90 no-scrollbar">{coReadReflection}</p>
+                            </div>
+                        )}
                         {excerpts.length > 0 && (
                             <div className="mt-2 space-y-1">
                                 {excerpts.map((ex, i) => (
@@ -3285,10 +3336,13 @@ const MessageItem = React.memo(({
     if (m.type === 'image') {
         const imageGeneration = (m.metadata as any)?.imageGeneration || {};
         const status = imageGeneration.status as 'pending' | 'success' | 'failed' | undefined;
-        const description = imageGeneration.description || imageGeneration.prompt || '';
+        const rawDescription = String(imageGeneration.caption || imageGeneration.description || '').trim();
+        // 生图接口内部提示词可能是英文；用户界面只展示中文说明，避免把内部 prompt 泄露到聊天里。
+        const description = /[\u4e00-\u9fff]/.test(rawDescription) ? rawDescription : '角色生成的照片';
         const wasSafetyBlocked = /安全|safety|policy|moderation|无法用于生成图像/i.test(String(imageGeneration.error || ''));
         const aspectRatio = String(imageGeneration.aspectRatio || '1:1');
         const placeholderRatioClass = aspectRatio === '3:4' ? 'aspect-[3/4]' : aspectRatio === '9:16' ? 'aspect-[9/16]' : aspectRatio === '4:3' ? 'aspect-[4/3]' : aspectRatio === '16:9' ? 'aspect-[16/9]' : 'aspect-square';
+        const imageReady = Boolean(m.content && loadedImageUrl === m.content);
         const downloadImage = () => {
             if (!m.content) return;
             const link = document.createElement('a');
@@ -3298,10 +3352,25 @@ const MessageItem = React.memo(({
         };
         return commonLayout(
             <div className="relative group">
-                {m.content ? (
-                    <button type="button" className="block max-w-[230px] overflow-hidden rounded-2xl text-left active:scale-[0.98]" onClick={() => setImagePreviewOpen(true)}>
-                        <img src={m.content} className="max-h-[320px] max-w-[230px] rounded-2xl object-cover" alt="角色生成的图片" loading="lazy" decoding="async" />
+                {m.content && imageReady ? (
+                    <button type="button" className={`block w-[224px] max-w-[230px] overflow-hidden rounded-2xl text-left active:scale-[0.98] ${placeholderRatioClass}`} onClick={() => setImagePreviewOpen(true)}>
+                        <img src={m.content} className="h-full w-full rounded-2xl object-cover" alt="角色生成的图片" />
                     </button>
+                ) : m.content && imageLoadFailed ? (
+                    <div className={`relative w-[224px] overflow-hidden rounded-2xl bg-white shadow-[0_5px_16px_rgba(15,23,42,0.14)] ${placeholderRatioClass}`}>
+                        <button type="button" aria-label="重新生成图片" title="图片链接已失效，点击重新生成" className="absolute right-3 top-3 z-10 flex h-9 w-9 items-center justify-center rounded-full bg-white text-slate-600 shadow-sm" onClick={() => onRetryImageGeneration?.(m)}><Camera size={19} weight="bold" /></button>
+                        <div className="flex h-full flex-col justify-end bg-slate-100/90 p-4">
+                            <div className="text-[11px] text-slate-400">照片链接已失效</div>
+                            <div className="mt-1 line-clamp-4 text-sm leading-relaxed text-slate-700">点击右上角重新生成</div>
+                        </div>
+                    </div>
+                ) : m.content ? (
+                    <div className={`relative w-[224px] overflow-hidden rounded-2xl bg-white shadow-[0_5px_16px_rgba(15,23,42,0.14)] ${placeholderRatioClass}`}>
+                        <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 bg-slate-100/95 text-slate-500">
+                            <SpinnerGap size={20} weight="bold" className="animate-spin" />
+                            <span className="text-[11px]">正在加载照片…</span>
+                        </div>
+                    </div>
                 ) : status === 'pending' ? (
                     <div className={`relative w-[224px] overflow-hidden rounded-2xl bg-white shadow-[0_5px_16px_rgba(15,23,42,0.14)] ${placeholderRatioClass}`}>
                         <div className="absolute right-3 top-3 z-10 flex h-9 w-9 items-center justify-center rounded-full bg-white/90 text-slate-600 shadow-sm">
@@ -3325,17 +3394,18 @@ const MessageItem = React.memo(({
                         <div className="flex h-full items-center justify-center bg-slate-100 text-xs italic text-slate-400">[图片已丢失]</div>
                     </div>
                 )}
-                {imagePreviewOpen && m.content && (
-                    <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/70 p-4" onClick={() => setImagePreviewOpen(false)}>
-                        <div className="relative flex max-h-full max-w-full flex-col items-center justify-center" onClick={e => e.stopPropagation()}>
-                            <div className="absolute right-0 top-0 z-10 flex translate-y-[-52px] gap-2">
-                                <button type="button" aria-label="下载图片" title="下载图片" className="flex h-10 w-10 items-center justify-center rounded-full bg-white/20 text-white backdrop-blur" onClick={downloadImage}><DownloadSimple size={20} weight="bold" /></button>
-                                <button type="button" aria-label="关闭大图" title="关闭大图" className="flex h-10 w-10 items-center justify-center rounded-full bg-white/20 text-white backdrop-blur" onClick={() => setImagePreviewOpen(false)}><X size={20} weight="bold" /></button>
-                            </div>
-                            <img src={m.content} className="max-h-[78vh] max-w-[92vw] rounded-2xl object-contain" alt="角色生成的大图" />
-                            {description && <div className="mt-4 max-w-[92vw] whitespace-pre-wrap text-center text-sm leading-relaxed text-white">{description}</div>}
+                {imagePreviewOpen && m.content && typeof document !== 'undefined' && createPortal(
+                    <div className="fixed inset-0 z-[200] flex flex-col items-center justify-center bg-black/70 px-5 py-16 backdrop-blur-xl" onClick={() => setImagePreviewOpen(false)}>
+                        <div className="absolute right-5 z-10 flex gap-3" style={{ top: 'max(16px, env(safe-area-inset-top))' }}>
+                            <button type="button" aria-label="下载图片" title="下载图片" className="flex h-11 w-11 items-center justify-center rounded-full bg-white/20 text-white shadow-sm backdrop-blur-md active:scale-95" onClick={downloadImage}><DownloadSimple size={21} weight="bold" /></button>
+                            <button type="button" aria-label="关闭大图" title="关闭大图" className="flex h-11 w-11 items-center justify-center rounded-full bg-white/20 text-white shadow-sm backdrop-blur-md active:scale-95" onClick={() => setImagePreviewOpen(false)}><X size={22} weight="bold" /></button>
                         </div>
-                    </div>
+                        <div className="flex max-h-full w-full max-w-[520px] flex-col items-center" onClick={e => e.stopPropagation()}>
+                            <img src={m.content} className="max-h-[58vh] max-w-full rounded-[28px] object-contain shadow-[0_18px_60px_rgba(0,0,0,0.35)]" alt="角色生成的大图" />
+                            <div className="mt-5 max-w-[92vw] whitespace-pre-wrap text-center text-[15px] leading-7 text-white drop-shadow-[0_1px_3px_rgba(0,0,0,0.75)]">{description}</div>
+                        </div>
+                    </div>,
+                    document.body,
                 )}
             </div>
         );
