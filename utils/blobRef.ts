@@ -275,3 +275,38 @@ export function useBlobRefUrl(value: string | undefined | null, mimeType?: strin
 
     return url;
 }
+
+/**
+ * 音频专用解析。部分 Android Edge 版本会把 IndexedDB Blob 生成的 blob: URL 当成
+ * 无效媒体（控件显示 0:00 / 0:00），但 data URL 可以稳定交给同一套解码器。
+ * 音频一般只在陪睡时取一首，不会像图片那样大量常驻，因此优先兼容性。
+ */
+export function useBlobRefAudioUrl(value: string | undefined | null, mimeType?: string): string | undefined {
+    const [url, setUrl] = useState<string | undefined>(
+        isBlobRef(value) ? undefined : (value ?? undefined)
+    );
+
+    useEffect(() => {
+        if (!isBlobRef(value)) {
+            setUrl(value ?? undefined);
+            return;
+        }
+        let alive = true;
+        getBlobForRef(value).then(async blob => {
+            if (!blob || !alive) {
+                if (alive) setUrl(undefined);
+                return;
+            }
+            const typedBlob = mimeType && blob.type !== mimeType ? new Blob([blob], { type: mimeType }) : blob;
+            try {
+                const dataUrl = await blobToDataUrl(typedBlob);
+                if (alive) setUrl(dataUrl);
+            } catch {
+                if (alive) setUrl(undefined);
+            }
+        });
+        return () => { alive = false; };
+    }, [value, mimeType]);
+
+    return url;
+}

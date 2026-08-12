@@ -73,7 +73,7 @@ import {
   type AvatarTouchHit,
   type AvatarTouchRecord,
 } from '../utils/avatarTouch';
-import { dataUrlToBlob, deleteBlobRef, isBlobRef, putImageBlob, useBlobRefUrl } from '../utils/blobRef';
+import { dataUrlToBlob, deleteBlobRef, isBlobRef, putImageBlob, useBlobRefAudioUrl, useBlobRefUrl } from '../utils/blobRef';
 import { CALL_LIGHT_THEME_CSS } from '../components/call/callLightTheme';
 import AvatarTouchFeedback, { type AvatarTouchEffect } from '../components/call/AvatarTouchFeedback';
 import { isBuiltinSullyLive2D, setBuiltinSullyLive2DQuality, type BuiltinSullyLive2DQuality } from '../utils/builtinSullyLive2D';
@@ -851,7 +851,7 @@ const CallApp: React.FC = () => {
     ? BUILTIN_SLEEP_NOISES.find(item => item.id === selectedSleepNoiseId)
       || selectedChar?.callSettings?.customSleepNoises?.find(item => item.id === selectedSleepNoiseId)
     : undefined;
-  const selectedSleepNoiseUrl = useBlobRefUrl(
+  const selectedSleepNoiseUrl = useBlobRefAudioUrl(
     selectedSleepNoise && 'audioRef' in selectedSleepNoise ? selectedSleepNoise.audioRef : undefined,
     selectedSleepNoise && 'mimeType' in selectedSleepNoise ? selectedSleepNoise.mimeType : undefined,
   );
