@@ -2737,21 +2737,37 @@ const chapterForSeg = (chapters: VRNovelChapter[], segIdx: number) =>
     chapters.find(c => segIdx >= c.startSeg && segIdx < c.endSeg) || chapters[chapters.length - 1];
 const chapterLabel = (chapter: VRNovelChapter | undefined) => chapter ? `${chapter.partTitle ? `${chapter.partTitle} · ` : ''}${chapter.title}` : '正文';
 
-/** 阅读页优先容纳 2~3 段文字，仍预留足够空间避免被底栏盖住。 */
-const buildReaderPages = (segments: VRWorldNovel['segments']) => {
-    const MAX_CHARS = 360;
-    const pages: Array<{ segIdx: number; text: string }> = [];
+type ReaderPage = { items: Array<{ segIdx: number; text: string }> };
+
+/**
+ * 页面容量由实际阅读区域计算，切点优先落在句末。短段不会单独占一页，会继续装入下一段内容。
+ * 这只是分段，不依赖固定设备尺寸；容器尺寸、字体或行距变更后会重新分页。
+ */
+const buildReaderPages = (segments: VRWorldNovel['segments'], capacity: number): ReaderPage[] => {
+    const pages: ReaderPage[] = [];
+    let items: ReaderPage['items'] = [];
+    let used = 0;
+    const pushPage = () => { if (items.length) pages.push({ items }); items = []; used = 0; };
+    const takeAtBoundary = (text: string, limit: number) => {
+        if (text.length <= limit) return text.length;
+        const sample = text.slice(0, limit + 1);
+        const boundary = Math.max(sample.lastIndexOf('。'), sample.lastIndexOf('！'), sample.lastIndexOf('？'), sample.lastIndexOf('；'), sample.lastIndexOf('，'), sample.lastIndexOf('\n'));
+        return boundary >= Math.min(80, Math.floor(limit * 0.55)) ? boundary + 1 : limit;
+    };
     for (const segment of segments) {
         let rest = segment.text.trim();
         while (rest) {
-            if (rest.length <= MAX_CHARS) { pages.push({ segIdx: segment.idx, text: rest }); break; }
-            const sample = rest.slice(0, MAX_CHARS + 1);
-            const boundary = Math.max(sample.lastIndexOf('。'), sample.lastIndexOf('！'), sample.lastIndexOf('？'), sample.lastIndexOf('；'), sample.lastIndexOf('\n'));
-            const cut = boundary >= 140 ? boundary + 1 : MAX_CHARS;
-            pages.push({ segIdx: segment.idx, text: rest.slice(0, cut).trim() });
-            rest = rest.slice(cut).trim();
+            const remaining = capacity - used;
+            // 余量太小就换页，避免把一句话切得只剩几个字。
+            if (used > 0 && remaining < 60) { pushPage(); continue; }
+            const take = takeAtBoundary(rest, Math.max(1, remaining));
+            const piece = rest.slice(0, take).trim();
+            if (piece) { items.push({ segIdx: segment.idx, text: piece }); used += piece.length; }
+            rest = rest.slice(take).trim();
+            if (rest) pushPage();
         }
     }
+    pushPage();
     return pages;
 };
 
@@ -2805,7 +2821,8 @@ const ReaderModal: React.FC<{
 }> = ({ novel, characters, apiConfig, userProfile, updateCharacter, onClose, initialSeg, peek }) => {
     // 所有阅读都只用同一套翻页，不再让正文滚到被底栏遮住。
     const total = novel.segments.length;
-    const readerPages = useMemo(() => buildReaderPages(novel.segments), [novel.segments]);
+    const [pageCapacity, setPageCapacity] = useState(360);
+    const readerPages = useMemo(() => buildReaderPages(novel.segments, pageCapacity), [novel.segments, pageCapacity]);
     const chapters = useMemo(() => resolvedChapters(novel), [novel]);
     const initialBm = useMemo(() => Math.min(Math.max(0, initialSeg != null ? initialSeg : readUserBm(novel.id)), Math.max(0, total - 1)), [novel.id, total, initialSeg]);
     const [annotations, setAnnotations] = useState<VRNovelAnnotation[]>([]);
@@ -2845,13 +2862,34 @@ const ReaderModal: React.FC<{
     const annBySeg = useMemo(() => groupAnnotationsBySeg(annotations), [annotations]);
     const nameOf = (id: string) => characters.find(c => c.id === id)?.name;
     const selectedChar = characters.find(c => c.id === readerCharId);
-    const currentSeg = readerPages[page]?.segIdx ?? Math.max(0, total - 1);
+    const currentSeg = readerPages[page]?.items[0]?.segIdx ?? Math.max(0, total - 1);
     const currentChapter = chapterForSeg(chapters, currentSeg);
     const totalPages = Math.max(1, readerPages.length);
-    const renderSegs = readerPages[page] ? [{ idx: readerPages[page].segIdx, text: readerPages[page].text }] : [];
+    const renderSegs = (readerPages[page]?.items || []).map(item => ({ idx: item.segIdx, text: item.text }));
     const readerFont = prefs.fontFamily === 'sans' ? `'Noto Sans SC','Microsoft YaHei',sans-serif` : prefs.fontFamily === 'system' ? 'system-ui,sans-serif' : `'Noto Serif SC','Songti SC','Noto Serif','Georgia',serif`;
     // 涂鸦是会话内的临时纸张：翻页后可翻回看，退出阅读器即随组件卸载清空。
     const doodleViewKey = `page:${page}`;
+
+    useLayoutEffect(() => {
+        const area = doodleAreaRef.current;
+        if (!area) return;
+        const recalculate = () => {
+            const { width, height } = area.getBoundingClientRect();
+            if (!width || !height) return;
+            const charsPerLine = Math.max(8, Math.floor((width - 40) / Math.max(12, fontSize * 1.02)));
+            const visibleLines = Math.max(3, Math.floor((height - 36) / Math.max(18, fontSize * (prefs.lineHeight || 1.9))));
+            // 首行缩进、段距与批注按钮预留 12%，让每页既尽量填满也不溢出。
+            const next = Math.max(100, Math.floor(charsPerLine * visibleLines * 0.88));
+            setPageCapacity(current => current === next ? current : next);
+        };
+        recalculate();
+        if (typeof ResizeObserver === 'undefined') return;
+        const observer = new ResizeObserver(recalculate);
+        observer.observe(area);
+        return () => observer.disconnect();
+    }, [fontSize, prefs.lineHeight, doodleMode, showAudio, showCtl]);
+
+    useEffect(() => setPage(current => Math.min(current, Math.max(0, readerPages.length - 1))), [readerPages.length]);
 
     const renderDoodles = useCallback(() => {
         const canvas = doodleCanvasRef.current;
