@@ -1225,6 +1225,7 @@ const WorldView: React.FC<{
     const [phoneView, setPhoneView] = useState<{ ownerId: string; tab?: 'feed' | 'dm' | 'group' } | null>(null);
     const [rerollTarget, setRerollTarget] = useState<{ charId: string; charName: string } | null>(null);
     const [rerollDir, setRerollDir] = useState('');
+    const [customStoryDirection, setCustomStoryDirection] = useState('');
 
     const members = useMemo(() => world.memberIds.map(id => characters.find(c => c.id === id)).filter(Boolean) as CharacterProfile[], [world.memberIds, characters]);
     const latest = episodes[0];
@@ -1253,6 +1254,14 @@ const WorldView: React.FC<{
     }, [world.id]);
 
     useEffect(() => { loadEpisodes(); }, [loadEpisodes]);
+    // 老版本曾把所有日期的伏笔都留下。打开世界时立即删掉三天前的存档，
+    // 不必等下一次观测才看到正确的伏笔栏。
+    useEffect(() => {
+        const floor = Math.max(0, world.storyClock - 12);
+        const trimmed = (world.seeds || []).filter(seed => seed.round >= floor);
+        if (trimmed.length === (world.seeds || []).length) return;
+        void DB.saveWorld({ ...world, seeds: trimmed, updatedAt: Date.now() }).then(onWorldUpdated);
+    }, [world.id, world.storyClock, world.seeds, onWorldUpdated]);
 
     useEffect(() => {
         const onStart = (e: any) => { if (e.detail?.worldId === world.id) setProgress({ done: 0, total: e.detail.total || members.length }); };
@@ -1409,6 +1418,15 @@ const WorldView: React.FC<{
         void mutateWorld({ directives: [...(world.directives || []), d] });
         trackEvent('给角色传一句心声');
         addToast('心声已传达，下一轮生效', 'success');
+    };
+
+    const setStoryDirection = (text: string) => {
+        const direction = text.trim();
+        if (!direction) { addToast('先写下你希望世界往哪里走', 'error'); return; }
+        void mutateWorld({ storyDirective: { id: `wsd_${Date.now().toString(36)}`, text: direction.slice(0, 500), createdRound: world.storyClock } });
+        trackEvent('指定家园下一段走向');
+        addToast('上帝指令已设定，下一段剧情必须照此推进', 'success');
+        setCustomStoryDirection('');
     };
 
     const armSeed = (seedId: string) => {
@@ -1590,6 +1608,24 @@ const WorldView: React.FC<{
                             <div className="text-[9px] text-white/55 mt-1">可以离开这个界面，演绎在后台继续</div>
                         </div>
                     )}
+                </div>
+            </div>
+
+            {/* ── 上帝指令：用户决定下一段全世界的共同走向 ── */}
+            <div className="mx-4 mt-3 rounded-2xl border p-3" style={{ background: isNight ? 'rgba(26,30,61,.9)' : 'rgba(255,255,255,.86)', borderColor: isNight ? 'rgba(251,191,36,.32)' : 'rgba(146,64,14,.18)' }}>
+                <div className={`flex items-center gap-1.5 text-[10px] font-black tracking-[0.18em] uppercase ${isNight ? 'text-amber-200/90' : 'text-amber-700'}`}><Sparkle size={12} weight="fill" />命运抉择 · 决定下一段</div>
+                <p className={`mt-1 text-[10px] leading-relaxed ${isNight ? 'text-indigo-100/60' : 'text-stone-500'}`}>选定后会强制影响所有角色与 NPC 的下一段演绎，完成后自动失效。</p>
+                {world.storyDirective && <div className={`mt-2 rounded-xl px-2.5 py-2 text-[10.5px] leading-relaxed ${isNight ? 'bg-amber-300/10 text-amber-100' : 'bg-amber-50 text-amber-800'}`}>已选定：{world.storyDirective.text}</div>}
+                <div className="mt-2 grid grid-cols-1 gap-1.5">
+                    {[
+                        '让一个隐藏的秘密出现明确破绽，相关的人不得不开始怀疑并试探对方。',
+                        '让一件突发的外部事件打乱所有人的原计划，迫使他们在压力下站队或互相求助。',
+                        '让两位关系最紧张或最微妙的人被迫单独相处，把压着的话和矛盾推到台面上。',
+                    ].map((option, index) => <button key={option} onClick={() => setStoryDirection(option)} disabled={!!progress} className={`w-full rounded-xl px-2.5 py-2 text-left text-[10.5px] font-semibold leading-relaxed transition active:scale-[.99] disabled:opacity-50 ${isNight ? 'bg-white/[.07] text-indigo-50 hover:bg-white/[.12]' : 'bg-stone-50 text-stone-700 hover:bg-amber-50'}`}><span className={`mr-1.5 inline-flex h-4 w-4 items-center justify-center rounded-full text-[9px] ${isNight ? 'bg-amber-300/20 text-amber-100' : 'bg-amber-100 text-amber-700'}`}>{index + 1}</span>{option}</button>)}
+                </div>
+                <div className="mt-2 flex gap-1.5">
+                    <input value={customStoryDirection} onChange={e => setCustomStoryDirection(e.target.value)} onKeyDown={e => { if (e.key === 'Enter') setStoryDirection(customStoryDirection); }} disabled={!!progress} maxLength={500} placeholder="自定义下一段走向…" className={`min-w-0 flex-1 rounded-xl px-2.5 py-2 text-[10.5px] outline-none disabled:opacity-50 ${isNight ? 'bg-black/20 text-white placeholder:text-indigo-200/35' : 'bg-stone-50 text-stone-800 placeholder:text-stone-400'}`} />
+                    <button onClick={() => setStoryDirection(customStoryDirection)} disabled={!!progress || !customStoryDirection.trim()} className="shrink-0 rounded-xl bg-amber-400 px-3 py-2 text-[10.5px] font-black text-amber-950 disabled:opacity-40 active:scale-95">确定</button>
                 </div>
             </div>
 
@@ -1776,7 +1812,7 @@ const WorldView: React.FC<{
                 {(world.seeds || []).length > 0 && (
                     <div className={`rounded-2xl border p-3.5 ${t.panel}`}>
                         <div className={`text-[10px] font-black tracking-[0.25em] uppercase flex items-center gap-1.5 mb-2.5 ${t.textLabel}`}>
-                            <EyeSlash size={11} weight="fill" />伏笔栏 · 只有你看得到<span className="normal-case tracking-normal font-medium opacity-60 ml-1">（长按删除）</span>
+                            <EyeSlash size={11} weight="fill" />伏笔栏 · 只有你看得到<span className="normal-case tracking-normal font-medium opacity-60 ml-1">（仅保留近 3 天 · 长按删除）</span>
                         </div>
                         {(() => {
                             const activeSeeds = (world.seeds || []).filter(s => s.status !== 'resolved').slice().reverse();

@@ -168,10 +168,9 @@ export function collectSeeds(world: WorldProfile, beat: WorldCharBeat, round: nu
             text, hideFrom: [], round, storyTime, status: 'pending',
         });
     }
-    // 伏笔栏只留最近 30 条 pending/armed；resolved 留 20 条供回看
-    const active = world.seeds.filter(s => s.status !== 'resolved').slice(-30);
-    const resolved = world.seeds.filter(s => s.status === 'resolved').slice(-20);
-    world.seeds = [...resolved, ...active];
+    // 伏笔只保留最近三天（四段制 = 12 段）。旧剧情不再占伏笔栏，也无法误触发。
+    const recentFloor = Math.max(0, round - 11);
+    world.seeds = world.seeds.filter(seed => seed.round >= recentFloor);
 }
 
 /** 按 armed 伏笔为某角色生成"绕不开的事"注入文案。 */
@@ -395,6 +394,7 @@ export async function runWorldEpisode(deps: WorldEpisodeDeps): Promise<WorldEpis
                     recentPosts: collectRecentPosts(lastBeats, beats),
                     exposures: buildExposures(world, char.id, char.name),
                     directive: directive ? { impulseText: directive.impulseText, text: directive.text } : undefined,
+                    storyDirective: world.storyDirective?.text,
                     priorChapter,
                     timeJump,
                     userName: userProfile?.name || '',
@@ -440,7 +440,7 @@ export async function runWorldEpisode(deps: WorldEpisodeDeps): Promise<WorldEpis
                     headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${api.apiKey || 'sk-none'}` },
                     body: JSON.stringify({
                         model: api.model,
-                    messages: [{ role: 'user', content: buildNpcTurn({ world, members, storyTime, lastSummary, chapterAtmosphere: latestChapter?.atmosphere, inboxes: npcInboxes(world), recentPosts: recentPostsForNpc, timeJump }) }],
+                    messages: [{ role: 'user', content: buildNpcTurn({ world, members, storyTime, lastSummary, chapterAtmosphere: latestChapter?.atmosphere, inboxes: npcInboxes(world), recentPosts: recentPostsForNpc, timeJump, storyDirective: world.storyDirective?.text }) }],
                         temperature: 0.9, stream: false,
                     }),
                 }, 2, 0, { appName: '家园', purpose: `NPC世界引擎 · ${world.name}` });
@@ -492,6 +492,7 @@ export async function runWorldEpisode(deps: WorldEpisodeDeps): Promise<WorldEpis
             threads: world.threads, // 本轮累积的私聊/群聊消息一并持久化
             seeds: world.seeds,
             directives: remainingDirectives,
+            storyDirective: undefined,
             storyClock: world.storyClock + 1,
             // real 模式：把世界的「现实段」推进到这次演的那一段
             realClock: realTarget || world.realClock,

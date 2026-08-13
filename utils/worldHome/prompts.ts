@@ -325,13 +325,15 @@ export function buildWorldCharTurn(args: {
     exposures?: string[];
     /** 用户对该角色冲动的决策留言 */
     directive?: { impulseText: string; text: string };
+    /** 用户作为上帝指定的下一段世界走向，所有角色必须落实。 */
+    storyDirective?: string;
     /** sim 模式：上一卷归档后喂回的「该角色单方面视角总结 + 本卷氛围」（防上帝视角，只给 ta 自己的视角） */
     priorChapter?: { atmosphere?: string; charPerspective?: string };
     /** 真实时间跳跃时的过渡说明：跳过未观测时段，不把它们倒灌成新剧情。 */
     timeJump?: string;
     userName: string;
 }): string {
-    const { world, char, members, storyTime, round, lastSummary, npcScene, npcHooks, beatsSoFar, recentPosts, exposures, directive, priorChapter, timeJump, userName } = args;
+    const { world, char, members, storyTime, round, lastSummary, npcScene, npcHooks, beatsSoFar, recentPosts, exposures, directive, storyDirective, priorChapter, timeJump, userName } = args;
     const isLateNight = storyTime.includes('凌晨');
     const others = members.filter(m => m.id !== char.id);
     const npcNames = new Map(world.npcs.map(n => [n.id, n.name]));
@@ -385,6 +387,9 @@ export function buildWorldCharTurn(args: {
             ? `\n## 心里的声音\n关于「${directive.impulseText}」，你忽然想起 ${userName || '那个最重要的人'}——仿佛能听见 ta 对你说：「${directive.text}」。这句话在你心里有分量，这半天它会影响你的选择。`
             : `\n## 心里的声音\n关于「${directive.impulseText}」，你内心深处有个声音越来越清晰：「${directive.text}」。这半天它会影响你的选择。`;
     }
+    const storyDirectiveSection = storyDirective
+        ? `\n## ⚠️ 上帝指令：下一段世界走向（最高优先级，必须执行）\n用户已经决定：${storyDirective}\n\n这不是可选灵感，也不能只在旁白里轻描淡写提一句。你必须让这条指令在本段通过具体事件、选择、对话或后果真正发生，并让它实质影响你的行动、关系或情绪；在不违背既有人设的前提下，不得回避、忽略或改写它。`
+        : '';
 
     // ── 凌晨专属：夜深了，理性打烊，情绪当班 ──
     const lateNightSection = isLateNight ? `
@@ -426,7 +431,7 @@ ${postsSection}
 ## 这半天其他人的动静（你能看到/听说的部分）
 ${observable}
 ${spokenToMe.length > 0 ? `\n## 刚才有人当面对你说话（请在 narrative 里自然接住、给出回应）\n${spokenToMe.join('\n')}` : ''}
-${exposureSection}${directiveSection}${lateNightSection}
+${exposureSection}${directiveSection}${storyDirectiveSection}${lateNightSection}
 
 ## 你的手机（标【刚刚】的是这半天刚收到的新消息）
 ${dmSection}
@@ -544,8 +549,10 @@ export function buildNpcTurn(args: {
     recentPosts?: { ref: string; name: string; post: string }[];
     /** 真实时间跳跃时的过渡说明。 */
     timeJump?: string;
+    /** 用户指定的下一段世界走向，NPC 也必须配合落实。 */
+    storyDirective?: string;
 }): string {
-    const { world, members, storyTime, lastSummary, chapterAtmosphere, inboxes, recentPosts, timeJump } = args;
+    const { world, members, storyTime, lastSummary, chapterAtmosphere, inboxes, recentPosts, timeJump, storyDirective } = args;
     const lateNightNote = storyTime.includes('凌晨')
         ? `\n\n## 🌙 现在是凌晨（0点~5点）\n镇子基本睡着了。scene 写夜的质感：便利店的夜班灯、末班车、巡街的猫、亮着的一两扇窗；hooks 少而轻（1条就够）；groupLines 至多 1 条（只有夜猫子 NPC 才冒泡）；点赞评论克制些——深夜刷手机的人少，但深夜 emo 的动态容易引来同样失眠的人留下感性的共情评论。`
         : '';
@@ -569,6 +576,7 @@ ${members.map(m => m.name).join('、')}
 ## 之前发生的事
 ${lastSummary || '（这是这个世界的第一个半天）'}
 ${timeJump ? `\n## 时间自然流逝\n${timeJump}\n` : ''}${chapterAtmosphere ? `\n## 这段日子的氛围基调\n${chapterAtmosphere}` : ''}${lateNightNote}${inboxSection}${postsSection}
+${storyDirective ? `\n## ⚠️ 上帝指令：下一段世界走向（必须执行）\n${storyDirective}\n你必须让 NPC 的 scene 或 hooks 用具体事件配合并推动这条走向，不能忽略、淡化或改写。` : ''}
 剧情时间：${storyTime}。
 一次性输出这一段所有 NPC 的群像动静。严格输出一个 JSON 对象（建议用 \`\`\`json 包裹）：
 {

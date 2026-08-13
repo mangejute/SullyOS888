@@ -1549,6 +1549,13 @@ export interface WorldDirective {
     createdRound: number;
 }
 
+/** 用户以“上帝视角”指定的下一段世界走向。所有角色与 NPC 都必须服从，演完即消费。 */
+export interface WorldStoryDirective {
+    id: string;
+    text: string;
+    createdRound: number;
+}
+
 /** 一个"世界"的完整定义（IndexedDB worlds 表）。 */
 export interface WorldProfile {
     id: string;
@@ -1590,6 +1597,8 @@ export interface WorldProfile {
     seeds?: WorldSeed[];
     /** 待注入的用户决策（消费后移除） */
     directives?: WorldDirective[];
+    /** 待执行的全世界剧情走向（只影响下一段） */
+    storyDirective?: WorldStoryDirective;
     /** 社交动态的互动：key = `${round}_${charId}_${postIdx}`，值含点赞数 + 评论（NPC/路人）。 */
     feedReactions?: Record<string, { likes: number; comments: { from: string; text: string }[] }>;
     /** 每天离线 tick 的时段（凌晨/早/午/晚），空数组 = 仅手动观测推进 */
