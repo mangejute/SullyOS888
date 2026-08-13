@@ -1556,6 +1556,12 @@ export interface WorldStoryDirective {
     createdRound: number;
 }
 
+/** 根据当前剧情由 AI 提议的三条下一段走向。 */
+export interface WorldStoryOption {
+    id: string;
+    text: string;
+}
+
 /** 一个"世界"的完整定义（IndexedDB worlds 表）。 */
 export interface WorldProfile {
     id: string;
@@ -1599,6 +1605,8 @@ export interface WorldProfile {
     directives?: WorldDirective[];
     /** 待执行的全世界剧情走向（只影响下一段） */
     storyDirective?: WorldStoryDirective;
+    /** 当前剧情节点的 AI 分叉选项；推进到下一段后重新生成。 */
+    storyOptions?: { generatedForRound: number; generatedAt: number; options: WorldStoryOption[] };
     /** 社交动态的互动：key = `${round}_${charId}_${postIdx}`，值含点赞数 + 评论（NPC/路人）。 */
     feedReactions?: Record<string, { likes: number; comments: { from: string; text: string }[] }>;
     /** 每天离线 tick 的时段（凌晨/早/午/晚），空数组 = 仅手动观测推进 */

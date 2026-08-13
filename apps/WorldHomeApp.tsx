@@ -32,7 +32,7 @@ import { safeFetchJson } from '../utils/safeApi';
 import { WORLD_API_KEY, WORLD_CUSTOM_STYLE_KEY } from '../utils/worldHome/localBackup';
 import { CharacterGroupFilterBar, filterCharactersByGroup, GROUP_FILTER_ALL } from '../components/character/CharacterGroupFilter';
 import { trackEvent } from '../utils/analytics';
-import type { WorldProfile, WorldEpisode, WorldHomeMode, WorldTimeMode, WorldHouse, WorldThread, WorldChatMessage, WorldNarrativeStyle, CharacterProfile, WorldCharBeat, APIConfig, ApiPreset } from '../types';
+import type { WorldProfile, WorldEpisode, WorldHomeMode, WorldTimeMode, WorldHouse, WorldThread, WorldChatMessage, WorldNarrativeStyle, CharacterProfile, WorldCharBeat, APIConfig, ApiPreset, WorldStoryOption } from '../types';
 
 /**
  * 家园里「生成内容」的可编辑/删除目标（手机里的动态/备忘/聊天）。
@@ -1208,9 +1208,10 @@ const WorldView: React.FC<{
     characters: CharacterProfile[];
     onEdit: () => void;
     onWorldUpdated: () => void;
+    apiConfig: APIConfig;
     onBack?: () => void;
     topSafe?: boolean;
-}> = ({ world, characters, onEdit, onWorldUpdated, onBack, topSafe }) => {
+}> = ({ world, characters, onEdit, onWorldUpdated, apiConfig, onBack, topSafe }) => {
     const { addToast } = useOS();
     const [episodes, setEpisodes] = useState<WorldEpisode[]>([]);
     const [progress, setProgress] = useState<{ done: number; total: number; charName?: string } | null>(
@@ -1226,6 +1227,7 @@ const WorldView: React.FC<{
     const [rerollTarget, setRerollTarget] = useState<{ charId: string; charName: string } | null>(null);
     const [rerollDir, setRerollDir] = useState('');
     const [customStoryDirection, setCustomStoryDirection] = useState('');
+    const [isGeneratingStoryOptions, setIsGeneratingStoryOptions] = useState(false);
 
     const members = useMemo(() => world.memberIds.map(id => characters.find(c => c.id === id)).filter(Boolean) as CharacterProfile[], [world.memberIds, characters]);
     const latest = episodes[0];
@@ -1428,6 +1430,41 @@ const WorldView: React.FC<{
         addToast('上帝指令已设定，下一段剧情必须照此推进', 'success');
         setCustomStoryDirection('');
     };
+    const generateStoryOptions = async () => {
+        if (isGeneratingStoryOptions) return;
+        const api = world.api?.baseUrl ? world.api : (loadWorldApi() || apiConfig);
+        if (!api.baseUrl) { addToast('先在家园设置或系统 API 里配置模型', 'error'); return; }
+        setIsGeneratingStoryOptions(true);
+        try {
+            const latestText = latest
+                ? latest.beats.map(beat => `${beat.charName}：${beat.location}；${beat.narrative.slice(0, 260)}${(beat.timeline || []).length ? `；行程：${beat.timeline!.map(item => `${item.time}${item.event}`).join('、').slice(0, 220)}` : ''}`).join('\n')
+                : '世界还没有正式演绎，请从世界观与成员关系设计第一段的三种开端。';
+            const group = groupThreadOf(world)?.messages.slice(-6).map(message => `${message.senderName}：${message.text}`).join('\n') || '（暂无群聊）';
+            const seeds = (world.seeds || []).filter(seed => seed.status !== 'resolved').slice(-6).map(seed => `${seed.charName}瞒着大家：${seed.text}`).join('\n') || '（暂无未爆发伏笔）';
+            const prompt = `你是互动剧情策划。请根据这个家园的当前剧情，设计“紧接着下一时间段”可由玩家选择的三条走向。\n\n世界：${world.name}\n世界观：${world.worldview || '未填写'}\n角色：${members.map(member => member.name).join('、')}\n当前时刻：${worldTimeLabel(world)}\n\n刚刚发生：\n${latestText}\n\n最近群聊：\n${group}\n\n未爆发伏笔：\n${seeds}\n\n要求：\n1. 三条都必须具体承接上面刚发生的事，至少涉及现有角色/地点/事件中的一个，不能写通用套话。\n2. 三条方向彼此明显不同：例如揭露与对质、外部压力与协作、关系推进或反转；但不要强行制造狗血或违背人设。\n3. 每条 45~100 字，描述“下一段必须发生的关键事件和影响”，可直接作为强制剧情指令。\n4. 不要解释，不要 Markdown。只输出 JSON：{"options":["...","...","..."]}`;
+            const data = await safeFetchJson(`${api.baseUrl.replace(/\/+$/, '')}/chat/completions`, {
+                method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${api.apiKey || 'sk-none'}` },
+                body: JSON.stringify({ model: api.model, messages: [{ role: 'user', content: prompt }], temperature: 0.9, stream: false }),
+            }, 2, 0, { appName: '家园', purpose: `生成剧情分叉 · ${world.name}` });
+            const raw = data?.choices?.[0]?.message?.content || '';
+            const match = raw.match(/\{[\s\S]*\}/);
+            const parsed = match ? JSON.parse(match[0]) : null;
+            const options = (Array.isArray(parsed?.options) ? parsed.options : []).map((text: unknown, index: number): WorldStoryOption | null => {
+                const value = String(text || '').trim().replace(/^\d+[.、:：]\s*/, '');
+                return value ? { id: `wso_${Date.now().toString(36)}_${index}`, text: value.slice(0, 500) } : null;
+            }).filter(Boolean).slice(0, 3) as WorldStoryOption[];
+            if (options.length !== 3) throw new Error('模型没有返回三条有效走向');
+            await mutateWorld({ storyOptions: { generatedForRound: world.storyClock, generatedAt: Date.now(), options } });
+            addToast('已根据当前剧情生成三条走向', 'success');
+        } catch (error) {
+            addToast(error instanceof Error ? `生成失败：${error.message}` : '生成失败，请稍后重试', 'error');
+        } finally { setIsGeneratingStoryOptions(false); }
+    };
+    // 每推进成功一段，剧情时钟变了就自动用新发生的事刷新一次三条分叉。
+    useEffect(() => {
+        if (world.storyOptions?.generatedForRound === world.storyClock || isGeneratingStoryOptions) return;
+        void generateStoryOptions();
+    }, [world.id, world.storyClock, world.storyOptions?.generatedForRound]);
 
     const armSeed = (seedId: string) => {
         void mutateWorld({ seeds: (world.seeds || []).map(s => s.id === seedId ? { ...s, status: 'armed' as const } : s) });
@@ -1613,15 +1650,12 @@ const WorldView: React.FC<{
 
             {/* ── 上帝指令：用户决定下一段全世界的共同走向 ── */}
             <div className="mx-4 mt-3 rounded-2xl border p-3" style={{ background: isNight ? 'rgba(26,30,61,.9)' : 'rgba(255,255,255,.86)', borderColor: isNight ? 'rgba(251,191,36,.32)' : 'rgba(146,64,14,.18)' }}>
-                <div className={`flex items-center gap-1.5 text-[10px] font-black tracking-[0.18em] uppercase ${isNight ? 'text-amber-200/90' : 'text-amber-700'}`}><Sparkle size={12} weight="fill" />命运抉择 · 决定下一段</div>
-                <p className={`mt-1 text-[10px] leading-relaxed ${isNight ? 'text-indigo-100/60' : 'text-stone-500'}`}>选定后会强制影响所有角色与 NPC 的下一段演绎，完成后自动失效。</p>
+                <div className="flex items-center gap-1.5"><div className={`flex items-center gap-1.5 text-[10px] font-black tracking-[0.18em] uppercase ${isNight ? 'text-amber-200/90' : 'text-amber-700'}`}><Sparkle size={12} weight="fill" />命运抉择 · 决定下一段</div><button onClick={() => void generateStoryOptions()} disabled={isGeneratingStoryOptions || !!progress} className={`ml-auto flex items-center gap-1 rounded-lg px-2 py-1 text-[10px] font-black disabled:opacity-45 active:scale-95 ${isNight ? 'bg-amber-300/15 text-amber-100' : 'bg-amber-100 text-amber-800'}`} title="根据当前剧情重新生成三条走向"><Sparkle size={11} weight="fill" />{isGeneratingStoryOptions ? '生成中' : '生成'}</button></div>
+                <p className={`mt-1 text-[10px] leading-relaxed ${isNight ? 'text-indigo-100/60' : 'text-stone-500'}`}>AI 会读取刚发生的剧情生成三条分叉；选定后会强制影响所有角色与 NPC 的下一段演绎。</p>
                 {world.storyDirective && <div className={`mt-2 rounded-xl px-2.5 py-2 text-[10.5px] leading-relaxed ${isNight ? 'bg-amber-300/10 text-amber-100' : 'bg-amber-50 text-amber-800'}`}>已选定：{world.storyDirective.text}</div>}
                 <div className="mt-2 grid grid-cols-1 gap-1.5">
-                    {[
-                        '让一个隐藏的秘密出现明确破绽，相关的人不得不开始怀疑并试探对方。',
-                        '让一件突发的外部事件打乱所有人的原计划，迫使他们在压力下站队或互相求助。',
-                        '让两位关系最紧张或最微妙的人被迫单独相处，把压着的话和矛盾推到台面上。',
-                    ].map((option, index) => <button key={option} onClick={() => setStoryDirection(option)} disabled={!!progress} className={`w-full rounded-xl px-2.5 py-2 text-left text-[10.5px] font-semibold leading-relaxed transition active:scale-[.99] disabled:opacity-50 ${isNight ? 'bg-white/[.07] text-indigo-50 hover:bg-white/[.12]' : 'bg-stone-50 text-stone-700 hover:bg-amber-50'}`}><span className={`mr-1.5 inline-flex h-4 w-4 items-center justify-center rounded-full text-[9px] ${isNight ? 'bg-amber-300/20 text-amber-100' : 'bg-amber-100 text-amber-700'}`}>{index + 1}</span>{option}</button>)}
+                    {world.storyOptions?.options?.map((option, index) => <button key={option.id} onClick={() => setStoryDirection(option.text)} disabled={!!progress || isGeneratingStoryOptions} className={`w-full rounded-xl px-2.5 py-2 text-left text-[10.5px] font-semibold leading-relaxed transition active:scale-[.99] disabled:opacity-50 ${isNight ? 'bg-white/[.07] text-indigo-50 hover:bg-white/[.12]' : 'bg-stone-50 text-stone-700 hover:bg-amber-50'}`}><span className={`mr-1.5 inline-flex h-4 w-4 items-center justify-center rounded-full text-[9px] ${isNight ? 'bg-amber-300/20 text-amber-100' : 'bg-amber-100 text-amber-700'}`}>{index + 1}</span>{option.text}</button>)}
+                    {!isGeneratingStoryOptions && !(world.storyOptions?.options?.length) && <button onClick={() => void generateStoryOptions()} className={`rounded-xl px-2.5 py-3 text-left text-[10.5px] font-semibold ${isNight ? 'bg-white/[.07] text-indigo-100' : 'bg-stone-50 text-stone-500'}`}>点右上“生成”，让 AI 根据当前剧情给出三个下一段走向。</button>}
                 </div>
                 <div className="mt-2 flex gap-1.5">
                     <input value={customStoryDirection} onChange={e => setCustomStoryDirection(e.target.value)} onKeyDown={e => { if (e.key === 'Enter') setStoryDirection(customStoryDirection); }} disabled={!!progress} maxLength={500} placeholder="自定义下一段走向…" className={`min-w-0 flex-1 rounded-xl px-2.5 py-2 text-[10.5px] outline-none disabled:opacity-50 ${isNight ? 'bg-black/20 text-white placeholder:text-indigo-200/35' : 'bg-stone-50 text-stone-800 placeholder:text-stone-400'}`} />
@@ -2180,6 +2214,7 @@ const WorldHomeApp: React.FC<{ embedded?: boolean; onFullscreen?: (full: boolean
                     characters={characters}
                     onEdit={() => { setDraft(active); setView('edit'); }}
                     onWorldUpdated={reload}
+                    apiConfig={resolvedApi}
                     onBack={goBack}
                     topSafe={!!embedded}
                 />
