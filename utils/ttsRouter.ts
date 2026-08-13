@@ -11,7 +11,7 @@ import {
 } from './minimaxTts';
 import { synthesizeSpeechFishDetailed } from './fishAudioTts';
 import { synthesizeSpeechQwenDetailed } from './qwenTts';
-import { synthesizeSpeechXiaomiDetailed, synthesizeSpeechXiaomiWithVoiceDetailed } from './xiaomiTts';
+import { synthesizeSpeechXiaomiDetailed, synthesizeSpeechXiaomiWithVoiceDetailed, synthesizeSpeechXiaomiTemporaryWithVoiceDetailed } from './xiaomiTts';
 import { resolveTtsProvider } from './ttsProvider';
 
 export type { TtsResult };
@@ -54,6 +54,15 @@ export async function synthesizeSpeechXiaomiReaderDetailed(
   voice: string,
 ): Promise<TtsResult> {
   return synthesizeSpeechXiaomiWithVoiceDetailed(text, apiConfig, voice);
+}
+
+/** 书库整章预生成专用，不把片段写进通用 TTS 缓存。 */
+export async function synthesizeSpeechXiaomiReaderTemporaryDetailed(
+  text: string,
+  apiConfig: APIConfig,
+  voice: string,
+): Promise<TtsResult> {
+  return synthesizeSpeechXiaomiTemporaryWithVoiceDetailed(text, apiConfig, voice);
 }
 
 export async function synthesizeSpeech(

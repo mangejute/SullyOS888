@@ -23,7 +23,7 @@ import { Signal, getMyAuthorship, setSignalWhisper, hasSignalNoticeAck, ackSigna
 import type { SignalPoem, SignalBooklet } from '../types';
 import { getVRApi, setVRApi, getVRApiLog, clearVRApiLog, type VRApiCall } from '../utils/vrWorld/vrApi';
 import { safeResponseJson } from '../utils/safeApi';
-import { synthesizeSpeechWithProviderDetailed, synthesizeSpeechXiaomiReaderDetailed, characterHasVoiceForProvider } from '../utils/ttsRouter';
+import { synthesizeSpeechWithProviderDetailed, synthesizeSpeechXiaomiReaderTemporaryDetailed, characterHasVoiceForProvider } from '../utils/ttsRouter';
 import { XIAOMI_TTS_VOICES } from '../utils/xiaomiTts';
 import { safeFetchJson } from '../utils/safeApi';
 import { getBlobRefAudioDataUrl, useBlobRefAudioUrl, useBlobRefUrl, putImageBlob } from '../utils/blobRef';
@@ -3089,7 +3089,7 @@ const ReaderModal: React.FC<{
     // 书库朗读独立于聊天/视频的全局语音引擎，避免互相改设置。
     const [readMode, setReadMode] = useState<'system' | 'minimax' | 'xiaomi'>(() => apiConfig.readerTtsProvider === 'xiaomi' ? 'xiaomi' : apiConfig.readerTtsProvider === 'minimax' ? 'minimax' : 'system');
     const [readerXiaomiVoice, setReaderXiaomiVoice] = useState(() => apiConfig.readerXiaomiTtsVoice || apiConfig.xiaomiTtsVoice || '冰糖');
-    const [readingState, setReadingState] = useState<'idle' | 'reading' | 'paused'>('idle');
+    const [readingState, setReadingState] = useState<'idle' | 'preparing' | 'reading' | 'paused'>('idle');
     const [noiseRef, setNoiseRef] = useState(() => (readReaderPrefs(novel.id) as ReaderPrefs & { noise?: { name: string; audioRef: string; mimeType?: string } }).noise);
     const [noisePlaying, setNoisePlaying] = useState(false);
     const [doodleMode, setDoodleMode] = useState(false);
@@ -3117,6 +3117,8 @@ const ReaderModal: React.FC<{
     const speechCancelled = useRef(false);
     const charReadIndex = useRef(0);
     const charReadUrls = useRef<string[]>([]);
+    const readerPlaybackRef = useRef({ urls: [] as string[], index: 0 });
+    const readerPauseTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
     const sleepTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
     const noiseUrl = useBlobRefAudioUrl(noiseRef?.audioRef, noiseRef?.mimeType);
     const backgroundUrl = useBlobRefUrl(prefs.backgroundRef);
@@ -3469,10 +3471,48 @@ const ReaderModal: React.FC<{
             normalReaderRef.current?.querySelector<HTMLElement>(`[data-reader-seg="${target}"]`)?.scrollIntoView({ block: 'start' });
         });
     }, [doodleMode, currentChapter?.id, normalSeg]);
-    useEffect(() => () => { window.speechSynthesis?.cancel(); audioRef.current?.pause(); noiseAudioRef.current?.pause(); charReadUrls.current.forEach(u => URL.revokeObjectURL(u)); if (sleepTimerRef.current) clearTimeout(sleepTimerRef.current); if (doodleDrawTimerRef.current) clearTimeout(doodleDrawTimerRef.current); }, []);
+    useEffect(() => () => { window.speechSynthesis?.cancel(); audioRef.current?.pause(); noiseAudioRef.current?.pause(); charReadUrls.current.forEach(u => URL.revokeObjectURL(u)); if (readerPauseTimerRef.current) clearTimeout(readerPauseTimerRef.current); if (sleepTimerRef.current) clearTimeout(sleepTimerRef.current); if (doodleDrawTimerRef.current) clearTimeout(doodleDrawTimerRef.current); }, []);
 
     const chapterText = () => novel.segments.slice(currentChapter?.startSeg || 0, currentChapter?.endSeg || total).map(s => s.text).join('\n\n');
-    const stopReading = () => { speechCancelled.current = true; window.speechSynthesis?.cancel(); audioRef.current?.pause(); setReadingState('idle'); };
+    const releaseReaderAudio = () => {
+        if (readerPauseTimerRef.current) { clearTimeout(readerPauseTimerRef.current); readerPauseTimerRef.current = null; }
+        charReadUrls.current.forEach(url => URL.revokeObjectURL(url));
+        charReadUrls.current = []; readerPlaybackRef.current = { urls: [], index: 0 };
+    };
+    const stopReading = () => { speechCancelled.current = true; window.speechSynthesis?.cancel(); audioRef.current?.pause(); releaseReaderAudio(); setReadingState('idle'); };
+    const pauseReading = () => {
+        if (readingState !== 'reading') return;
+        window.speechSynthesis?.pause(); audioRef.current?.pause();
+        if (readerPauseTimerRef.current) { clearTimeout(readerPauseTimerRef.current); readerPauseTimerRef.current = null; }
+        setReadingState('paused');
+    };
+    const resumeReading = async () => {
+        if (readingState !== 'paused') return;
+        if (readMode === 'system') { window.speechSynthesis?.resume(); setReadingState('reading'); return; }
+        if (readerPlaybackRef.current.urls.length && audioRef.current?.ended) { void playPreparedReaderChunk(); return; }
+        if (!audioRef.current?.src) { setReadingState('idle'); return; }
+        try { await audioRef.current.play(); setReadingState('reading'); } catch { setCoReadMessage('无法继续播放，请重新朗读本章'); setReadingState('idle'); }
+    };
+    const splitReaderTtsChunks = (text: string, maximum = 420) => {
+        const sentences = text.replace(/\r/g, '').split(/\n{2,}/).flatMap(paragraph => paragraph.match(/[^。！？；!?…]+[。！？；!?…]?/g) || [paragraph]);
+        const chunks: string[] = []; let current = '';
+        const add = (piece: string) => {
+            const sentence = piece.trim(); if (!sentence) return;
+            if (sentence.length > maximum) {
+                if (current) { chunks.push(current); current = ''; }
+                const parts = sentence.split(/(?<=，|、|：|,|;)/);
+                // 少数 EPUB 会有整段没有标点，仍必须硬切，不能递归调用同一整段。
+                if (parts.length === 1) {
+                    for (let offset = 0; offset < sentence.length; offset += maximum) chunks.push(sentence.slice(offset, offset + maximum));
+                } else for (const part of parts) add(part);
+                return;
+            }
+            if (current && current.length + sentence.length > maximum) { chunks.push(current); current = sentence; }
+            else current += sentence;
+        };
+        sentences.forEach(add); if (current) chunks.push(current);
+        return chunks;
+    };
     const startSystemReading = () => {
         stopReading();
         if (!window.speechSynthesis) { setCoReadMessage('当前浏览器不支持系统朗读'); return; }
@@ -3485,19 +3525,47 @@ const ReaderModal: React.FC<{
             utterance.onend = next; utterance.onerror = next; window.speechSynthesis.speak(utterance);
         }; next();
     };
+    const playPreparedReaderChunk = async () => {
+        const playback = readerPlaybackRef.current;
+        if (speechCancelled.current || playback.index >= playback.urls.length) { setReadingState('idle'); return; }
+        const audio = audioRef.current; if (!audio) { setReadingState('idle'); return; }
+        audio.src = playback.urls[playback.index]; audio.playbackRate = prefs.voiceSpeed || 1;
+        audio.onended = () => {
+            playback.index += 1;
+            if (playback.index >= playback.urls.length) { setReadingState('idle'); return; }
+            // 保留自然换气，不会重新请求网络或让朗读突然接上下一段。
+            readerPauseTimerRef.current = setTimeout(() => { readerPauseTimerRef.current = null; void playPreparedReaderChunk(); }, 1500);
+        };
+        try { await audio.play(); setReadingState('reading'); } catch { setCoReadMessage('音频无法播放，请重新朗读本章'); setReadingState('idle'); }
+    };
     const startCharacterReading = async (provider: 'minimax' | 'xiaomi') => {
         if (provider === 'minimax' && (!selectedChar || !characterHasVoiceForProvider(selectedChar, apiConfig, provider))) { setCoReadMessage('先在角色语音里配置 MiniMax 音色'); return; }
         if (provider === 'xiaomi' && !apiConfig.xiaomiTtsApiKey?.trim()) { setCoReadMessage('先在系统设置中配置小米 MiMo API Key'); return; }
         if (provider === 'minimax' && !(apiConfig.minimaxApiKey || apiConfig.apiKey)?.trim()) { setCoReadMessage('先在系统设置中配置 MiniMax API Key'); return; }
-        stopReading(); speechCancelled.current = false; charReadIndex.current = 0; setReadingState('reading');
-        const list = novel.segments.slice(currentChapter?.startSeg || 0, currentChapter?.endSeg || total);
+        stopReading(); speechCancelled.current = false;
+        const list = provider === 'xiaomi'
+            ? splitReaderTtsChunks(chapterText())
+            : novel.segments.slice(currentChapter?.startSeg || 0, currentChapter?.endSeg || total).map(segment => segment.text);
+        if (provider === 'xiaomi') {
+            setReadingState('preparing'); setCoReadMessage(`正在准备本章朗读 0/${list.length}`);
+            try {
+                const urls: string[] = [];
+                for (let index = 0; index < list.length; index += 1) {
+                    if (speechCancelled.current) { urls.forEach(url => URL.revokeObjectURL(url)); return; }
+                    const result = await synthesizeSpeechXiaomiReaderTemporaryDetailed(list[index], apiConfig, readerXiaomiVoice);
+                    urls.push(result.url); setCoReadMessage(`正在准备本章朗读 ${index + 1}/${list.length}`);
+                }
+                if (speechCancelled.current) { urls.forEach(url => URL.revokeObjectURL(url)); return; }
+                charReadUrls.current = urls; readerPlaybackRef.current = { urls, index: 0 };
+                setCoReadMessage('本章已准备完成，正在朗读'); void playPreparedReaderChunk();
+            } catch { setCoReadMessage('小米朗读生成失败，已停止'); setReadingState('idle'); }
+            return;
+        }
+        charReadIndex.current = 0; setReadingState('reading');
         const next = async () => {
             if (speechCancelled.current || charReadIndex.current >= list.length) { setReadingState('idle'); return; }
             try {
-                const text = list[charReadIndex.current++].text;
-                const result = provider === 'xiaomi'
-                    ? await synthesizeSpeechXiaomiReaderDetailed(text, apiConfig, readerXiaomiVoice)
-                    : await synthesizeSpeechWithProviderDetailed(text, selectedChar!, apiConfig, provider);
+                const result = await synthesizeSpeechWithProviderDetailed(list[charReadIndex.current++], selectedChar!, apiConfig, provider);
                 if (speechCancelled.current || !audioRef.current) return;
                 charReadUrls.current.push(result.url); audioRef.current.src = result.url; audioRef.current.playbackRate = prefs.voiceSpeed || 1;
                 audioRef.current.onended = () => { void next(); }; await audioRef.current.play();
@@ -3651,7 +3719,7 @@ const ReaderModal: React.FC<{
                 <div className="flex gap-1.5"><button onClick={() => { setReadMode('system'); updateApiConfig({ readerTtsProvider: 'system' }); }} className="flex-1 rounded-lg py-1.5 text-[10px] font-semibold" style={{ color: readMode === 'system' ? theme.paper : theme.text, background: readMode === 'system' ? theme.accent : 'transparent' }}>系统朗读</button><button onClick={() => { setReadMode('minimax'); updateApiConfig({ readerTtsProvider: 'minimax' }); }} className="flex-1 rounded-lg py-1.5 text-[10px] font-semibold" style={{ color: readMode === 'minimax' ? theme.paper : theme.text, background: readMode === 'minimax' ? theme.accent : 'transparent' }}>MiniMax</button><button onClick={() => { setReadMode('xiaomi'); updateApiConfig({ readerTtsProvider: 'xiaomi' }); }} className="flex-1 rounded-lg py-1.5 text-[10px] font-semibold" style={{ color: readMode === 'xiaomi' ? theme.paper : theme.text, background: readMode === 'xiaomi' ? theme.accent : 'transparent' }}>小米</button></div>
                 {readMode === 'minimax' && <select value={readerCharId} onChange={e => setReaderCharId(e.target.value)} className="w-full rounded-lg px-2 py-1.5 text-[10px]" style={{ color: theme.text, background: theme.paper, border: `1px solid ${theme.accent}33` }}>{characters.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}</select>}
                 {readMode === 'xiaomi' && <select value={readerXiaomiVoice} onChange={e => { setReaderXiaomiVoice(e.target.value); updateApiConfig({ readerXiaomiTtsVoice: e.target.value }); }} className="w-full rounded-lg px-2 py-1.5 text-[10px]" style={{ color: theme.text, background: theme.paper, border: `1px solid ${theme.accent}33` }} aria-label="选择小米朗读音色">{XIAOMI_TTS_VOICES.map(voice => <option key={voice.id} value={voice.id}>{voice.name} · {voice.description}</option>)}</select>}
-                <div className="flex items-center gap-2 text-[10px]" style={{ color: theme.sub }}>语速 {[0.8, 1, 1.2, 1.5].map(speed => <button key={speed} onClick={() => savePrefs({ voiceSpeed: speed })} className="rounded px-1.5 py-1" style={{ color: (prefs.voiceSpeed || 1) === speed ? theme.paper : theme.text, background: (prefs.voiceSpeed || 1) === speed ? theme.accent : theme.paper }}>{speed}x</button>)}<button onClick={readingState === 'reading' ? stopReading : () => readMode === 'system' ? startSystemReading() : void startCharacterReading(readMode)} className="ml-auto rounded px-2 py-1 font-semibold" style={{ color: theme.paper, background: theme.accent }}>{readingState === 'reading' ? '停止' : '朗读本章'}</button></div>
+                <div className="flex items-center gap-2 text-[10px]" style={{ color: theme.sub }}>语速 {[0.8, 1, 1.2, 1.5].map(speed => <button key={speed} onClick={() => savePrefs({ voiceSpeed: speed })} className="rounded px-1.5 py-1" style={{ color: (prefs.voiceSpeed || 1) === speed ? theme.paper : theme.text, background: (prefs.voiceSpeed || 1) === speed ? theme.accent : theme.paper }}>{speed}x</button>)}<div className="ml-auto flex gap-1"><button disabled={readingState === 'preparing'} onClick={readingState === 'paused' ? () => void resumeReading() : readingState === 'idle' ? () => readMode === 'system' ? startSystemReading() : void startCharacterReading(readMode) : pauseReading} className="rounded px-2 py-1 font-semibold disabled:opacity-45" style={{ color: theme.paper, background: theme.accent }}>{readingState === 'preparing' ? '准备中' : readingState === 'paused' ? '继续播放' : readingState === 'reading' ? '暂停' : '朗读本章'}</button>{readingState !== 'idle' && <button onClick={stopReading} className="rounded px-2 py-1 font-semibold" style={{ color: theme.text, background: theme.paper, border: `1px solid ${theme.accent}44` }}>停止</button>}</div></div>
                 <div className="flex items-center gap-2 text-[10px]" style={{ color: theme.sub }}><label className="cursor-pointer"><UploadSimple size={13} className="inline mr-1" />上传白噪音<input type="file" accept="audio/*" className="hidden" onChange={e => void uploadNoise(e.target.files?.[0])} /></label>{noiseRef && <button onClick={() => void toggleNoise()} className="ml-auto rounded px-2 py-1" style={{ color: theme.paper, background: theme.accent }}>{noisePlaying ? '暂停白噪音' : `播放 ${noiseRef.name}`}</button>}</div>
                 <div className="flex items-center gap-1 text-[10px]" style={{ color: theme.sub }}>睡眠定时 {[0, 30, 60, 120, 480].map(min => <button key={min} onClick={() => setSleepMinutes(min)} className="rounded px-1.5 py-1" style={{ color: (prefs.sleepMinutes || 0) === min ? theme.paper : theme.text, background: (prefs.sleepMinutes || 0) === min ? theme.accent : theme.paper }}>{min === 0 ? '关闭' : min < 60 ? `${min}分` : `${min / 60}时`}</button>)}</div>
             </div>}

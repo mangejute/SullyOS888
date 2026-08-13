@@ -50,14 +50,17 @@ const buildConfig = (config: APIConfig, voiceOverride?: string) => ({
   voice: (voiceOverride || config.xiaomiTtsVoice || DEFAULT_VOICE).trim() || DEFAULT_VOICE,
 });
 
-const synthesizeXiaomiText = async (text: string, config: APIConfig, voiceOverride?: string): Promise<TtsResult> => {
+const synthesizeXiaomiText = async (text: string, config: APIConfig, voiceOverride?: string, temporary = false): Promise<TtsResult> => {
   const spoken = cleanText(text);
   if (!spoken) throw new Error('小米 TTS 文本为空');
   const options = buildConfig(config, voiceOverride);
   if (!options.key) throw new Error('缺少小米 MiMo API Key');
   const cacheKey = hashTtsParams({ kind: 'xiaomi-mimo-tts', spoken, model: options.model, voice: options.voice, baseUrl: options.baseUrl });
-  const cached = await getCachedTts(cacheKey);
-  if (cached) return { url: URL.createObjectURL(cached), blob: cached };
+  // 书库的整章预生成只在当前阅读器会话中保留，不写入长期语音缓存。
+  if (!temporary) {
+    const cached = await getCachedTts(cacheKey);
+    if (cached) return { url: URL.createObjectURL(cached), blob: cached };
+  }
   // 小米官方接口已正确开放浏览器 CORS。默认直连，避免公共 Worker 的旧 /xiaomi-tts
   // 路由误把 POST 当成 GET 而返回 405；自定义兼容地址仍可经用户自己的 Worker 转发。
   const isOfficial = options.baseUrl === DEFAULT_BASE_URL;
@@ -95,7 +98,7 @@ const synthesizeXiaomiText = async (text: string, config: APIConfig, voiceOverri
     blob = await response.blob();
   }
   if (!blob.size) throw new Error('小米 MiMo TTS 返回了空音频');
-  void saveCachedTts(cacheKey, blob);
+  if (!temporary) void saveCachedTts(cacheKey, blob);
   return { url: URL.createObjectURL(blob), blob };
 };
 
@@ -106,6 +109,11 @@ export async function synthesizeSpeechXiaomiDetailed(text: string, char: Charact
 /** 书库等场景的内置小米音色朗读，不读取角色档案中的音色。 */
 export async function synthesizeSpeechXiaomiWithVoiceDetailed(text: string, apiConfig: APIConfig, voice: string): Promise<TtsResult> {
   return synthesizeXiaomiText(text, apiConfig, voice);
+}
+
+/** 书库整章朗读的临时片段：关闭阅读器即释放，不占用持久缓存。 */
+export async function synthesizeSpeechXiaomiTemporaryWithVoiceDetailed(text: string, apiConfig: APIConfig, voice: string): Promise<TtsResult> {
+  return synthesizeXiaomiText(text, apiConfig, voice, true);
 }
 
 export async function testXiaomiTtsConnection(apiConfig: APIConfig): Promise<void> {
