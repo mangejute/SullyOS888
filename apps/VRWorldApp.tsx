@@ -3065,7 +3065,7 @@ const ReaderModal: React.FC<{
     updateCharacter: (id: string, update: Partial<CharacterProfile>) => Promise<void> | void;
     onClose: () => void; initialSeg?: number; peek?: boolean;
 }> = ({ novel, characters, apiConfig, updateApiConfig, userProfile, updateCharacter, onClose, initialSeg, peek }) => {
-    // 所有阅读都只用同一套翻页，不再让正文滚到被底栏遮住。
+    // 普通阅读整章纵向滚动；只有涂鸦模式需要锁住纸张并使用精确分页。
     const total = novel.segments.length;
     const chapters = useMemo(() => resolvedChapters(novel), [novel]);
     const chapterHeadings = useMemo(() => new Map(chapters.map(chapter => [chapter.startSeg, { title: chapter.title, partTitle: chapter.partTitle }])), [chapters]);
@@ -3095,6 +3095,7 @@ const ReaderModal: React.FC<{
     const [doodleMode, setDoodleMode] = useState(false);
     const [doodleTool, setDoodleTool] = useState<'pen' | 'eraser'>('pen');
     const [doodleWidth, setDoodleWidth] = useState(3);
+    const [normalSeg, setNormalSeg] = useState(initialBm);
     const paginationAnchorRef = useRef<ReaderPosition | null>(null);
     const readerPagesRef = useRef(readerPages);
     const pageRef = useRef(page);
@@ -3102,6 +3103,9 @@ const ReaderModal: React.FC<{
     readerPagesRef.current = readerPages;
     pageRef.current = page;
     const doodleAreaRef = useRef<HTMLDivElement>(null);
+    const normalReaderRef = useRef<HTMLDivElement>(null);
+    const normalSegRef = useRef(initialBm);
+    const normalScrollTargetRef = useRef<number | null>(initialBm);
     const doodleCanvasRef = useRef<HTMLCanvasElement>(null);
     const doodlesByViewRef = useRef<Map<string, ReaderDoodleStroke[]>>(new Map());
     const activeDoodleRef = useRef<ReaderDoodleStroke | null>(null);
@@ -3120,20 +3124,26 @@ const ReaderModal: React.FC<{
     const annBySeg = useMemo(() => groupAnnotationsBySeg(annotations), [annotations]);
     const nameOf = (id: string) => characters.find(c => c.id === id)?.name;
     const selectedChar = characters.find(c => c.id === readerCharId);
-    const currentSeg = readerPages[page]?.items[0]?.segIdx ?? Math.max(0, total - 1);
+    const doodleSeg = readerPages[page]?.items[0]?.segIdx ?? Math.max(0, total - 1);
+    const currentSeg = doodleMode ? doodleSeg : normalSeg;
     const currentChapter = chapterForSeg(chapters, currentSeg);
     const chapterReflection = annotations.find(annotation => annotation.type === 'reflection' && annotation.chapterId === currentChapter?.id);
     const isChapterLastPage = !currentChapter || !readerPages[page + 1] || !readerPages[page + 1].items.some(item => item.segIdx < currentChapter.endSeg);
     const totalPages = Math.max(1, readerPages.length);
-    const renderSegs = (readerPages[page]?.items || []).map(item => ({ idx: item.segIdx, text: item.text }));
+    const renderSegs = doodleMode
+        ? (readerPages[page]?.items || []).map(item => ({ idx: item.segIdx, text: item.text }))
+        : novel.segments.slice(currentChapter?.startSeg || 0, currentChapter?.endSeg || total).map(segment => ({ idx: segment.idx, text: segment.text }));
     // 首次打开时先用轻量分页，真实像素分页随后异步替换；两种状态下章节首页都必须有正式标题。
-    const pageHeading = readerPages[page]?.chapter || (currentSeg === currentChapter?.startSeg ? currentChapter : undefined);
+    const pageHeading = doodleMode
+        ? readerPages[page]?.chapter || (currentSeg === currentChapter?.startSeg ? currentChapter : undefined)
+        : currentChapter;
     const readerFont = prefs.fontFamily === 'sans' ? `'Noto Sans SC','Microsoft YaHei',sans-serif` : prefs.fontFamily === 'system' ? 'system-ui,sans-serif' : `'Noto Serif SC','Songti SC','Noto Serif','Georgia',serif`;
     const readerFontWeight = prefs.fontWeight === 'bold' ? 700 : 400;
     // 涂鸦是会话内的临时纸张：翻页后可翻回看，退出阅读器即随组件卸载清空。
     const doodleViewKey = `page:${page}`;
 
     useLayoutEffect(() => {
+        if (!doodleMode) return;
         const area = doodleAreaRef.current;
         if (!area) return;
         let debounce: ReturnType<typeof setTimeout> | undefined;
@@ -3388,11 +3398,50 @@ const ReaderModal: React.FC<{
     };
     const jumpToSegment = (idx: number) => {
         const target = Math.min(Math.max(0, idx), Math.max(0, total - 1));
-        const targetPage = findReaderPage(readerPages, { segIdx: target, offset: 0 });
-        // 章节起点若正好在旧书的最后一个不完整段，跳到最接近的末页，而不是错误回到首页。
-        setPage(targetPage >= 0 ? targetPage : Math.max(0, readerPages.length - 1));
+        if (doodleMode) {
+            const targetPage = findReaderPage(readerPages, { segIdx: target, offset: 0 });
+            // 章节起点若正好在旧书的最后一个不完整段，跳到最接近的末页，而不是错误回到首页。
+            setPage(targetPage >= 0 ? targetPage : Math.max(0, readerPages.length - 1));
+        } else {
+            setNormalSeg(target);
+            normalSegRef.current = target;
+            normalScrollTargetRef.current = target;
+        }
         setShowToc(false);
         if (!peek) writeUserBm(novel.id, target);
+    };
+    const changeChapter = (direction: -1 | 1) => {
+        const chapterIndex = Math.max(0, chapters.findIndex(chapter => chapter.id === currentChapter?.id));
+        const next = chapters[chapterIndex + direction];
+        if (next) jumpToSegment(next.startSeg);
+    };
+    const toggleDoodleMode = () => {
+        if (doodleMode) {
+            const anchor = readerPages[page]?.items[0]?.segIdx ?? normalSegRef.current;
+            setNormalSeg(anchor);
+            normalSegRef.current = anchor;
+            normalScrollTargetRef.current = anchor;
+            setDoodleMode(false);
+            return;
+        }
+        const targetPage = findReaderPage(readerPages, { segIdx: normalSegRef.current, offset: 0 });
+        setPage(targetPage >= 0 ? targetPage : 0);
+        setDoodleMode(true);
+    };
+    const recordNormalScroll = () => {
+        const container = normalReaderRef.current;
+        if (!container || doodleMode) return;
+        const top = container.getBoundingClientRect().top;
+        const nodes = Array.from(container.querySelectorAll<HTMLElement>('[data-reader-seg]'));
+        let candidate = Number(nodes[0]?.dataset.readerSeg ?? normalSegRef.current);
+        for (const node of nodes) {
+            if (node.getBoundingClientRect().top <= top + 24) candidate = Number(node.dataset.readerSeg);
+            else break;
+        }
+        if (!Number.isFinite(candidate) || candidate === normalSegRef.current) return;
+        normalSegRef.current = candidate;
+        setNormalSeg(candidate);
+        if (!peek) writeUserBm(novel.id, candidate);
     };
 
     useEffect(() => { void DB.getVRAnnotations(novel.id).then(setAnnotations); }, [novel.id]);
@@ -3407,7 +3456,19 @@ const ReaderModal: React.FC<{
         observer.observe(area);
         return () => observer.disconnect();
     }, [doodleMode, renderDoodles]);
-    useEffect(() => { if (!peek) writeUserBm(novel.id, readerPages[page]?.items[0]?.segIdx || 0); }, [page, novel.id, peek, readerPages]);
+    useEffect(() => {
+        if (!doodleMode || peek) return;
+        writeUserBm(novel.id, readerPages[page]?.items[0]?.segIdx || 0);
+    }, [page, novel.id, peek, readerPages, doodleMode]);
+    useEffect(() => {
+        if (doodleMode) return;
+        const target = normalScrollTargetRef.current;
+        if (target == null) return;
+        normalScrollTargetRef.current = null;
+        requestAnimationFrame(() => {
+            normalReaderRef.current?.querySelector<HTMLElement>(`[data-reader-seg="${target}"]`)?.scrollIntoView({ block: 'start' });
+        });
+    }, [doodleMode, currentChapter?.id, normalSeg]);
     useEffect(() => () => { window.speechSynthesis?.cancel(); audioRef.current?.pause(); noiseAudioRef.current?.pause(); charReadUrls.current.forEach(u => URL.revokeObjectURL(u)); if (sleepTimerRef.current) clearTimeout(sleepTimerRef.current); if (doodleDrawTimerRef.current) clearTimeout(doodleDrawTimerRef.current); }, []);
 
     const chapterText = () => novel.segments.slice(currentChapter?.startSeg || 0, currentChapter?.endSeg || total).map(s => s.text).join('\n\n');
@@ -3546,7 +3607,7 @@ const ReaderModal: React.FC<{
             <button onClick={() => { saveProgress(); onClose(); }} className="p-1.5 -ml-1.5 rounded-full" style={{ color: theme.text }}><X size={20} weight="bold" /></button>
             <div className="min-w-0 flex-1"><div className="text-[14px] font-bold truncate" style={{ color: theme.text }}>{novel.title}</div><div className="text-[10px] truncate" style={{ color: theme.sub }}>{chapterLabel(currentChapter)} · {Math.round((currentSeg / Math.max(1, total)) * 100)}%</div></div>
             <button onClick={() => setShowToc(true)} className="p-1.5 rounded-full" style={{ color: theme.accent }} aria-label="目录"><List size={18} weight="bold" /></button>
-            <button onClick={() => setDoodleMode(enabled => !enabled)} className="p-1.5 rounded-full" style={{ color: doodleMode ? theme.paper : theme.accent, background: doodleMode ? theme.accent : 'transparent' }} aria-label="临时涂鸦"><PencilSimple size={18} weight="bold" /></button>
+            <button onClick={toggleDoodleMode} className="p-1.5 rounded-full" style={{ color: doodleMode ? theme.paper : theme.accent, background: doodleMode ? theme.accent : 'transparent' }} aria-label="临时涂鸦"><PencilSimple size={18} weight="bold" /></button>
             <button onClick={() => setShowCtl(s => !s)} className="p-1.5 rounded-full" style={{ color: theme.accent }} aria-label="阅读设置"><Palette size={18} weight="bold" /></button>
         </div>
         {peek && <div className="relative px-4 py-1.5 shrink-0 text-[11px] text-center" style={{ background: theme.paper, color: theme.accent }}>正在查看批注位置，不会改动你的书签</div>}
@@ -3556,7 +3617,7 @@ const ReaderModal: React.FC<{
             <div className="flex items-center gap-2 text-[10px]" style={{ color: theme.sub }}>行距 <input type="range" min="1.5" max="2.5" step="0.1" value={prefs.lineHeight || 1.9} onChange={e => savePrefs({ lineHeight: Number(e.target.value) })} className="flex-1" /><span>{(prefs.lineHeight || 1.9).toFixed(1)}</span></div>
             <div className="flex items-center justify-between text-[10px]" style={{ color: theme.sub }}><span>字体加粗</span><button onClick={() => savePrefs({ fontWeight: prefs.fontWeight === 'bold' ? 'normal' : 'bold' })} className="rounded-lg px-3 py-1 font-bold" style={{ color: prefs.fontWeight === 'bold' ? theme.paper : theme.text, background: prefs.fontWeight === 'bold' ? theme.accent : theme.bg, border: `1px solid ${theme.accent}44` }}>{prefs.fontWeight === 'bold' ? '已加粗' : '普通'}</button></div>
             <div className="rounded-lg p-2 space-y-2" style={{ background: theme.bg, border: `1px solid ${theme.accent}22` }}><div className="flex items-center justify-between"><span className="text-[10px] font-semibold" style={{ color: theme.sub }}>我的阅读样式</span><button onClick={saveStylePreset} className="rounded px-2 py-1 text-[10px] font-semibold" style={{ color: theme.paper, background: theme.accent }}>保存当前样式</button></div>{stylePresets.length > 0 ? <div className="flex flex-wrap gap-1">{stylePresets.map(preset => <span key={preset.id} className="inline-flex items-center overflow-hidden rounded-md" style={{ border: `1px solid ${theme.accent}33` }}><button onClick={() => applyStylePreset(preset)} className="px-2 py-1 text-[10px]" style={{ color: theme.text }}>{preset.name}</button><button onClick={() => removeStylePreset(preset.id)} className="px-1.5 py-1 text-[10px]" style={{ color: theme.sub }} aria-label={`删除 ${preset.name}`}>×</button></span>)}</div> : <div className="text-[10px]" style={{ color: theme.sub }}>保存后可在别的设备导入备份后直接选择。</div>}</div>
-            <div className="text-[10px]" style={{ color: theme.sub }}>阅读方式：左右翻页。正文和涂鸦共用相同分页，分页会为墨水屏底栏预留一整行安全空间。</div>
+            <div className="text-[10px]" style={{ color: theme.sub }}>普通阅读按完整章节上下滑动；涂鸦时锁定纸张，用页码按钮切换，避免电磁笔误触滚动。</div>
             <label className="flex items-center gap-2 text-[10px] cursor-pointer" style={{ color: theme.sub }}><UploadSimple size={14} /> 自定义背景<input type="file" accept="image/*" className="hidden" onChange={async e => { const file = e.target.files?.[0]; if (file) savePrefs({ backgroundRef: await putImageBlob(file) }); }} /></label>
             {prefs.backgroundRef && <button onClick={() => savePrefs({ backgroundRef: undefined })} className="text-[10px]" style={{ color: theme.accent }}>恢复纯色背景</button>}
             <textarea value={prefs.annotationGuide || ''} onChange={e => savePrefs({ annotationGuide: e.target.value })} placeholder="专属批注引导词：例如更关注人物关系、伏笔和情绪变化" className="w-full rounded-lg p-2 text-[10px] outline-none" rows={2} style={{ color: theme.text, background: theme.bg, border: `1px solid ${theme.accent}33` }} />
@@ -3569,19 +3630,22 @@ const ReaderModal: React.FC<{
             <span className="absolute right-4 -bottom-4 text-[9px]" style={{ color: theme.sub }}>退出阅读后自动清除</span>
         </div>}
         <div ref={doodleAreaRef} className="relative flex-1 min-h-0">
-            <div className="relative h-full overflow-hidden px-5 pt-4" style={{ background: backgroundUrl ? 'transparent' : theme.bg, touchAction: doodleMode ? 'none' : 'pan-x', paddingBottom: doodleMode ? 44 : 16, boxSizing: 'border-box' }}>
+            <div ref={normalReaderRef} onScroll={recordNormalScroll} className={`relative h-full px-5 pt-4 ${doodleMode ? 'overflow-hidden' : 'overflow-y-auto overscroll-contain'}`} style={{ background: backgroundUrl ? 'transparent' : theme.bg, touchAction: doodleMode ? 'none' : 'pan-y', paddingBottom: doodleMode ? 44 : 28, boxSizing: 'border-box' }}>
                 {pageHeading && <div className="mb-6 mt-0.5" style={{ fontFamily: readerFont }}>
                     {pageHeading.partTitle && pageHeading.partTitle.trim() !== readableChapterTitle(pageHeading.title) && <div className="mb-1.5 text-[11px]" style={{ color: theme.sub }}>{pageHeading.partTitle}</div>}
                     <div className="text-[20px] font-bold leading-snug" style={{ color: theme.text }}>{readableChapterTitle(pageHeading.title)}</div>
                 </div>}
-                {renderSegs.map(seg => <SegBlock key={seg.idx} seg={seg} anns={annBySeg.get(seg.idx) || []} theme={theme} fontSize={fontSize} lineHeight={prefs.lineHeight || 1.9} fontFamily={readerFont} fontWeight={readerFontWeight} nameOf={nameOf} onOpenAnnotation={setSelectedAnnotation} highlight={peek && seg.idx === initialSeg} />)}
+                {renderSegs.map(seg => <div key={`${doodleMode ? 'page' : 'chapter'}-${seg.idx}`} data-reader-seg={seg.idx}><SegBlock seg={seg} anns={annBySeg.get(seg.idx) || []} theme={theme} fontSize={fontSize} lineHeight={prefs.lineHeight || 1.9} fontFamily={readerFont} fontWeight={readerFontWeight} nameOf={nameOf} onOpenAnnotation={setSelectedAnnotation} highlight={peek && seg.idx === initialSeg} /></div>)}
                 {chapterReflection && isChapterLastPage && <div className="mt-6 border-t pt-4" style={{ borderColor: `${theme.accent}33`, color: theme.text }}><div className="mb-2 text-[11px] font-bold" style={{ color: theme.accent }}>{chapterReflection.authorName} 的本章感悟</div><p className="whitespace-pre-wrap text-[13px] leading-7">{stripLeakedAttrs(chapterReflection.content)}</p></div>}
             </div>
             {doodleMode && <canvas ref={doodleCanvasRef} className="absolute inset-0 z-[2]" style={{ touchAction: 'none', cursor: doodleTool === 'eraser' ? 'cell' : 'crosshair' }} onPointerDown={startDoodle} onPointerMove={moveDoodle} onPointerUp={endDoodle} onPointerCancel={endDoodle} />}
         </div>
         <div className="relative shrink-0" style={{ background: theme.paper, borderTop: `1px solid ${theme.accent}22`, paddingBottom: vrBottomPad('0.5rem') }}>
             <div className="flex items-center gap-2 px-4 pt-2"><div className="relative min-w-0 max-w-[30%]"><select value={readerCharId} onChange={e => { setReaderCharId(e.target.value); setCoReadState('idle'); }} className="w-full appearance-none bg-transparent py-1 pr-4 text-[11px] font-semibold outline-none truncate" style={{ color: theme.accent }} aria-label="选择共读角色">{characters.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}</select><CaretDown size={12} weight="bold" className="pointer-events-none absolute right-0 top-1/2 -translate-y-1/2" style={{ color: theme.accent }} /></div><button onClick={() => setShowAudio(v => !v)} className="text-[11px] font-semibold whitespace-nowrap" style={{ color: theme.accent }}><SpeakerHigh size={14} className="inline mr-1" />音效</button><button onClick={() => { void shareReadingProgress(); }} className="text-[11px] font-semibold whitespace-nowrap" style={{ color: theme.accent }}><BookmarkSimple size={14} className="inline mr-1" />保存</button><button onClick={readTogether} disabled={coReadState === 'loading'} className="ml-auto text-[11px] font-semibold disabled:opacity-45 whitespace-nowrap" style={{ color: theme.accent }}>{coReadState === 'loading' ? <CircleNotch size={14} className="inline mr-1 animate-spin" /> : <BookOpen size={14} className="inline mr-1" />}{coReadState === 'done' ? '已读完' : '一起读本章'}</button></div>
-            <div className="flex items-center justify-between px-5 py-2"><button disabled={page === 0} onClick={() => setPage(p => Math.max(0, p - 1))} className="text-[12px] disabled:opacity-30 font-semibold" style={{ color: theme.accent }}>‹ 上一页</button><span className="text-[10px]" style={{ color: theme.sub }}>{page + 1} / {totalPages}</span><button disabled={page >= totalPages - 1} onClick={() => setPage(p => Math.min(totalPages - 1, p + 1))} className="text-[12px] disabled:opacity-30 font-semibold" style={{ color: theme.accent }}>下一页 ›</button></div>
+            {doodleMode ? <>
+                <div className="flex items-center justify-between px-5 pt-2"><button disabled={currentChapter?.index === 0} onClick={() => changeChapter(-1)} className="text-[12px] disabled:opacity-30 font-semibold" style={{ color: theme.accent }}>‹ 上一章</button><span className="max-w-[44%] truncate text-center text-[10px]" style={{ color: theme.sub }}>{chapterLabel(currentChapter)}</span><button disabled={(currentChapter?.index ?? chapters.length - 1) >= chapters.length - 1} onClick={() => changeChapter(1)} className="text-[12px] disabled:opacity-30 font-semibold" style={{ color: theme.accent }}>下一章 ›</button></div>
+                <div className="flex items-center justify-between px-5 py-2"><button disabled={page === 0} onClick={() => setPage(p => Math.max(0, p - 1))} className="text-[12px] disabled:opacity-30 font-semibold" style={{ color: theme.accent }}>‹ 上一页</button><span className="text-[10px]" style={{ color: theme.sub }}>{page + 1} / {totalPages}</span><button disabled={page >= totalPages - 1} onClick={() => setPage(p => Math.min(totalPages - 1, p + 1))} className="text-[12px] disabled:opacity-30 font-semibold" style={{ color: theme.accent }}>下一页 ›</button></div>
+            </> : <div className="flex items-center justify-between px-5 py-2"><button disabled={currentChapter?.index === 0} onClick={() => changeChapter(-1)} className="text-[12px] disabled:opacity-30 font-semibold" style={{ color: theme.accent }}>‹ 上一章</button><span className="max-w-[44%] truncate text-center text-[10px]" style={{ color: theme.sub }}>{chapterLabel(currentChapter)}</span><button disabled={(currentChapter?.index ?? chapters.length - 1) >= chapters.length - 1} onClick={() => changeChapter(1)} className="text-[12px] disabled:opacity-30 font-semibold" style={{ color: theme.accent }}>下一章 ›</button></div>}
             {coReadMessage && <div className="px-4 pb-1 text-center text-[10px]" style={{ color: coReadState === 'error' ? '#bd554f' : theme.sub }}>{coReadMessage}</div>}
             {showAudio && <div className="mx-4 mb-2 rounded-lg p-2.5 space-y-2" style={{ background: theme.bg, border: `1px solid ${theme.accent}33` }}>
                 <div className="flex gap-1.5"><button onClick={() => { setReadMode('system'); updateApiConfig({ readerTtsProvider: 'system' }); }} className="flex-1 rounded-lg py-1.5 text-[10px] font-semibold" style={{ color: readMode === 'system' ? theme.paper : theme.text, background: readMode === 'system' ? theme.accent : 'transparent' }}>系统朗读</button><button onClick={() => { setReadMode('minimax'); updateApiConfig({ readerTtsProvider: 'minimax' }); }} className="flex-1 rounded-lg py-1.5 text-[10px] font-semibold" style={{ color: readMode === 'minimax' ? theme.paper : theme.text, background: readMode === 'minimax' ? theme.accent : 'transparent' }}>MiniMax</button><button onClick={() => { setReadMode('xiaomi'); updateApiConfig({ readerTtsProvider: 'xiaomi' }); }} className="flex-1 rounded-lg py-1.5 text-[10px] font-semibold" style={{ color: readMode === 'xiaomi' ? theme.paper : theme.text, background: readMode === 'xiaomi' ? theme.accent : 'transparent' }}>小米</button></div>
