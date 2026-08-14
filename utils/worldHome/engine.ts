@@ -24,15 +24,17 @@ import { buildChatRequestPayload } from '../chatRequestPayload';
 import { safeFetchJson } from '../safeApi';
 import { processNewMessagesWithAutoArchive } from '../memoryPalace/autoArchive';
 import { getDailyScheduleForChar } from '../dailySchedule';
+import { generateDailyScheduleForChar, isScheduleFeatureOn } from '../scheduleGenerator';
 import { ensureWorldLifePlan, syncWorldBeatToSchedule } from './lifeLink';
 import {
     worldTimeLabel, buildWorldSystemAddendum, buildWorldCharTurn, buildNpcTurn,
     parseCharBeat, parseNpcScene, realObserveTarget, formatRealClock, migrateWorldDaySegs,
-    alignCharToWorldClock,
+    alignCharToWorldClock, realNowSeg, worldNow,
 } from './prompts';
 import { ensureThreads, applyBeatToThreads, applyNpcGroupLines, applyNpcDms, npcInboxes } from './threads';
 import { shouldCloseChapter, summarizeChapter, SIM_CHAPTER_CLOCKS } from './chapters';
 import { getCharacterWorldState, locationByName } from '../characterWorld';
+import type { WorldTickSlot } from './scheduler';
 
 interface MemoryConfigLike {
     embedding?: { baseUrl?: string; apiKey?: string; model?: string; dimensions?: number };
@@ -48,6 +50,7 @@ export interface WorldEpisodeDeps {
     realtimeConfig?: RealtimeConfig;
     memoryPalaceConfig?: MemoryConfigLike;
     trigger: 'observe' | 'tick';
+    tickSlot?: WorldTickSlot;
 }
 
 export interface WorldEpisodeResult {
@@ -260,6 +263,37 @@ async function buildFullDayScheduleBlock(world: WorldProfile, char: CharacterPro
     }
 }
 
+/** 真实家园先定全天公共骨架，再为每个开启日程的住户补齐当天日程，最后才演绎某一段。 */
+async function ensureWorldDaySchedules(
+    world: WorldProfile,
+    members: CharacterProfile[],
+    userProfile: UserProfile,
+    api: APIConfig,
+): Promise<void> {
+    if (!world.lifeLinkEnabled || (world.timeMode || 'real') !== 'real') return;
+    for (const char of members) {
+        if (!isScheduleFeatureOn(char)) continue;
+        await generateDailyScheduleForChar(char, userProfile, api, false);
+    }
+}
+
+type RealClock = { dayKey: string; seg: number };
+
+const compareRealClock = (a: RealClock, b: RealClock) =>
+    a.dayKey === b.dayKey ? a.seg - b.seg : a.dayKey.localeCompare(b.dayKey);
+
+function targetForTickSlot(world: WorldProfile, slot: WorldTickSlot): RealClock {
+    const d = new Date(worldNow(world));
+    if (slot === 'latenight') {
+        d.setDate(d.getDate() - 1);
+        return { dayKey: `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`, seg: 3 };
+    }
+    return {
+        dayKey: `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`,
+        seg: slot === 'morning' ? 0 : slot === 'noon' ? 1 : 2,
+    };
+}
+
 /** 把当天共享生活计划交给家园演绎，保证观测到的事和随后展开的细日程来自同一条生活线。 */
 function buildWorldLifePlanBlock(world: WorldProfile, char: CharacterProfile, segmentIndex?: number): string {
     const segmentKeys: WorldDaySegmentKey[] = ['morning', 'noon', 'evening', 'latenight'];
@@ -282,7 +316,7 @@ export async function injectWorldCard(world: WorldProfile, beat: WorldCharBeat, 
 }
 
 export async function runWorldEpisode(deps: WorldEpisodeDeps): Promise<WorldEpisodeResult> {
-    const { world, characters, apiConfig, userProfile, groups, realtimeConfig, memoryPalaceConfig, trigger } = deps;
+    const { world, characters, apiConfig, userProfile, groups, realtimeConfig, memoryPalaceConfig, trigger, tickSlot } = deps;
 
     if (running.has(world.id)) return { ok: false, reason: 'busy' };
 
@@ -302,7 +336,15 @@ export async function runWorldEpisode(deps: WorldEpisodeDeps): Promise<WorldEpis
     const baseUrl = api.baseUrl.replace(/\/+$/, '');
 
     // real 模式：演的那一段跟着真实时钟走；错过的时段自然流逝，不倒灌成多轮剧情
-    const realTarget = world.timeMode !== 'sim' ? realObserveTarget(world) : null;
+    let realTarget = world.timeMode !== 'sim' ? realObserveTarget(world) : null;
+    if (world.timeMode !== 'sim' && tickSlot) {
+        const requested = targetForTickSlot(world, tickSlot);
+        const current = realNowSeg(worldNow(world));
+        realTarget = compareRealClock(requested, current) <= 0
+            && (!world.realClock || compareRealClock(requested, world.realClock) > 0)
+            ? requested
+            : null;
+    }
     if (world.timeMode !== 'sim' && !realTarget) return { ok: false, reason: 'caught-up' };
 
     const timeJump = realTarget && world.realClock && (
@@ -313,6 +355,7 @@ export async function runWorldEpisode(deps: WorldEpisodeDeps): Promise<WorldEpis
     if (world.lifeLinkEnabled && world.timeMode !== 'sim') {
         const plan = await ensureWorldLifePlan(world, api);
         if (plan) world.lifePlan = plan;
+        await ensureWorldDaySchedules(world, members, userProfile, api as APIConfig);
     }
 
     running.add(world.id);

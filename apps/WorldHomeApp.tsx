@@ -784,6 +784,27 @@ const WorldEditor: React.FC<{
                             一个世界只有一把钟：设了之后，早/中/晚/凌晨的段判定、离线运转的触发时刻、以及注入给<b>每个成员</b>的「当前时间」都按这个时区走。
                             它会<b>覆盖</b>成员在「神经链接」里各自设的自定义时区——同一个世界里的人不可能各活一个时区，不覆盖的话世界钟和角色的时间会互相打架。
                         </div>
+                        <div className="border-t border-sky-200/70 pt-2">
+                            <div className="text-[10.5px] font-bold text-sky-700">自动家园时段</div>
+                            <div className="mt-1.5 grid grid-cols-2 gap-1.5">
+                                {([
+                                    ['latenight', '凌晨 02:00'],
+                                    ['morning', '早上 09:00'],
+                                    ['noon', '中午 14:00'],
+                                    ['evening', '晚上 21:00'],
+                                ] as const).map(([slot, label]) => {
+                                    const checked = (w.offlineTickSlots || []).includes(slot);
+                                    return <label key={slot} className="flex items-center gap-1.5 rounded-lg bg-white/80 px-2 py-1.5 text-[10.5px] font-semibold text-sky-800">
+                                        <input type="checkbox" checked={checked} onChange={event => {
+                                            const current = w.offlineTickSlots || [];
+                                            upd({ offlineTickSlots: event.target.checked ? [...current, slot] : current.filter(item => item !== slot) });
+                                        }} />
+                                        {label}
+                                    </label>;
+                                })}
+                            </div>
+                            <div className="mt-1.5 text-[9.5px] leading-snug text-sky-600">网页关闭时不会调用 API；当天重新打开后会按顺序补齐已到的段，未来段不会提前生成。每一段成功保存后才算完成。</div>
+                        </div>
                     </div>
                 )}
             </div>
@@ -2042,7 +2063,7 @@ const WorldHomeApp: React.FC<{ embedded?: boolean; onFullscreen?: (full: boolean
         setDraft({
             id: genId('world'), name: '', worldview: '', mode: 'light', timeMode: 'real',
             memberIds: [], npcs: [], houses: [], relationships: [],
-            offlineTickSlots: [], storyClock: 0, clockSegs: SEGMENTS_PER_DAY, injectToChat: true,
+            offlineTickSlots: ['latenight', 'morning', 'noon', 'evening'], storyClock: 0, clockSegs: SEGMENTS_PER_DAY, injectToChat: true,
             createdAt: Date.now(), updatedAt: Date.now(),
         });
         setView('edit');

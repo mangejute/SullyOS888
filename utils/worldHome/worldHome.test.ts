@@ -669,6 +669,37 @@ describe('WorldScheduler', () => {
         expect(fired).toEqual(['w1:tick']);
     });
 
+    it('把具体时段传给执行器，失败时不消耗当天配额', () => {
+        vi.setSystemTime(new Date('2026-06-11T08:00:00'));
+        const fired: string[] = [];
+        WorldScheduler.onTrigger((id, trigger, slot) => {
+            fired.push(`${id}:${trigger}:${slot}`);
+            return false;
+        });
+        WorldScheduler.reconcile([{ worldId: 'w1', slots: ['morning'] }]);
+        vi.setSystemTime(new Date('2026-06-11T09:30:00'));
+        vi.advanceTimersByTime(61_000);
+
+        expect(fired).toEqual(['w1:tick:morning']);
+        expect(JSON.parse(localStorage.getItem('world_tick_fired')!).w1.fired).toEqual([]);
+    });
+
+    it('当天首次检查会按时间顺序补齐所有已经到达的时段', () => {
+        vi.setSystemTime(new Date('2026-06-11T15:00:00'));
+        localStorage.setItem('world_tick_slots', JSON.stringify({
+            w1: { slots: ['latenight', 'morning', 'noon', 'evening'] },
+        }));
+        localStorage.setItem('world_tick_fired', JSON.stringify({
+            w1: { date: '2026-06-11', fired: [] },
+        }));
+        const fired: string[] = [];
+        WorldScheduler.onTrigger((_id, _trigger, slot) => { fired.push(slot || ''); });
+
+        expect(fired).toEqual(['latenight', 'morning', 'noon']);
+        expect(JSON.parse(localStorage.getItem('world_tick_fired')!).w1.fired)
+            .toEqual(['latenight', 'morning', 'noon']);
+    });
+
     it('跨天后时段配额重置', () => {
         vi.setSystemTime(new Date('2026-06-11T10:00:00'));
         const fired: string[] = [];

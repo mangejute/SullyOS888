@@ -12,7 +12,7 @@ import { FadersHorizontal, Phone, GearSix } from '@phosphor-icons/react';
 import { generateDailyScheduleForChar, isScheduleFeatureOn } from '../utils/scheduleGenerator';
 import { getDailyScheduleForChar } from '../utils/dailySchedule';
 import { runWorldEpisode } from '../utils/worldHome/engine';
-import { getLinkedWorldForCharacter, syncWorldBeatToSchedule } from '../utils/worldHome/lifeLink';
+import { getLinkedWorldForCharacter } from '../utils/worldHome/lifeLink';
 import { useLocalDateKey } from '../hooks/useLocalDateKey';
 import { resolveCharTimeZone } from '../utils/timezone';
 import { generateSlotTheater } from '../utils/theaterGenerator';
@@ -1890,38 +1890,26 @@ const Chat: React.FC = () => {
         if (!targetChar || isScheduleGenerating) return;
         setIsScheduleGenerating(true);
         try {
-            // 日程与家园共享一把真实时间的钟：每次准备生成/重生成日程前，先让落后现实的家园
-            // 观测推进到当前时段。runWorldEpisode 自带 caught-up 判断，已追上时不会重复调用 API。
-            let linkedWorldId: string | undefined;
-            let observedBeats: import('../types').WorldCharBeat[] | undefined;
+            // 顺序固定为：家园当天总计划（由日程生成内部保证）→ 今日日程 → 当前家园演绎。
+            // 不能先演剧情再补日程，否则角色刚演出的行程没有当天安排作为依据。
             const linkedWorld = await getLinkedWorldForCharacter(targetChar.id);
-            if (linkedWorld) {
-                linkedWorldId = linkedWorld.id;
-                const observed = await runWorldEpisode({
-                    world: linkedWorld,
-                    characters,
-                    apiConfig,
-                    userProfile,
-                    groups,
-                    realtimeConfig,
-                    memoryPalaceConfig,
-                    trigger: 'observe',
-                });
-                if (observed.ok && observed.episode) {
-                    observedBeats = observed.episode.beats;
-                    await reloadMessages(visibleCountRef.current);
-                }
-            }
             const result = await generateDailyScheduleForChar(targetChar, userProfile, apiConfig, forceRegenerate);
             if (result) {
                 setScheduleData(result);
-                // 观测发生在日程重建之前，需把本轮已发生事件补回新日程，不能让重建覆盖掉实况。
-                if (linkedWorldId && observedBeats?.length) {
-                    const refreshedWorld = await DB.getWorld(linkedWorldId);
-                    if (refreshedWorld) {
-                        await Promise.all(observedBeats.map(beat => syncWorldBeatToSchedule(refreshedWorld, beat)));
+                if (linkedWorld) {
+                    const observed = await runWorldEpisode({
+                        world: linkedWorld,
+                        characters,
+                        apiConfig,
+                        userProfile,
+                        groups,
+                        realtimeConfig,
+                        memoryPalaceConfig,
+                        trigger: 'observe',
+                    });
+                    if (observed.ok && observed.episode) {
+                        await reloadMessages(visibleCountRef.current);
                     }
-                    if (forceRegenerate) addToast('家园已观测更新，日程已按最新事件重生成', 'success');
                 }
                 // 跨天后台重新生成也要刷云端：不刷的话角色到点照着昨天的作息表说话
                 markAmsgStateDirty({ char: targetChar, userProfile, groups, realtimeConfig });

@@ -78,10 +78,21 @@ const localNow = (tz?: string) => {
     };
 };
 
-let triggerCallback: ((worldId: string, trigger: 'observe' | 'tick') => void | Promise<void>) | null = null;
+let triggerCallback: ((worldId: string, trigger: 'observe' | 'tick', slot?: WorldTickSlot) => boolean | void | Promise<boolean | void>) | null = null;
 let visibilityListener: (() => void) | null = null;
 let focusListener: (() => void) | null = null;
 let mainThreadTimer: ReturnType<typeof setInterval> | null = null;
+const inFlight = new Set<string>();
+
+const SLOT_ORDER: WorldTickSlot[] = ['latenight', 'morning', 'noon', 'evening'];
+
+function markComplete(worldId: string, date: string, slot: WorldTickSlot) {
+    const firedMap = load<FiredMap>(FIRED_KEY);
+    const rec = firedMap[worldId]?.date === date ? firedMap[worldId] : { date, fired: [] };
+    if (!rec.fired.includes(slot)) rec.fired.push(slot);
+    firedMap[worldId] = rec;
+    save(FIRED_KEY, firedMap);
+}
 
 function checkDue() {
     if (!triggerCallback) return;
@@ -100,12 +111,37 @@ function checkDue() {
             firedMap[worldId] = rec;
             changed = true;
         }
-        for (const slot of slots) {
+        for (const slot of SLOT_ORDER.filter(item => slots.includes(item))) {
             if (rec.fired.includes(slot)) continue;
             if (hour < SLOT_HOUR[slot]) continue;
-            rec.fired.push(slot);
-            changed = true;
-            void triggerCallback(worldId, 'tick');
+            const taskKey = `${worldId}:${date}:${slot}`;
+            if (inFlight.has(taskKey)) break;
+            inFlight.add(taskKey);
+            // 先把跨日重置后的空记录写下；同步回调若成功会在此基础上追加完成段，
+            // 避免 checkDue 末尾的旧内存把刚写入的完成标记覆盖掉。
+            if (changed) {
+                save(FIRED_KEY, firedMap);
+                changed = false;
+            }
+            const finish = (ok: boolean | void) => {
+                inFlight.delete(taskKey);
+                // 只有本轮真的完成（或已由其它入口完成）才消耗时段配额；失败会留给下次检查重试。
+                if (ok !== false) {
+                    markComplete(worldId, date, slot);
+                    // 补段必须保持时序，但不用机械地等下一分钟；上一段落库后立刻检查下一段。
+                    checkDue();
+                }
+            };
+            try {
+                const result = triggerCallback(worldId, 'tick', slot);
+                if (result && typeof (result as Promise<boolean | void>).then === 'function') {
+                    void Promise.resolve(result).then(finish).catch(() => finish(false));
+                } else {
+                    finish(result as boolean | void);
+                }
+            } catch {
+                finish(false);
+            }
             // 一次 check 每个世界最多补一轮：链式 N 角色调用很贵，
             // 错过的多个时段隔分钟级轮询逐个补，不在同一瞬间叠加触发。
             break;
@@ -145,7 +181,7 @@ function detachListeners() {
 
 export const WorldScheduler = {
     /** 注册触发回调（应用启动时调一次）。 */
-    onTrigger(callback: (worldId: string, trigger: 'observe' | 'tick') => void | Promise<void>) {
+    onTrigger(callback: (worldId: string, trigger: 'observe' | 'tick', slot?: WorldTickSlot) => boolean | void | Promise<boolean | void>) {
         triggerCallback = callback;
         if (Object.keys(load<SlotsMap>(SLOTS_KEY)).length > 0) {
             attachListeners();

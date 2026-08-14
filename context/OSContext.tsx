@@ -2602,12 +2602,12 @@ export const OSProvider: React.FC<{ children: React.ReactNode }> = ({ children }
 
       // 「家园」演绎 —— 引擎跑在全局：用户不在家园界面（可能正在和别人私聊）时，
       // 观测/离线 tick 触发的一轮链式演绎照样完成并注入 world_card。
-      const runWorld = async (worldId: string, trigger: 'observe' | 'tick') => {
-          if (!userProfileRef.current) return;
+      const runWorld = async (worldId: string, trigger: 'observe' | 'tick', tickSlot?: import('../utils/worldHome/scheduler').WorldTickSlot): Promise<boolean> => {
+          if (!userProfileRef.current) return false;
           try {
               const world = await DB.getWorld(worldId);
-              if (!world) return;
-              await runWorldEpisode({
+              if (!world) return false;
+              const result = await runWorldEpisode({
                   world,
                   characters: charactersRef.current,
                   apiConfig: apiConfigRef.current,
@@ -2616,12 +2616,15 @@ export const OSProvider: React.FC<{ children: React.ReactNode }> = ({ children }
                   realtimeConfig: realtimeConfigRef.current,
                   memoryPalaceConfig: memoryPalaceConfigRef.current,
                   trigger,
+                  tickSlot,
               });
+              return result.ok || result.reason === 'caught-up';
           } catch (e) {
               console.error('[WorldHome] runWorld error', e);
+              return false;
           }
       };
-      WorldScheduler.onTrigger((worldId, trigger) => { void runWorld(worldId, trigger); });
+      WorldScheduler.onTrigger((worldId, trigger, tickSlot) => runWorld(worldId, trigger, tickSlot));
 
       // 单个角色重 roll（家园 WorldView 派发 world-reroll-request 事件，带 worldId/charId/direction）
       const onRerollRequest = async (e: Event) => {
