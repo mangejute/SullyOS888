@@ -54,6 +54,22 @@ export function normalizeScheduleSlot(char: CharacterProfile, slot: ScheduleSlot
     };
 }
 
+/** 给日程补齐地点之间的移动时间，并保留无法在地图上连通的警告信息。 */
+export function applyScheduleTravelModel(char: CharacterProfile, slots: ScheduleSlot[]): ScheduleSlot[] {
+    let previous = getCharacterWorldState(char).homeLocationId;
+    return slots.map(slot => {
+        const location = resolveSlotLocation(char, slot);
+        const minutes = location && previous ? travelMinutesBetween(char, previous, location.id) : undefined;
+        const next = {
+            ...slot,
+            ...(location ? { locationId: location.id, location: location.name } : {}),
+            ...(slot.travelMinutes == null && minutes != null ? { travelMinutes: minutes } : {}),
+        };
+        if (location) previous = location.id;
+        return next;
+    });
+}
+
 export function currentScheduleSlot(schedule: DailySchedule | null, now = new Date()): ScheduleSlot | null {
     if (!schedule?.slots?.length) return null;
     const minutes = now.getHours() * 60 + now.getMinutes();
@@ -82,6 +98,10 @@ export function buildCharacterWorldContext(char: CharacterProfile, schedule?: Da
     if (active) {
         const activeLocation = resolveSlotLocation(char, active);
         lines.push(`当前日程：${active.startTime} ${active.activity}${activeLocation ? `，地点=${activeLocation.name}` : active.location ? `，地点=${active.location}` : ''}`);
+        if (activeLocation && activeLocation.id !== state.currentLocationId) {
+            const minutes = travelMinutesBetween(char, state.currentLocationId, activeLocation.id);
+            lines.push(`移动状态：正在前往${activeLocation.name}${minutes != null ? `，预计还需约 ${minutes} 分钟` : '，地图未提供直连路程，请按常识安排移动过程'}`);
+        }
     }
     if (locations.length) {
         lines.push('地点索引：');
@@ -92,6 +112,8 @@ export function buildCharacterWorldContext(char: CharacterProfile, schedule?: Da
     }
     if (npcs.length) {
         lines.push('附近与关系网络：');
+        const samePlace = npcs.filter(npc => npc.currentLocationId && npc.currentLocationId === state.currentLocationId).map(npc => npc.name);
+        if (samePlace.length) lines.push(`同地点 NPC：${samePlace.join('、')}（可以自然相遇，但不要替他们编造内心）`);
         for (const npc of npcs.slice(0, 60)) {
             const rawNpc = npc as CharacterWorldNpc & { homeLocationName?: string; workLocationName?: string; frequentLocationNames?: string[] };
             const npcLocation = locationById(char, npc.currentLocationId || npc.workLocationId || npc.homeLocationId)
@@ -114,6 +136,63 @@ export function deriveWorldStatePatch(char: CharacterProfile, slot?: ScheduleSlo
         ...(resolved ? { currentLocationId: resolved.id, currentLocationSince: now } : {}),
         ...(slot ? { lastScheduleId: `${char.id}:${slot.startTime}`, lastTransitionAt: now } : {}),
     };
+}
+
+export function travelMinutesBetween(char: CharacterProfile, fromId?: string, toId?: string): number | undefined {
+    if (!fromId || !toId || fromId === toId) return 0;
+    const from = locationById(char, fromId);
+    const direct = from?.travelMinutes?.[toId];
+    if (Number.isFinite(direct)) return direct;
+    if (from?.connectedLocationIds?.includes(toId)) {
+        const target = locationById(char, toId);
+        if (target && from) return Math.max(3, Math.round(Math.hypot(from.x - target.x, from.y - target.y) * 0.7));
+    }
+    return undefined;
+}
+
+function npcLocationForClock(char: CharacterProfile, npc: CharacterWorldNpc, hour: number): string | undefined {
+    const raw = npc as CharacterWorldNpc & { homeLocationName?: string; workLocationName?: string; frequentLocationNames?: string[] };
+    const home = npc.homeLocationId || locationByName(char, raw.homeLocationName)?.id;
+    const work = npc.workLocationId || locationByName(char, raw.workLocationName)?.id;
+    const frequent = npc.frequentLocationIds?.[0] || locationByName(char, raw.frequentLocationNames?.[0])?.id;
+    if (hour < 7 || hour >= 22) return home || work || frequent;
+    if (hour >= 8 && hour < 18) return work || frequent || home;
+    return frequent || home || work;
+}
+
+/** 根据当前日程和世界钟计算角色/NPC位置，不负责持久化。 */
+export function deriveCharacterWorldClock(char: CharacterProfile, schedule: DailySchedule | null, at = new Date()): CharacterProfile | null {
+    if (!char.worldMap && !char.worldNpcs && !char.worldState) return null;
+    const active = currentScheduleSlot(schedule, at);
+    const oldState = getCharacterWorldState(char);
+    const target = active ? resolveSlotLocation(char, active) : locationById(char, oldState.currentLocationId);
+    const now = at.getTime();
+    const currentLocationId = target?.id || oldState.currentLocationId;
+    const stateChanged = currentLocationId !== oldState.currentLocationId;
+    const travelMinutes = stateChanged ? travelMinutesBetween(char, oldState.currentLocationId, currentLocationId) : undefined;
+    const nextState: CharacterWorldState = {
+        ...oldState,
+        ...(currentLocationId ? { currentLocationId } : {}),
+        ...(stateChanged ? {
+            currentLocationSince: now,
+            lastTransitionAt: now,
+            lastTravelFromLocationId: oldState.currentLocationId,
+            lastTravelToLocationId: currentLocationId,
+            ...(travelMinutes != null ? { lastTravelMinutes: travelMinutes } : {}),
+        } : {}),
+        ...(active ? { lastScheduleId: `${char.id}:${schedule?.date || ''}:${active.startTime}` } : {}),
+    };
+    const npcs = getCharacterNpcs(char);
+    const hour = at.getHours();
+    const nextNpcs = npcs.map(npc => ({ ...npc, currentLocationId: npcLocationForClock(char, npc, hour) || npc.currentLocationId }));
+    const npcsChanged = nextNpcs.some((npc, i) => npc.currentLocationId !== npcs[i]?.currentLocationId);
+    const nextWorldNpcs = Array.isArray(char.worldNpcs)
+        ? nextNpcs
+        : char.worldNpcs
+            ? { ...(char.worldNpcs as { sourceText?: string; updatedAt?: number }), npcs: nextNpcs }
+            : char.worldNpcs;
+    if (!stateChanged && !npcsChanged && char.worldState?.lastScheduleId === nextState.lastScheduleId) return null;
+    return { ...char, worldState: nextState, ...(nextWorldNpcs ? { worldNpcs: nextWorldNpcs } : {}) };
 }
 
 /** 只响应明确的移动动词，避免把普通聊天里的“在哪里”误判成位置变更。 */

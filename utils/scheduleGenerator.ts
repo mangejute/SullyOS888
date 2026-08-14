@@ -13,7 +13,7 @@ import { getFlowNarrativeKey, isScheduleFeatureOn } from './scheduleFeature';
 import { formatWorldLifeContext, getWorldLifeContextForCharacter, type WorldLifeContext } from './worldHome/lifeLink';
 import { worldNow } from './worldHome/prompts';
 import { recordPromptHistory } from './promptHistory';
-import { buildCharacterWorldContext, normalizeScheduleSlot } from './characterWorld';
+import { applyScheduleTravelModel, buildCharacterWorldContext, normalizeScheduleSlot } from './characterWorld';
 
 export { getFlowNarrativeKey, isScheduleFeatureOn } from './scheduleFeature';
 
@@ -369,6 +369,7 @@ export async function generateDailyScheduleForChar(
 
         // Sort by time
         slots.sort((a, b) => a.startTime.localeCompare(b.startTime));
+        const modeledSlots = applyScheduleTravelModel(char, slots);
 
         // Extract flowNarrative
         let flowNarrative: Record<string, string> | undefined;
@@ -390,7 +391,7 @@ export async function generateDailyScheduleForChar(
             id: `${char.id}_${today}`,
             charId: char.id,
             date: today,
-            slots,
+            slots: modeledSlots,
             generatedAt: Date.now(),
             coverImage,
             flowNarrative,

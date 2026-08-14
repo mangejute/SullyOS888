@@ -1603,6 +1603,9 @@ export interface CharacterWorldState {
     currentLocationSince?: number;
     lastScheduleId?: string;
     lastTransitionAt?: number;
+    lastTravelMinutes?: number;
+    lastTravelFromLocationId?: string;
+    lastTravelToLocationId?: string;
 }
 
 /** 用户以“上帝视角”指定的下一段世界走向。所有角色与 NPC 都必须服从，演完即消费。 */

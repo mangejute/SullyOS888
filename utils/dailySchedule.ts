@@ -2,6 +2,7 @@ import { CharacterProfile, DailySchedule } from '../types';
 import { DB } from './db';
 import { getLocalDateKey } from './localDate';
 import { nowInTimeZone, resolveCharTimeZone } from './timezone';
+import { deriveCharacterWorldClock } from './characterWorld';
 
 /**
  * Load a schedule for the requested calendar timezone (device time by default).
@@ -56,18 +57,36 @@ export async function getLocalDailySchedule(
 }
 
 /** 按角色自己的日历日读取日程；未开启自定义时区时保持原本的手机时间行为。 */
-export function getDailyScheduleForChar(
-    char: Pick<CharacterProfile, 'id' | 'customTimezoneEnabled' | 'customTimezone'>,
+export async function getDailyScheduleForChar(
+    char: CharacterProfile,
     at: Date = new Date(),
 ): Promise<DailySchedule | null> {
-    return DB.getWorlds()
-        .then(worlds => {
-            const linkedWorld = worlds.find(world =>
-                world.lifeLinkEnabled === true
-                && (world.timeMode || 'real') === 'real'
-                && world.memberIds.includes(char.id)
-            );
-            return getLocalDailySchedule(char.id, at, linkedWorld?.timezone || resolveCharTimeZone(char));
-        })
-        .catch(() => getLocalDailySchedule(char.id, at, resolveCharTimeZone(char)));
+    let schedule: DailySchedule | null;
+    try {
+        const worlds = await DB.getWorlds();
+        const linkedWorld = worlds.find(world =>
+            world.lifeLinkEnabled === true
+            && (world.timeMode || 'real') === 'real'
+            && world.memberIds.includes(char.id)
+        );
+        schedule = await getLocalDailySchedule(char.id, at, linkedWorld?.timezone || resolveCharTimeZone(char));
+    } catch {
+        schedule = await getLocalDailySchedule(char.id, at, resolveCharTimeZone(char));
+    }
+
+    // 角色有地图/NPC 数据时，读取日程本身就是一次世界钟 tick：
+    // 更新角色当前地点和 NPC 的家/工作/常去地点，并保留用户刚刚修改的其他字段。
+    if (char.worldMap || char.worldNpcs || char.worldState) {
+        try {
+            const fresh = (await DB.getAllCharacters()).find(item => item.id === char.id) || char;
+            const updated = deriveCharacterWorldClock(fresh, schedule, at);
+            if (updated) {
+                await DB.saveCharacter(updated);
+                Object.assign(char, updated);
+            }
+        } catch (error) {
+            console.warn('[CharacterWorld] clock sync failed:', error);
+        }
+    }
+    return schedule;
 }
