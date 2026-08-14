@@ -2,6 +2,14 @@
 
 > 供后续所有开发窗口使用。开始工作前先读本文件；完成改动后同步更新版本号、构建产物和本文件中的状态。
 
+## 唯一开发入口（优先级最高）
+
+本项目虽基于“手抓糯米机 / SullyOS”，但当前这套 `customization` 分支是用户自己的**小雨手机二改版**。以后所有需求只能在下面的唯一源码目录实现：
+
+`C:\Users\Yu\Documents\ChatGPT\nuomi\SullyOS888-workspace\SullyOS888-master`
+
+禁止误改上游原版、`SullyOS-github`、任何 `SullyOS888-update-*`、`SullyOS888-pages-*` 或 `_orig_tmp_*` 历史/备份目录。唯一上传成品目录是 `C:\Users\Yu\Documents\GitHub\SullyOS888`。根目录的 `AGENTS.md` 也写有此硬性约定。
+
 ## 项目与发布
 
 - 源码仓库：`C:\Users\Yu\Documents\ChatGPT\nuomi\SullyOS888-workspace\SullyOS888-master`
