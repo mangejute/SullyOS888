@@ -5,6 +5,7 @@ import { getCurrentScheduleSlotIndex, getScheduleWallClock } from '../../utils/s
 import { resolveCharTimeZone, tzShortLabel } from '../../utils/timezone';
 import { useOS } from '../../context/OSContext';
 import { resolveScheduleCardPalette } from '../../utils/scheduleAppearance';
+import { findNpcById, resolveSlotLocation } from '../../utils/characterWorld';
 import ScheduleAppearanceButton, { ScheduleCustomCssStyle } from './ScheduleAppearanceButton';
 
 interface ScheduleCardProps {
@@ -274,6 +275,12 @@ const ScheduleCard: React.FC<ScheduleCardProps> = ({
                             const isPast = currentIdx >= 0 && idx < currentIdx;
                             const isFuture = !isPast && !isCurrent; // 还没到的时段：按钮灰着，点了给提示
                             const isEditing = editingIdx === idx;
+                            const slotLocation = character ? resolveSlotLocation(character, slot) : undefined;
+                            const participantNames = character
+                                ? (slot.participantNpcIds || [])
+                                    .map(id => findNpcById(character, id)?.name)
+                                    .filter(Boolean)
+                                : [];
 
                             if (isEditing && !compact) {
                                 return (
@@ -376,6 +383,23 @@ const ScheduleCard: React.FC<ScheduleCardProps> = ({
                                         </div>
                                         {slot.description && (
                                             <p className="sully-schedule-description text-[11px] opacity-50 mt-0.5 leading-tight">{slot.description}</p>
+                                        )}
+                                        {(slotLocation || slot.location || participantNames.length > 0 || slot.worldEvent) && (
+                                            <div className="flex flex-wrap items-center gap-1 mt-1.5">
+                                                {(slotLocation || slot.location) && (
+                                                    <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md text-[9px] font-semibold border" style={{ borderColor: palette.line, color: accentHsl, background: accentBg }}>
+                                                        <span aria-hidden="true">⌖</span>{slotLocation?.name || slot.location}
+                                                    </span>
+                                                )}
+                                                {participantNames.map(name => (
+                                                    <span key={name} className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md text-[9px] font-semibold border" style={{ borderColor: palette.line, color: contentColor, background: 'color-mix(in srgb, var(--schedule-text) 7%, transparent)' }}>
+                                                        <span aria-hidden="true">♙</span>{name}
+                                                    </span>
+                                                ))}
+                                            </div>
+                                        )}
+                                        {slot.worldEvent && (
+                                            <p className="text-[10px] opacity-45 mt-1 leading-tight">家园：{slot.worldEvent}</p>
                                         )}
                                     </div>
 

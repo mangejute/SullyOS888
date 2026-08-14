@@ -10,7 +10,7 @@ import { loadCharacterContextRange } from './chatContextRange';
 import { ChatPrompts } from './chatPrompts';
 import { cleanApiMessages, flattenImageContentParts } from './promptMessageCleanup';
 import { getFlowNarrativeKey, isScheduleFeatureOn } from './scheduleFeature';
-import { formatWorldLifeContext, getWorldLifeContextForCharacter, type WorldLifeContext } from './worldHome/lifeLink';
+import { enforceWorldLifePlanOnSchedule, formatWorldLifeContext, getWorldLifeContextForCharacter, type WorldLifeContext } from './worldHome/lifeLink';
 import { worldNow } from './worldHome/prompts';
 import { recordPromptHistory } from './promptHistory';
 import { applyScheduleTravelModel, buildCharacterWorldContext, normalizeScheduleSlot } from './characterWorld';
@@ -103,6 +103,8 @@ ${chatHistoryBlock ? `**重要：上面给了你最近和「${user.name}」的�
 - activity: 活动名（2-6字）
 - description: 一句话描述（可以带动作质感、物件、感官细节）
 - emoji: 一个匹配的emoji
+- locationId: 地图中地点的唯一 ID；有地图时必须从地点索引中选择
+- participantNpcIds: 一起活动的 NPC 唯一 ID 数组；没有同行者时写 []
 - worldSegment: "morning" / "noon" / "evening" / "latenight"。没有家园计划时也按时间填写。
 
 #### 关键要求
@@ -156,7 +158,7 @@ ${chatHistoryBlock ? `**重要：上面给了你最近和「${user.name}」的�
 请以JSON格式输出：
 {
   "slots": [
-    { "startTime": "08:00", "activity": "活动名称", "description": "简短描述", "emoji": "🏃", "worldSegment": "morning" },
+    { "startTime": "08:00", "activity": "活动名称", "description": "简短描述", "emoji": "🏃", "locationId": "地图地点ID", "participantNpcIds": [], "worldSegment": "morning" },
     ...
   ],
   "flowNarrative": {
@@ -202,6 +204,8 @@ ${chatHistoryBlock ? `**重要：上面给了你最近和「${user.name}」的�
 - activity: 状态名（2-6字，如"回想昨天的对话""发呆""整理想法""想找你聊天"）
 - description: 一句话描述此刻在想什么
 - emoji: 一个匹配的emoji
+- locationId: 如果当前意识对应地图地点，从地点索引中选择唯一 ID
+- participantNpcIds: 如果明确和 NPC 一起，从 NPC 索引中选择唯一 ID，否则写 []
 - worldSegment: "morning" / "noon" / "evening" / "latenight"。必须覆盖四段；若有家园计划，按该段的共同事实思考，不能假装发生物理活动。
 
 **可以做的事**（基于真实能力）：回想和用户的对话、整理之前聊过的话题、琢磨某个问题、等待用户、感到无聊、想念用户、发呆、反思自己说过的话、对某个话题产生好奇、期待下次聊天
@@ -233,7 +237,7 @@ ${chatHistoryBlock ? `**重要：上面给了你最近和「${user.name}」的�
 请以JSON格式输出：
 {
   "slots": [
-    { "startTime": "08:00", "activity": "状态名", "description": "简短描述", "emoji": "💭", "worldSegment": "morning" },
+    { "startTime": "08:00", "activity": "状态名", "description": "简短描述", "emoji": "💭", "locationId": "地图地点ID", "participantNpcIds": [], "worldSegment": "morning" },
     ...
   ],
   "flowNarrative": {
@@ -369,7 +373,11 @@ export async function generateDailyScheduleForChar(
 
         // Sort by time
         slots.sort((a, b) => a.startTime.localeCompare(b.startTime));
-        const modeledSlots = applyScheduleTravelModel(char, slots);
+        let modeledSlots = applyScheduleTravelModel(char, slots);
+        if (worldLifeContext) {
+            modeledSlots = enforceWorldLifePlanOnSchedule(char, modeledSlots, worldLifeContext);
+            modeledSlots = applyScheduleTravelModel(char, modeledSlots);
+        }
 
         // Extract flowNarrative
         let flowNarrative: Record<string, string> | undefined;

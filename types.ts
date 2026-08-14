@@ -1443,8 +1443,12 @@ export interface WorldLifePlanMember {
     charId: string;
     activity: string;
     location: string;
+    /** 地图中的规范地点 ID；旧计划没有时由地点名称解析。 */
+    locationId?: string;
     description?: string;
     mood?: string;
+    /** 该段明确同行的地图 NPC；旧计划没有时为空。 */
+    participantNpcIds?: string[];
 }
 
 /** 每个真实时间家园每天只生成一次的共享计划。 */

@@ -47,11 +47,14 @@ export function resolveSlotLocation(char: CharacterProfile, slot: ScheduleSlot):
 /** 规范化 AI/旧日程输出：地点名只用于展示，内部始终优先使用 locationId。 */
 export function normalizeScheduleSlot(char: CharacterProfile, slot: ScheduleSlot): ScheduleSlot {
     const resolved = resolveSlotLocation(char, slot);
+    const knownNpcIds = new Set(getCharacterNpcs(char).map(npc => npc.id));
     return {
         ...slot,
         ...(resolved ? { locationId: resolved.id, location: resolved.name } : {}),
         travelMinutes: Number.isFinite(slot.travelMinutes) ? slot.travelMinutes : undefined,
-        participantNpcIds: Array.isArray(slot.participantNpcIds) ? slot.participantNpcIds.filter(Boolean) : undefined,
+        participantNpcIds: Array.isArray(slot.participantNpcIds)
+            ? slot.participantNpcIds.filter(id => Boolean(id) && knownNpcIds.has(id))
+            : undefined,
     };
 }
 
@@ -87,14 +90,16 @@ export function buildCharacterWorldContext(char: CharacterProfile, schedule?: Da
     const npcs = getCharacterNpcs(char);
     if (locations.length === 0 && npcs.length === 0 && !char.worldState) return '';
     const state = getCharacterWorldState(char);
-    const current = locationById(char, state.currentLocationId);
+    const active = currentScheduleSlot(schedule || null, now);
+    const activeLocation = resolveSlotLocation(char, active || {} as ScheduleSlot);
+    // 日程是当前地点的唯一事实源；worldState 只是未生成日程时的持久化缓存。
+    const current = activeLocation || locationById(char, state.currentLocationId);
     const home = locationById(char, state.homeLocationId);
     const work = locationById(char, state.workLocationId);
-    const active = currentScheduleSlot(schedule || null, now);
     // 地图是完整资料库，但聊天只需要此刻可影响行动的那一小块。
     // 否则地点和 NPC 越积越多，每一轮对话都会无意义地膨胀上下文。
     const relevantLocationIds = new Set<string>([
-        state.currentLocationId,
+        current?.id,
         state.homeLocationId,
         state.workLocationId,
         resolveSlotLocation(char, active || {} as ScheduleSlot)?.id,
@@ -104,7 +109,7 @@ export function buildCharacterWorldContext(char: CharacterProfile, schedule?: Da
     }
     const contextLocations = locations.filter(location => relevantLocationIds.has(location.id));
     if (!contextLocations.length) contextLocations.push(...locations.slice(0, 12));
-    const samePlaceNpcs = npcs.filter(npc => npc.currentLocationId && npc.currentLocationId === state.currentLocationId);
+    const samePlaceNpcs = npcs.filter(npc => npc.currentLocationId && npc.currentLocationId === current?.id);
     const relatedNpcs = npcs.filter(npc =>
         npc.currentLocationId && relevantLocationIds.has(npc.currentLocationId)
         || npc.homeLocationId && relevantLocationIds.has(npc.homeLocationId)
@@ -117,11 +122,23 @@ export function buildCharacterWorldContext(char: CharacterProfile, schedule?: Da
     if (home) lines.push(`你的家：${home.name}`);
     if (work) lines.push(`你的工作场所：${work.name}`);
     if (active) {
-        const activeLocation = resolveSlotLocation(char, active);
         lines.push(`当前日程：${active.startTime} ${active.activity}${activeLocation ? `，地点=${activeLocation.name}` : active.location ? `，地点=${active.location}` : ''}`);
-        if (activeLocation && activeLocation.id !== state.currentLocationId) {
-            const minutes = travelMinutesBetween(char, state.currentLocationId, activeLocation.id);
-            lines.push(`移动状态：正在前往${activeLocation.name}${minutes != null ? `，预计还需约 ${minutes} 分钟` : '，地图未提供直连路程，请按常识安排移动过程'}`);
+        const activeNpcNames = (active.participantNpcIds || [])
+            .map(id => findNpcById(char, id)?.name)
+            .filter(Boolean)
+            .join('、');
+        if (activeNpcNames) lines.push(`当前同行 NPC：${activeNpcNames}`);
+        if (active.worldEvent) lines.push(`当前家园实况：${active.worldEvent}${active.worldMood ? `（${active.worldMood}）` : ''}`);
+    }
+    if (schedule?.slots?.length) {
+        lines.push('今日已确定日程（地点和同行者必须保持一致）：');
+        for (const slot of schedule.slots) {
+            const slotLocation = resolveSlotLocation(char, slot);
+            const slotNpcNames = (slot.participantNpcIds || [])
+                .map(id => findNpcById(char, id)?.name)
+                .filter(Boolean)
+                .join('、');
+            lines.push(`- ${slot.startTime} ${slot.activity}${slotLocation ? `｜地点：${slotLocation.name}` : slot.location ? `｜地点：${slot.location}` : ''}${slotNpcNames ? `｜同行：${slotNpcNames}` : ''}`);
         }
     }
     if (locations.length) {
@@ -144,7 +161,7 @@ export function buildCharacterWorldContext(char: CharacterProfile, schedule?: Da
         }
         if (npcs.length > contextNpcs.length) lines.push(`（其余 ${npcs.length - contextNpcs.length} 位 NPC 不在当前场景，不要主动让他们出现。）`);
     }
-    lines.push('行动约束：从一个地点去另一个地点需要经过相连地点或合理的移动时间；聊天中只有明确说出“去/回/到某地”等行动时，才改变当前所在。');
+    lines.push('行动约束：当前时间段优先服从日程地点和同行 NPC；从一个地点去另一个地点需要经过相连地点或合理的移动时间。只有明确发生了移动，才在后续时间段改变地点。');
     return lines.join('\n') + '\n';
 }
 

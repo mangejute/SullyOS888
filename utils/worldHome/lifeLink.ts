@@ -1,8 +1,9 @@
-import type { CharacterProfile, DailySchedule, WorldCharBeat, WorldDaySegmentKey, WorldLifePlan, WorldProfile } from '../../types';
+import type { CharacterProfile, DailySchedule, ScheduleSlot, WorldCharBeat, WorldDaySegmentKey, WorldLifePlan, WorldProfile } from '../../types';
 import { DB } from '../db';
 import { extractContent, extractJson, safeFetchJson } from '../safeApi';
 import { getLocalDateKey } from '../localDate';
 import { worldNow } from './prompts';
+import { getCharacterNpcs, locationById, locationByName } from '../characterWorld';
 
 type ApiConfig = { baseUrl: string; apiKey: string; model: string };
 
@@ -24,7 +25,8 @@ export function worldSegmentForHour(hour: number): WorldDaySegmentKey {
 
 export function worldSegmentFromClock(world: WorldProfile): WorldDaySegmentKey {
     const segment = world.realClock?.seg;
-    return SEGMENTS[segment ?? worldSegmentForHour(worldNow(world).getHours())] || 'morning';
+    const key = typeof segment === 'number' ? SEGMENTS[segment] : worldSegmentForHour(worldNow(world).getHours());
+    return key || 'morning';
 }
 
 export function worldLifeDayKey(world: WorldProfile): string {
@@ -49,8 +51,12 @@ function cleanMemberPlan(raw: any, charId: string) {
         charId,
         activity: activity.slice(0, 40),
         location: location.slice(0, 60),
+        locationId: typeof raw?.locationId === 'string' ? raw.locationId.trim() || undefined : undefined,
         description: String(raw?.description || '').trim().slice(0, 180) || undefined,
         mood: String(raw?.mood || '').trim().slice(0, 24) || undefined,
+        participantNpcIds: Array.isArray(raw?.participantNpcIds)
+            ? raw.participantNpcIds.map((id: unknown) => String(id || '').trim()).filter(Boolean).slice(0, 8)
+            : undefined,
     };
 }
 
@@ -82,7 +88,11 @@ function normalizeLifePlan(raw: any, world: WorldProfile, members: CharacterProf
 function buildLifePlanPrompt(world: WorldProfile, members: CharacterProfile[], dayKey: string, recentSummary: string): string {
     const residents = members.map(member => {
         const persona = (member.description || member.systemPrompt || '').replace(/\s+/g, ' ').trim().slice(0, 260);
-        return `- ${member.name}（id: ${member.id}）：${persona || '请按已有角色设定安排'}`;
+        const places = Array.isArray(member.worldMap?.locations)
+            ? member.worldMap!.locations.slice(0, 24).map(location => `${location.id}=${location.name}`).join('、')
+            : '';
+        const npcs = getCharacterNpcs(member).slice(0, 16).map(npc => `${npc.id}=${npc.name}`).join('、');
+        return `- ${member.name}（id: ${member.id}）：${persona || '请按已有角色设定安排'}${places ? `\n  地图地点（必须优先使用 ID）：${places}` : ''}${npcs ? `\n  可同行 NPC：${npcs}` : ''}`;
     }).join('\n');
     return `你是共同家园「${world.name}」的当日生活规划器。现在要为 ${dayKey} 先排出共同生活的四段骨架；这只是计划，不是已经发生的剧情。
 
@@ -110,7 +120,7 @@ ${SEGMENTS.map(key => `- ${key}: ${SEGMENT_LABEL[key]}`).join('\n')}
       "key": "morning",
       "event": "这一段的共同背景",
       "members": [
-        { "charId": "角色id", "activity": "2-8字活动", "location": "地点", "description": "一句具体安排", "mood": "1-4字心情" }
+        { "charId": "角色id", "activity": "2-8字活动", "location": "地点", "locationId": "地图地点ID（如果上下文有）", "participantNpcIds": ["同行NPC ID（如果有）"], "description": "一句具体安排", "mood": "1-4字心情" }
       ]
     }
   ]
@@ -177,9 +187,73 @@ export async function getWorldLifeContextForCharacter(charId: string, api: ApiCo
 export function formatWorldLifeContext(context: WorldLifeContext): string {
     const planLines = context.plan.segments.map(segment => {
         const mine = segment.members.find(member => member.charId === context.member.charId);
-        return `- ${SEGMENT_LABEL[segment.key]}：家园背景「${segment.event}」；你的安排「${mine?.activity || '自然生活'}」${mine?.location ? `（${mine.location}）` : ''}${mine?.description ? `，${mine.description}` : ''}`;
+        const location = mine?.locationId || mine?.location;
+        const npcNames = (mine?.participantNpcIds || [])
+            .map(id => context.world.npcs.find(npc => npc.id === id)?.name)
+            .filter(Boolean)
+            .join('、');
+        return `- ${SEGMENT_LABEL[segment.key]}：家园背景「${segment.event}」；你的安排「${mine?.activity || '自然生活'}」${location ? `（${location}）` : ''}${npcNames ? `；同行：${npcNames}` : ''}${mine?.description ? `，${mine.description}` : ''}`;
     }).join('\n');
     return `\n## 家园当日生活计划（必须遵循）\n你正在共同家园「${context.world.name}」中生活。以下是今天的共享生活骨架；请把日程展开得丰富具体，但不得和这些已定的地点、公共事件、关系安排冲突。每个早/中/晚/凌晨段至少安排一条细日程。\n${planLines}\n`;
+}
+
+/** 家园计划给出的地点是日程的硬约束；细日程可以更细，但不能换到另一个地方。 */
+export function enforceWorldLifePlanOnSchedule(
+    char: CharacterProfile,
+    slots: ScheduleSlot[],
+    context: WorldLifeContext,
+): ScheduleSlot[] {
+    return slots.map(slot => {
+        const hour = Number(slot.startTime.split(':')[0] || 0);
+        const segment = slot.worldSegment || worldSegmentForHour(hour);
+        const member = context.plan.segments.find(item => item.key === segment)?.members.find(item => item.charId === context.member.charId);
+        if (!member?.location) return slot;
+        const location = member.locationId
+            ? locationById(char, member.locationId)
+            : locationByName(char, member.location);
+        if (!location) return slot;
+        const participantNpcIds = (member.participantNpcIds || [])
+            .filter(id => getCharacterNpcs(char).some(npc => npc.id === id));
+        return {
+            ...slot,
+            locationId: location.id,
+            location: location.name,
+            ...(participantNpcIds.length > 0 ? { participantNpcIds } : {}),
+        };
+    });
+}
+
+/** 日程重生成后回写家园计划，下一次家园演绎读取同一份地点和活动事实。 */
+export async function syncScheduleToWorldLifePlan(schedule: DailySchedule): Promise<void> {
+    const world = await getLinkedWorldForCharacter(schedule.charId);
+    if (!world?.lifePlan || world.lifePlan.dayKey !== schedule.date) return;
+    const characters = await DB.getAllCharacters();
+    const char = characters.find(item => item.id === schedule.charId);
+    if (!char) return;
+    const nextSegments = world.lifePlan.segments.map(segment => {
+        const segmentSlots = schedule.slots.filter(slot => (slot.worldSegment || worldSegmentForHour(Number(slot.startTime.split(':')[0] || 0))) === segment.key);
+        if (segmentSlots.length === 0) return segment;
+        const first = segmentSlots[0];
+        const location = first.locationId ? locationById(char, first.locationId) : locationByName(char, first.location);
+        const participantNpcIds = Array.from(new Set(segmentSlots.flatMap(slot => slot.participantNpcIds || [])))
+            .filter(id => getCharacterNpcs(char).some(npc => npc.id === id));
+        return {
+            ...segment,
+            members: segment.members.map(member => member.charId !== schedule.charId ? member : {
+                ...member,
+                activity: first.activity || member.activity,
+                location: location?.name || first.location || member.location,
+                locationId: location?.id || first.locationId || member.locationId,
+                description: first.description || member.description,
+                participantNpcIds: participantNpcIds.length > 0 ? participantNpcIds : member.participantNpcIds,
+            }),
+        };
+    });
+    await DB.saveWorld({
+        ...world,
+        lifePlan: { ...world.lifePlan, generatedAt: Date.now(), segments: nextSegments },
+        updatedAt: Date.now(),
+    });
 }
 
 /** Feed actual observed world facts into the linked schedule without replacing its detailed activities. */
@@ -190,8 +264,30 @@ export async function syncWorldBeatToSchedule(world: WorldProfile, beat: WorldCh
     const segment = worldSegmentFromClock(world);
     const event = (beat.timeline || []).map(item => item.event).filter(Boolean).join('；') || beat.narrative.slice(0, 120);
     if (!event) return;
+    const char = (await DB.getAllCharacters()).find(item => item.id === beat.charId);
+    const observedLocation = char ? locationByName(char, beat.location) : undefined;
     const slots = schedule.slots.map(slot => slot.worldSegment === segment
-        ? { ...slot, worldEvent: event.slice(0, 180), worldMood: beat.mood }
+        ? {
+            ...slot,
+            worldEvent: event.slice(0, 180),
+            worldMood: beat.mood,
+            ...(observedLocation ? { locationId: observedLocation.id, location: observedLocation.name } : {}),
+        }
         : slot);
     await DB.saveDailySchedule({ ...schedule, slots });
+    if (observedLocation) {
+        const lifePlan = {
+            ...world.lifePlan,
+            generatedAt: Date.now(),
+            segments: world.lifePlan.segments.map(item => item.key !== segment ? item : ({
+                ...item,
+                members: item.members.map(member => member.charId !== beat.charId ? member : {
+                    ...member,
+                    location: observedLocation.name,
+                    locationId: observedLocation.id,
+                }),
+            })),
+        };
+        await DB.saveWorld({ ...world, lifePlan, updatedAt: Date.now() });
+    }
 }

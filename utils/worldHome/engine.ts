@@ -25,7 +25,7 @@ import { safeFetchJson } from '../safeApi';
 import { processNewMessagesWithAutoArchive } from '../memoryPalace/autoArchive';
 import { getDailyScheduleForChar } from '../dailySchedule';
 import { generateDailyScheduleForChar, isScheduleFeatureOn } from '../scheduleGenerator';
-import { ensureWorldLifePlan, syncWorldBeatToSchedule } from './lifeLink';
+import { ensureWorldLifePlan, syncScheduleToWorldLifePlan, syncWorldBeatToSchedule } from './lifeLink';
 import {
     worldTimeLabel, buildWorldSystemAddendum, buildWorldCharTurn, buildNpcTurn,
     parseCharBeat, parseNpcScene, realObserveTarget, formatRealClock, migrateWorldDaySegs,
@@ -33,7 +33,7 @@ import {
 } from './prompts';
 import { ensureThreads, applyBeatToThreads, applyNpcGroupLines, applyNpcDms, npcInboxes } from './threads';
 import { shouldCloseChapter, summarizeChapter, SIM_CHAPTER_CLOCKS } from './chapters';
-import { getCharacterWorldState, locationByName } from '../characterWorld';
+import { getCharacterNpcs, getCharacterWorldState, locationByName } from '../characterWorld';
 import type { WorldTickSlot } from './scheduler';
 
 interface MemoryConfigLike {
@@ -255,7 +255,13 @@ async function buildFullDayScheduleBlock(world: WorldProfile, char: CharacterPro
         const s = await getDailyScheduleForChar(char);
         if (!s?.slots?.length) return '';
         const lines = s.slots
-            .map(x => `- ${x.startTime} ${x.activity}${x.location ? `（${x.location}）` : ''}`)
+            .map(x => {
+                const npcNames = (x.participantNpcIds || [])
+                    .map(id => getCharacterNpcs(char).find(npc => npc.id === id)?.name)
+                    .filter(Boolean)
+                    .join('、');
+                return `- ${x.startTime} ${x.activity}${x.location ? `（${x.location}）` : ''}${npcNames ? `｜同行：${npcNames}` : ''}`;
+            })
             .join('\n');
         return `\n\n## 你今天的日程表（既定安排）\n${lines}\n（演绎这半天时以此为参照，行为别和既定安排无故冲突；世界里的事件可以合理打断日程，但要有交代。）`;
     } catch {
@@ -273,7 +279,8 @@ async function ensureWorldDaySchedules(
     if (!world.lifeLinkEnabled || (world.timeMode || 'real') !== 'real') return;
     for (const char of members) {
         if (!isScheduleFeatureOn(char)) continue;
-        await generateDailyScheduleForChar(char, userProfile, api, false);
+        const schedule = await generateDailyScheduleForChar(char, userProfile, api, false);
+        if (schedule) await syncScheduleToWorldLifePlan(schedule).catch(() => {});
     }
 }
 
@@ -356,6 +363,9 @@ export async function runWorldEpisode(deps: WorldEpisodeDeps): Promise<WorldEpis
         const plan = await ensureWorldLifePlan(world, api);
         if (plan) world.lifePlan = plan;
         await ensureWorldDaySchedules(world, members, userProfile, api as APIConfig);
+        // 日程生成会把地点/活动回写家园计划；本轮演绎必须读取回写后的版本。
+        const persistedWorld = (await DB.getWorlds()).find(item => item.id === world.id);
+        if (persistedWorld?.lifePlan) world.lifePlan = persistedWorld.lifePlan;
     }
 
     running.add(world.id);

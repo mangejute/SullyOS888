@@ -59,4 +59,27 @@ describe('character world context', () => {
         const updated = deriveCharacterWorldClock(char, schedule, new Date('2026-08-14T13:00:00.000Z'));
         expect(Array.isArray(updated?.worldNpcs) && updated?.worldNpcs[0].currentLocationId).toBe('work');
     });
+
+    it('uses the active schedule slot as the single current-location fact', () => {
+        const char = {
+            id: 'char-1',
+            name: '测试角色',
+            worldMap: {
+                referenceCity: '', sourceText: '', updatedAt: 0,
+                locations: [
+                    { id: 'home', name: '家', description: '', purpose: '', distance: '', category: '', x: 0, y: 0 },
+                    { id: 'studio', name: '工作室', description: '', purpose: '', distance: '', category: '', x: 1, y: 1 },
+                ],
+            },
+            worldState: { mapVersion: 1, currentLocationId: 'home' },
+        } as CharacterProfile;
+        const schedule: DailySchedule = {
+            id: 's', charId: 'char-1', date: '2026-08-14', generatedAt: 0,
+            slots: [{ startTime: '14:00', activity: '工作', locationId: 'studio', location: '工作室' }],
+        };
+        const context = buildCharacterWorldContext(char, schedule, new Date(2026, 7, 14, 15, 0));
+        expect(context).toContain('当前所在：工作室');
+        expect(context).toContain('当前日程：14:00 工作，地点=工作室');
+        expect(context).not.toContain('正在前往工作室');
+    });
 });

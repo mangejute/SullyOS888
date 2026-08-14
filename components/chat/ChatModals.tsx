@@ -1249,8 +1249,8 @@ const ChatModals: React.FC<ChatModalsProps> = ({
                 isOpen={modalType === 'schedule'} title={`${activeCharacter?.name || '角色'}の日程/情绪`} onClose={() => setModalType('none')}
             >
                 <div className="max-h-[70vh] overflow-y-auto -mx-2 px-2">
-                    {/* 总开关：关闭时不调副 API、不生成日程、不注入情绪 buff */}
-                    {onToggleScheduleFeature && (
+                    {/* 未开启时保留总开关；开启后把计划表放在设置区上方。 */}
+                    {onToggleScheduleFeature && !isScheduleFeatureEnabled && (
                         <div className="mb-4 bg-slate-50 border border-slate-200 rounded-2xl p-3">
                             <div className="flex items-center justify-between">
                                 <div className="flex-1 min-w-0 pr-3">
@@ -1274,6 +1274,40 @@ const ChatModals: React.FC<ChatModalsProps> = ({
 
                     {isScheduleFeatureEnabled && (
                         <>
+                            <ScheduleCard
+                                schedule={scheduleData || null}
+                                character={activeCharacter}
+                                compact={false}
+                                onEdit={onScheduleEdit}
+                                onDelete={onScheduleDelete}
+                                onReroll={onScheduleReroll}
+                                onCoverImageChange={onScheduleCoverChange}
+                                onPlayTheater={onPlayTheater}
+                                isGenerating={isScheduleGenerating}
+                            />
+                            <p className="text-[10px] text-slate-400 text-center mt-3 leading-relaxed">
+                                点击日程项可编辑 · 长按可删除
+                            </p>
+
+                            {/* 总开关：开启时放在日程计划之后 */}
+                            {onToggleScheduleFeature && (
+                                <div className="mt-4 mb-4 bg-slate-50 border border-slate-200 rounded-2xl p-3">
+                                    <div className="flex items-center justify-between">
+                                        <div className="flex-1 min-w-0 pr-3">
+                                            <p className="text-xs font-bold text-slate-700">日程与情绪 Buff</p>
+                                            <p className="text-[10px] text-slate-500 leading-relaxed mt-0.5">已开启：角色会有今日日程，并在聊天中带上当下情绪。</p>
+                                        </div>
+                                        <button
+                                            onClick={onToggleScheduleFeature}
+                                            aria-label="切换日程与情绪总开关"
+                                            className="w-10 h-6 rounded-full p-1 transition-colors flex items-center flex-shrink-0 bg-primary"
+                                        >
+                                            <div className="w-4 h-4 bg-white rounded-full shadow-sm translate-x-4"></div>
+                                        </button>
+                                    </div>
+                                </div>
+                            )}
+
                             {/* Schedule Style Selector */}
                             {onScheduleStyleChange && (
                                 <div className="mb-4">
@@ -1313,21 +1347,6 @@ const ChatModals: React.FC<ChatModalsProps> = ({
                                     </div>
                                 </div>
                             )}
-
-                            <ScheduleCard
-                                schedule={scheduleData || null}
-                                character={activeCharacter}
-                                compact={false}
-                                onEdit={onScheduleEdit}
-                                onDelete={onScheduleDelete}
-                                onReroll={onScheduleReroll}
-                                onCoverImageChange={onScheduleCoverChange}
-                                onPlayTheater={onPlayTheater}
-                                isGenerating={isScheduleGenerating}
-                            />
-                            <p className="text-[10px] text-slate-400 text-center mt-3 leading-relaxed">
-                                点击日程项可编辑 · 长按可删除
-                            </p>
 
                             {/* 情绪 / 意识流 API — 与日程强制同步 */}
                             {activeCharacter && apiPresets && onAddApiPreset && onSaveEmotion && onClearBuffs && (

@@ -12,7 +12,7 @@ import { FadersHorizontal, Phone, GearSix } from '@phosphor-icons/react';
 import { generateDailyScheduleForChar, isScheduleFeatureOn } from '../utils/scheduleGenerator';
 import { getDailyScheduleForChar } from '../utils/dailySchedule';
 import { runWorldEpisode } from '../utils/worldHome/engine';
-import { getLinkedWorldForCharacter } from '../utils/worldHome/lifeLink';
+import { getLinkedWorldForCharacter, syncScheduleToWorldLifePlan } from '../utils/worldHome/lifeLink';
 import { useLocalDateKey } from '../hooks/useLocalDateKey';
 import { resolveCharTimeZone } from '../utils/timezone';
 import { generateSlotTheater } from '../utils/theaterGenerator';
@@ -1896,9 +1896,15 @@ const Chat: React.FC = () => {
             const result = await generateDailyScheduleForChar(targetChar, userProfile, apiConfig, forceRegenerate);
             if (result) {
                 setScheduleData(result);
+                // 日程生成完成后立即回写家园当天计划，后续家园演绎与聊天读取同一份地点/活动事实。
+                await syncScheduleToWorldLifePlan(result).catch(error => {
+                    console.warn('[Schedule] linked home plan sync failed:', error);
+                });
                 if (linkedWorld) {
+                    // 同步会刷新 IndexedDB 中的家园计划；演绎前重新取一次，避免本轮还拿旧地点。
+                    const linkedWorldForEpisode = (await DB.getWorlds()).find(world => world.id === linkedWorld.id) || linkedWorld;
                     const observed = await runWorldEpisode({
-                        world: linkedWorld,
+                        world: linkedWorldForEpisode,
                         characters,
                         apiConfig,
                         userProfile,
@@ -1933,7 +1939,10 @@ const Chat: React.FC = () => {
         setIsScheduleGenerating(true);
         try {
             const result = await generateDailyScheduleForChar(updatedChar, userProfile, apiConfig, true);
-            if (result) setScheduleData(result);
+            if (result) {
+                setScheduleData(result);
+                await syncScheduleToWorldLifePlan(result).catch(error => console.warn('[Schedule] linked home plan sync failed:', error));
+            }
         } catch (e) {
             console.error('[Schedule] Regeneration after style change failed:', e);
         } finally {
