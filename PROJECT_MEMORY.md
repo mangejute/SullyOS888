@@ -92,6 +92,14 @@ robocopy $source (Join-Path $target 'source') /MIR /XD node_modules .git chrome-
 - 家园：`apps/WorldHomeApp.tsx`、`utils/worldHome/engine.ts`、`utils/worldHome/prompts.ts`、`types.ts`
 - 小雨手机角色世界空间：聊天 `＋` 面板中的独立 `地图` / `NPC` 入口；实现于 `apps/Chat.tsx`、`components/chat/ChatInputArea.tsx`、`components/chat/WorldSpaceModal.tsx`。地图保存到角色 `worldMap`，NPC 保存到角色 `worldNpcs`；地图重新打开时恢复已保存的可视化节点布局。
 
+### 8月15日-2：地图与 NPC 资料体验
+
+- 地图和 NPC 的资料/AI 识别区在已有数据时默认折叠，保存后自动折叠；可随时展开重新识别或编辑资料。
+- 地图采用可横向查看的固定网格布局，地点图标缩小、名称自动换行；无论地点数量多少，打开时都以此清晰布局展示，不使用旧的随机坐标堆叠方式。
+- 地点卡只显示 AI 识别出的 `家` / `工作` 标签，不给用户逐项勾选；原有 `isHome` / `isWork` 字段继续用于日程和家园联动。
+- 地图和 NPC 页面均可单独导出/导入 JSON，也会随整合备份的角色资料保存。
+- NPC 新增 `relationType`、`relationStrength`、`relationStatus`、`contactFrequency`、`relationReason`。AI 要独立判断关系类别与实际亲密度，血缘不自动等于亲密；关系图以强度控制与角色中心的距离和连线样式。
+
 ## 当前待核验
 
 - `8月15日-1` 家园首次打开/重新回到前台会按时间顺序补齐当天已经到达的凌晨、早上、中午、晚上段；未来段不会提前演绎。顺序固定为家园当天生活计划、角色今日日程、家园分段演绎。每段只有成功落库后才计为完成，失败会留待下次检查重试。新家园默认启用四段自动运行；已有家园可在世界设置中自行勾选时段。

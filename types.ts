@@ -1579,6 +1579,16 @@ export interface CharacterWorldNpc {
     gender: string;
     role: string;
     relation: string;
+    /** AI 判断的关系类别，不等同于情感亲密度，例如“血缘亲属”“工作关系”。 */
+    relationType?: string;
+    /** AI 判断的实际情感亲密度，0-100；血缘关系不会自动得到高分。 */
+    relationStrength?: number;
+    /** 当前关系状态，例如稳定、疏远、紧张、断联、依赖。 */
+    relationStatus?: string;
+    /** 双方现实中的互动频率。 */
+    contactFrequency?: string;
+    /** AI 对关系判断的简要依据。 */
+    relationReason?: string;
     description: string;
     homeLocationId?: string;
     workLocationId?: string;
