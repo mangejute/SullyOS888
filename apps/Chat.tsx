@@ -46,6 +46,7 @@ import Modal from '../components/os/Modal';
 import ProactiveSettingsModal from '../components/chat/ProactiveSettingsModal';
 import ActiveMsg2SettingsModal from '../components/chat/ActiveMsg2SettingsModal';
 import ThinkingChainSettingsModal from '../components/chat/ThinkingChainSettingsModal';
+import WorldSpaceModal from '../components/chat/WorldSpaceModal';
 import { useChatAI } from '../hooks/useChatAI';
 import { cleanTextForTts, parseVoiceOutput } from '../utils/minimaxTts';
 import { collectVoiceBatchSubtitle, isPoisonedVoiceSubtitle } from '../utils/voiceSubtitle';
@@ -87,7 +88,7 @@ type InstantToolUiStatus = {
 };
 
 const Chat: React.FC = () => {
-    const { characters, activeCharacterId, setActiveCharacterId, updateCharacter, apiConfig, apiPresets, addApiPreset, closeApp, openApp, customThemes, removeCustomTheme, addToast, showError, userProfile, lastMsgTimestamp, groups, characterGroups, clearUnread, unreadMessages, realtimeConfig, memoryPalaceConfig, remoteVectorConfig, syncEmotionApiToAllCharacters, theme: osTheme, proactiveComposingChars, openDateWithChar } = useOS();
+    const { characters, activeCharacterId, setActiveCharacterId, updateCharacter, apiConfig, apiPresets, addApiPreset, closeApp, openApp, customThemes, removeCustomTheme, addToast, showError, userProfile, lastMsgTimestamp, groups, characterGroups, clearUnread, unreadMessages, realtimeConfig, memoryPalaceConfig, remoteVectorConfig, syncEmotionApiToAllCharacters, theme: osTheme, proactiveComposingChars, openDateWithChar, worldbooks } = useOS();
     const isProactiveComposing = !!(activeCharacterId && proactiveComposingChars[activeCharacterId]);
     const localDateKey = useLocalDateKey();
 
@@ -193,6 +194,7 @@ const Chat: React.FC = () => {
     const [showProactiveModal, setShowProactiveModal] = useState(false);
     const [showActiveMsg2Modal, setShowActiveMsg2Modal] = useState(false);
     const [showThinkingChainModal, setShowThinkingChainModal] = useState(false);
+    const [worldSpaceMode, setWorldSpaceMode] = useState<'none' | 'map' | 'npc'>('none');
 
     // Archive Prompts State
     const [archivePrompts, setArchivePrompts] = useState<{id: string, name: string, content: string}[]>(DEFAULT_ARCHIVE_PROMPTS);
@@ -1452,6 +1454,7 @@ const Chat: React.FC = () => {
             'transfer', 'archive', 'settings', 'chrome-css', 'chrome-sound', 'fine-tune',
             'meetup', 'proactive', 'active-msg-2', 'schedule', 'world-home', 'mcd-request', 'luckin-request',
             'html-mode-toggle', 'html-mode-settings', 'thinking-settings',
+            'world-map', 'world-npc',
             // 独立小功能：点一下就是用了一次，跟「打开某个面板」同一性质。
             // send-emoji / select-category 这些是「挑哪一个」，不进名单。
             'poke', 'emoji-import', 'add-category', 'mcd-end', 'luckin-end',
@@ -1464,6 +1467,8 @@ const Chat: React.FC = () => {
                 setPromptViewerOpen(true);
                 break;
             case 'memory-link': setShowPanel('none'); setMemoryRepairOpen(true); break;
+            case 'world-map': setShowPanel('none'); setWorldSpaceMode('map'); break;
+            case 'world-npc': setShowPanel('none'); setWorldSpaceMode('npc'); break;
             case 'dev-debug':
                 setShowPanel('none');
                 window.dispatchEvent(new CustomEvent('open-dev-debug'));
@@ -3837,6 +3842,21 @@ const Chat: React.FC = () => {
                 />
             </div>
 
+
+            {char && worldSpaceMode !== 'none' && (
+                <WorldSpaceModal
+                    isOpen
+                    mode={worldSpaceMode}
+                    onClose={() => setWorldSpaceMode('none')}
+                    char={char}
+                    worldbooks={worldbooks}
+                    apiConfig={apiConfig}
+                    onSave={(mode, data) => {
+                        updateCharacter(char.id, mode === 'map' ? { worldMap: data } as any : { worldNpcs: data } as any);
+                        addToast(mode === 'map' ? '城市地图已保存到当前角色' : 'NPC 档案已保存到当前角色', 'success');
+                    }}
+                />
+            )}
 
             {/* Proactive Settings Modal */}
             {char && (

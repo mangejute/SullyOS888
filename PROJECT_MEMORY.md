@@ -90,8 +90,11 @@ robocopy $source (Join-Path $target 'source') /MIR /XD node_modules .git chrome-
 - 版本：`utils/buildInfo.ts`、`public/version.json`
 - 书库/阅读器/TTS：`apps/VRWorldApp.tsx`、`utils/xiaomiTts.ts`、`utils/ttsRouter.ts`
 - 家园：`apps/WorldHomeApp.tsx`、`utils/worldHome/engine.ts`、`utils/worldHome/prompts.ts`、`types.ts`
+- 小雨手机角色世界空间：聊天 `＋` 面板中的独立 `地图` / `NPC` 入口；实现于 `apps/Chat.tsx`、`components/chat/ChatInputArea.tsx`、`components/chat/WorldSpaceModal.tsx`。地图保存到角色 `worldMap`，NPC 保存到角色 `worldNpcs`；地图重新打开时恢复已保存的可视化节点布局。
 
 ## 当前待核验
+
+- `8月14日-3` 已加入角色城市地图与 NPC 独立页面；已在小雨手机源码分支构建并同步成品目录，仍需后续联动日程/家园。
 
 - `8月13日-9` 的家园动态选项已实现，但真实网页/手机尚未完整验证。
 - 提交 `b2e4817c` 最后一次推送曾遇到 GitHub 网络失败；下次发布前先核对远程分支是否已包含该提交。
