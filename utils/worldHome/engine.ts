@@ -32,6 +32,7 @@ import {
 } from './prompts';
 import { ensureThreads, applyBeatToThreads, applyNpcGroupLines, applyNpcDms, npcInboxes } from './threads';
 import { shouldCloseChapter, summarizeChapter, SIM_CHAPTER_CLOCKS } from './chapters';
+import { getCharacterWorldState, locationByName } from '../characterWorld';
 
 interface MemoryConfigLike {
     embedding?: { baseUrl?: string; apiKey?: string; model?: string; dimensions?: number };
@@ -427,6 +428,27 @@ export async function runWorldEpisode(deps: WorldEpisodeDeps): Promise<WorldEpis
         }
 
         if (!anyCharOk) return { ok: false, reason: 'all-beats-failed' };
+
+        // 家园观察到的地点回写角色世界状态。地图页面、聊天实时上下文和下一次日程
+        // 生成都读取同一个 currentLocationId，避免各自记着不同的地点。
+        await Promise.all(beats.map(async beat => {
+            const char = members.find(member => member.id === beat.charId);
+            if (!char) return;
+            const location = locationByName(char, beat.location);
+            if (!location) return;
+            const now = Date.now();
+            await DB.saveCharacter({
+                ...char,
+                worldState: {
+                    ...getCharacterWorldState(char),
+                    currentLocationId: location.id,
+                    currentLocationSince: now,
+                    lastTransitionAt: now,
+                },
+            });
+        }).map(p => p.catch(error => {
+            console.warn('[WorldHome] character world state sync failed:', error);
+        })));
 
         // ── 2.5 NPC 世界引擎（角色之后跑）：回应本轮角色发来的私聊、给本轮动态点赞/评论、群里冒泡 ──
         if (world.npcs.length > 0) {

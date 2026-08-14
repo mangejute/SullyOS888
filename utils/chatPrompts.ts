@@ -23,6 +23,7 @@ import { getCharNameById } from './charNameRegistry';
 import { getLocalDateKey } from './localDate';
 import { getDailyScheduleForChar } from './dailySchedule';
 import { formatRelativeAge } from './groupChat/relativeTime';
+import { buildCharacterWorldContext } from './characterWorld';
 
 // 语音格式指导按当前 TTS 服务商选择：MiniMax / Fish 使用各自标记，Qwen 直接输出自然文本。
 // 用户在「设置 → 其他 API → 语音提示词」里自定义过该服务商的指南时，优先用用户那份；留空则回退内置默认。
@@ -472,6 +473,13 @@ ${groupLogStr}\n`;
             } catch (e) {
                 console.error('Failed to inject schedule context:', e);
             }
+        }
+
+        // 地图/NPC/日程/家园共享同一份角色世界状态；地图只是可视化投影，
+        // 这里把当前地点、家和附近 NPC 放进实时状态，避免角色只记得地点文字。
+        if (!forFirePack) {
+            const worldContext = buildCharacterWorldContext(char, schedule, charNow);
+            if (worldContext) volatileState += `\n${worldContext}\n`;
         }
 
         // 2b. 音乐氛围（复用同一份 schedule）

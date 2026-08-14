@@ -3,8 +3,8 @@ import { MapTrifold, UsersThree, Sparkle, Plus, Trash, X, MapPin, House, Briefca
 import type { CharacterProfile, Worldbook } from '../../types';
 import { safeResponseJson, extractContent } from '../../utils/safeApi';
 
-type Location = { id: string; name: string; description: string; purpose: string; distance: string; category: string; x: number; y: number; isHome?: boolean; isWork?: boolean };
-type Npc = { id: string; name: string; age: string; gender: string; role: string; relation: string; description: string };
+type Location = { id: string; name: string; description: string; purpose: string; distance: string; category: string; x: number; y: number; isHome?: boolean; isWork?: boolean; connectedLocationIds?: string[]; travelMinutes?: Record<string, number> };
+type Npc = { id: string; name: string; age: string; gender: string; role: string; relation: string; description: string; homeLocationName?: string; workLocationName?: string; frequentLocationNames?: string[] };
 type MapData = { referenceCity: string; locations: Location[]; sourceText: string; updatedAt: number };
 type NpcData = { sourceText: string; npcs: Npc[]; updatedAt: number };
 type Mode = 'map' | 'npc';
@@ -50,15 +50,20 @@ const WorldSpaceModal: React.FC<Props> = ({ isOpen, mode, onClose, char, worldbo
     try {
       const task = mode === 'map'
         ? `参考城市：${referenceCity || '未指定'}\n${persona}\n从资料整理地点。返回严格 JSON：{"locations":[{"name":"","description":"","purpose":"","distance":"","category":"","isHome":false,"isWork":false}]}。若资料没有明确住所，根据角色人设从地点中合理推断一个居所。`
-        : `${persona}\n从资料整理 NPC。返回严格 JSON：{"npcs":[{"name":"","age":"","gender":"","role":"","relation":"","description":""}]}。relation 只能使用亲密、朋友、同事、邻居、点头之交、陌生等具体关系。`;
+        : `${persona}\n从资料整理 NPC。返回严格 JSON：{"npcs":[{"name":"","age":"","gender":"","role":"","relation":"","description":"","homeLocationName":"","workLocationName":"","frequentLocationNames":[]}]}。relation 只能使用亲密、朋友、同事、邻居、点头之交、陌生等具体关系；地点字段必须使用资料中出现的地点名称。`;
       const response = await fetch(`${apiConfig.baseUrl.replace(/\/+$/, '')}/chat/completions`, { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiConfig.apiKey}` }, body: JSON.stringify({ model: apiConfig.model, temperature: 0.2, stream: false, messages: [{ role: 'system', content: '你是世界观资料整理助手，只返回严格 JSON，不要 Markdown。' }, { role: 'user', content: `${task}\n资料：${text.slice(0, 18000)}` }] }) });
       const raw = extractContent(await safeResponseJson(response));
       const parsed = JSON.parse(raw.replace(/^```json\s*/i, '').replace(/```$/i, '').trim());
       if (mode === 'map') {
         const locations = (parsed.locations || []).map((item: any, i: number) => ({ id: uid(), name: item.name || `地点 ${i + 1}`, description: item.description || '', purpose: item.purpose || '日常活动', distance: item.distance || '待估算', category: item.category || '地点', x: 13 + ((i * 29) % 76), y: 18 + ((i * 37) % 68), isHome: !!item.isHome, isWork: !!item.isWork }));
+        locations.forEach((location: Location, i: number) => {
+          const neighbors = [locations[i - 1], locations[i + 1]].filter(Boolean) as Location[];
+          location.connectedLocationIds = neighbors.map(item => item.id);
+          location.travelMinutes = Object.fromEntries(neighbors.map(item => [item.id, Math.max(3, Math.round(Math.hypot(location.x - item.x, location.y - item.y) * 0.7))]));
+        });
         setMapData({ referenceCity, locations, sourceText: text, updatedAt: Date.now() });
       } else {
-        const npcs = (parsed.npcs || []).map((item: any) => ({ id: uid(), name: item.name || '未命名 NPC', age: item.age || '未知', gender: item.gender || '未知', role: item.role || '待识别', relation: item.relation || '陌生', description: item.description || '' }));
+        const npcs = (parsed.npcs || []).map((item: any) => ({ id: uid(), name: item.name || '未命名 NPC', age: item.age || '未知', gender: item.gender || '未知', role: item.role || '待识别', relation: item.relation || '陌生', description: item.description || '', homeLocationName: item.homeLocationName || '', workLocationName: item.workLocationName || '', frequentLocationNames: Array.isArray(item.frequentLocationNames) ? item.frequentLocationNames : [] }));
         setNpcData({ sourceText: text, npcs, updatedAt: Date.now() });
       }
       setNotice('识别完成，可以编辑后保存');

@@ -13,6 +13,7 @@ import { getFlowNarrativeKey, isScheduleFeatureOn } from './scheduleFeature';
 import { formatWorldLifeContext, getWorldLifeContextForCharacter, type WorldLifeContext } from './worldHome/lifeLink';
 import { worldNow } from './worldHome/prompts';
 import { recordPromptHistory } from './promptHistory';
+import { buildCharacterWorldContext, normalizeScheduleSlot } from './characterWorld';
 
 export { getFlowNarrativeKey, isScheduleFeatureOn } from './scheduleFeature';
 
@@ -306,7 +307,10 @@ export async function generateDailyScheduleForChar(
     const dayOfWeek = ['日', '一', '二', '三', '四', '五', '六'][now.getDay()];
 
     const style = char.scheduleStyle || 'lifestyle';
-    const worldLifeText = worldLifeContext ? formatWorldLifeContext(worldLifeContext) : '';
+    const worldLifeText = [
+        worldLifeContext ? formatWorldLifeContext(worldLifeContext) : '',
+        buildCharacterWorldContext(char),
+    ].filter(Boolean).join('\n');
     const prompt = style === 'mindful'
         ? buildMindfulPrompt(baseContext, char, userProfile, today, dayOfWeek, chatHistoryBlock, worldLifeText)
         : buildLifestylePrompt(baseContext, char, userProfile, today, dayOfWeek, chatHistoryBlock, worldLifeText);
@@ -352,11 +356,14 @@ export async function generateDailyScheduleForChar(
             description: s.description,
             emoji: s.emoji,
             location: s.location,
+            locationId: s.locationId,
+            travelMinutes: Number.isFinite(Number(s.travelMinutes)) ? Number(s.travelMinutes) : undefined,
+            participantNpcIds: Array.isArray(s.participantNpcIds) ? s.participantNpcIds : undefined,
             innerThought: s.innerThought,
             worldSegment: ['morning', 'noon', 'evening', 'latenight'].includes(s.worldSegment)
                 ? s.worldSegment
                 : scheduleSegmentForTime(s.startTime || '00:00'),
-        })).filter((s: ScheduleSlot) => s.activity);
+        })).filter((s: ScheduleSlot) => s.activity).map((s: ScheduleSlot) => normalizeScheduleSlot(char, s));
 
         if (slots.length === 0) return null;
 

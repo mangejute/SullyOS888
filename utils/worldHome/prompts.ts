@@ -12,6 +12,7 @@
 import type { CharacterProfile, WorldProfile, WorldHouse, WorldCharBeat, WorldHomeMode, WorldNarrativeStyle } from '../../types';
 import { dmThreadsOf, groupThreadOf, formatThreadForPrompt } from './threads';
 import { nowInTimeZone, tzLabel } from '../timezone';
+import { buildCharacterWorldContext } from '../characterWorld';
 
 /** 大段正文的文风预设（世界编辑器里选）。 */
 export const NARRATIVE_STYLES: Record<Exclude<WorldNarrativeStyle, 'custom'>, { name: string; guide: string }> = {
@@ -227,7 +228,7 @@ export function buildModeRule(mode: WorldHomeMode, userName: string): string {
 
 /** 注入到角色 systemPrompt 末尾的家园场景框定。 */
 export function buildWorldSystemAddendum(world: WorldProfile, char: CharacterProfile, userName: string): string {
-    return `
+    const base = `
 
 ---
 [家园 · ${world.name}]
@@ -235,6 +236,8 @@ export function buildWorldSystemAddendum(world: WorldProfile, char: CharacterPro
 ${buildModeRule(world.mode, userName)}
 铁律：你只扮演你自己（${char.name}）。同世界的其他角色各有自己的演绎轮，你看不到他们的内心，只能根据他们外在的言行做反应；不要替任何其他角色做决定或编造他们的内心戏。NPC 的言行可以引用（他们由世界引擎给出）。
 保持你在聊天中一贯的人设、记忆与行事风格——这是同一个你，只是生活在这个世界里。`;
+    const worldContext = buildCharacterWorldContext(char);
+    return `${base}${worldContext ? `\n\n${worldContext}\n家园演绎中，若你移动到地图上的另一个地点，要在叙述中体现路程或抵达过程；若遇到 NPC，优先使用地图/NPC 目录中的关系和地点。` : ''}`;
 }
 
 /** 居住安排的可读文本。 */

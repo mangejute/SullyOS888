@@ -28,6 +28,7 @@ import { isMcdConfigured } from '../utils/mcdMcpClient';
 import { isMcdActivatedInMessages, MCD_ACTIVATE_TRIGGER, MCD_DEACTIVATE_TRIGGER } from '../utils/mcdToolBridge';
 import { isLuckinConfigured } from '../utils/luckinMcpClient';
 import { isLuckinActivatedInMessages, LUCKIN_ACTIVATE_TRIGGER, LUCKIN_DEACTIVATE_TRIGGER } from '../utils/luckinToolBridge';
+import { getCharacterWorldState, parseExplicitLocationAction } from '../utils/characterWorld';
 import MessageItem, { ThinkingChainBlock } from '../components/chat/MessageItem';
 import McdMiniApp from '../components/mcd/McdMiniApp';
 import LuckinMiniApp from '../components/luckin/LuckinMiniApp';
@@ -1192,6 +1193,23 @@ const Chat: React.FC = () => {
         }
 
         const savedUserMsgId = await DB.saveMessage(msgPayload);
+
+        // 明确的“去/回/到某地”是唯一会由聊天直接改变当前地点的语法，
+        // 普通提问不会修改世界状态；AI 回复仍然会读取这个新位置。
+        if (type === 'text') {
+            const destination = parseExplicitLocationAction(char, text);
+            if (destination) {
+                const now = Date.now();
+                void updateCharacter(char.id, {
+                    worldState: {
+                        ...getCharacterWorldState(char),
+                        currentLocationId: destination.id,
+                        currentLocationSince: now,
+                        lastTransitionAt: now,
+                    },
+                } as any);
+            }
+        }
 
         // 小红书链接 → xhs_card。主路径不依赖任何后端：小红书分享文案自带标题（【标题】）
         // 和笔记 id/token，直接解析就能建卡，让「没部署小红书 MCP」的用户也能让角色看到分享了哪篇笔记。
@@ -3852,7 +3870,24 @@ const Chat: React.FC = () => {
                     worldbooks={worldbooks}
                     apiConfig={apiConfig}
                     onSave={(mode, data) => {
-                        updateCharacter(char.id, mode === 'map' ? { worldMap: data } as any : { worldNpcs: data } as any);
+                        if (mode === 'map') {
+                            const map = data as any;
+                            const locations = Array.isArray(map.locations) ? map.locations : [];
+                            const homeLocationId = locations.find((item: any) => item.isHome)?.id;
+                            const workLocationId = locations.find((item: any) => item.isWork)?.id;
+                            updateCharacter(char.id, {
+                                worldMap: map,
+                                worldState: {
+                                    ...(char.worldState || { mapVersion: 1 }),
+                                    mapVersion: (char.worldState?.mapVersion || 1) + 1,
+                                    homeLocationId: homeLocationId || char.worldState?.homeLocationId,
+                                    workLocationId: workLocationId || char.worldState?.workLocationId,
+                                    currentLocationId: char.worldState?.currentLocationId || homeLocationId || workLocationId,
+                                },
+                            } as any);
+                        } else {
+                            updateCharacter(char.id, { worldNpcs: data } as any);
+                        }
                         addToast(mode === 'map' ? '城市地图已保存到当前角色' : 'NPC 档案已保存到当前角色', 'success');
                     }}
                 />

@@ -734,6 +734,12 @@ export interface ScheduleSlot {
     description?: string; // "在河边慢跑"
     emoji?: string;       // "🏃"
     location?: string;    // "河边"
+    /** 角色世界地图中的规范地点 ID；location 仅作为旧数据/展示回退。 */
+    locationId?: string;
+    /** 从上一地点移动到本地点预计需要的分钟数。 */
+    travelMinutes?: number;
+    /** 本时段可能遇到或共同活动的角色 NPC ID。 */
+    participantNpcIds?: string[];
     innerThought?: string; // 该时段的内心独白，生成时由AI写好，运行时直接注入
     theater?: SlotTheater; // 该时段的小剧场（窥视演出），按需生成并缓存
     /** 家园联动：该细日程归属的家园时间段。未绑定家园时为空。 */
@@ -1547,6 +1553,56 @@ export interface WorldDirective {
     /** 用户的意见 */
     text: string;
     createdRound: number;
+}
+
+/** 角色专属城市地图中的规范地点。地图 UI 只是该图的一个投影。 */
+export interface CharacterWorldLocation {
+    id: string;
+    name: string;
+    description: string;
+    purpose: string;
+    distance: string;
+    category: string;
+    x: number;
+    y: number;
+    isHome?: boolean;
+    isWork?: boolean;
+    connectedLocationIds?: string[];
+    travelMinutes?: Record<string, number>;
+}
+
+/** 角色专属 NPC，地点和关系均使用规范 ID。 */
+export interface CharacterWorldNpc {
+    id: string;
+    name: string;
+    age: string;
+    gender: string;
+    role: string;
+    relation: string;
+    description: string;
+    homeLocationId?: string;
+    workLocationId?: string;
+    frequentLocationIds?: string[];
+    currentLocationId?: string;
+}
+
+/** 地图、NPC、当前状态的共同事实源，挂在 CharacterProfile 上持久化。 */
+export interface CharacterWorldMap {
+    referenceCity: string;
+    locations: CharacterWorldLocation[];
+    sourceText: string;
+    updatedAt: number;
+}
+
+export interface CharacterWorldState {
+    mapVersion: number;
+    homeLocationId?: string;
+    workLocationId?: string;
+    frequentLocationIds?: string[];
+    currentLocationId?: string;
+    currentLocationSince?: number;
+    lastScheduleId?: string;
+    lastTransitionAt?: number;
 }
 
 /** 用户以“上帝视角”指定的下一段世界走向。所有角色与 NPC 都必须服从，演完即消费。 */
@@ -2812,6 +2868,13 @@ export interface CharacterProfile {
    * - undefined：向后兼容——若 scheduleStyle 已设（老用户已隐式选风格）视为开启；否则默认关闭。
    */
   scheduleFeatureEnabled?: boolean;
+
+  /** 角色专属城市地图与可视化地点数据。 */
+  worldMap?: CharacterWorldMap;
+  /** 角色专属 NPC 目录。 */
+  worldNpcs?: CharacterWorldNpc[] | { sourceText: string; npcs: CharacterWorldNpc[]; updatedAt: number };
+  /** 地图/NPC/日程/家园共享的实时世界状态。 */
+  worldState?: CharacterWorldState;
 
   /**
    * HTML 模块模式（per-character）。
