@@ -34,6 +34,7 @@ export const captureUserCameraSnapshot = (
   video: HTMLVideoElement,
   maxEdge = 640,
   quality = 0.76,
+  mirror = true,
 ): string | null => {
   if (!video || video.readyState < HTMLMediaElement.HAVE_CURRENT_DATA) return null;
   const size = fitUserCameraSnapshot(video.videoWidth, video.videoHeight, maxEdge);
@@ -43,9 +44,11 @@ export const captureUserCameraSnapshot = (
   canvas.height = size.height;
   const context = canvas.getContext('2d', { alpha: false });
   if (!context) return null;
-  // The preview is mirrored. Submit the exact composition the user saw.
-  context.translate(size.width, 0);
-  context.scale(-1, 1);
+  // Mirror only the selfie camera so the submitted frame matches the preview.
+  if (mirror) {
+    context.translate(size.width, 0);
+    context.scale(-1, 1);
+  }
   context.drawImage(video, 0, 0, size.width, size.height);
   return canvas.toDataURL('image/jpeg', Math.max(0.55, Math.min(0.86, quality)));
 };

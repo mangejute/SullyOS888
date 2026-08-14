@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { Microphone, SpeakerHigh, SpeakerSlash, PhoneDisconnect, Translate, Gear, Clock, CaretLeft, CaretRight, Phone, VideoCamera, VideoCameraSlash, Cube, FolderOpen, FileZip, Moon, Sun, Check } from '@phosphor-icons/react';
+import { Microphone, SpeakerHigh, SpeakerSlash, PhoneDisconnect, Translate, Gear, Clock, CaretLeft, CaretRight, Phone, VideoCamera, VideoCameraSlash, Cube, FolderOpen, FileZip, Moon, Sun, Check, ArrowsClockwise } from '@phosphor-icons/react';
 import { useOS } from '../context/OSContext';
 import { extractContent, safeFetchJson } from '../utils/safeApi';
 import { minimaxFetch } from '../utils/minimaxEndpoint';
@@ -233,6 +233,8 @@ const sanitizeAssistantOutput = (raw: string) => {
   if (!raw) return '';
   // Strip ALL [emotion]/【emotion】 tags (any position) so they're never shown or read.
   return stripCallTextFormatting(stripEmotionTags(raw)
+    .replace(/\((?:chuckle|laughs|sighs|coughs|clear-throat|groans|breath|pant|inhale|exhale|gasps|sniffs|snorts|lip-smacking|humming|hissing|emm)\)/gi, '')
+    .replace(/<#[\d.]+#>/g, '')
     .replace(/^\s*(?:\[\s*通话\s*\]\s*)+/gim, '')
     .replace(/^\s*(?:\[\s*(?:聊天|约会)\s*\]\s*)+/gim, '')
     .replace(/^\s*\[?\d{1,2}:\d{2}(?::\d{2})?\]?\s*/gm, '')
@@ -476,23 +478,11 @@ const buildCallPrompt = (
 聊得来的时候可以说多一点，没必要每次都控制字数。
 关键是：**让对方觉得你真的在听、真的在聊，而不是在执行对话任务。**
 
-### 让声音有情绪（重要——直接写进文本，不要靠旁白）
+### 说话方式
 
-你的话会被转成真实语音，所以**情绪和语气要由你自己标出来**，不要写中文舞台指示（系统不会朗读它们，只会被删掉）。两种工具：
+直接输出自然、清晰的对白。MiniMax 使用角色固定音色和稳定语速，不要输出 [happy]、[sad] 等情绪标签，也不要输出 (chuckle)、(laughs)、(sighs) 等语音演出标签；情绪通过正常措辞表达即可。不要写小说式中文旁白或舞台指示。
 
-1) **整段情绪**（可选，最多一个）：如果这通回复整体有明显情绪，**只在整段回复的最最开头**放一个标签，从这些里选一个：
-\`[happy] [sad] [angry] [fearful] [disgusted] [surprised] [calm] [fluent]\`
-   例：\`[angry] 你昨晚十二点半还喝咖啡？不要命了是吧。\`
-   **铁律**：整段回复最多一个，且必须在最开头。**绝对不要每段都标、不要标在句子中间、不要标在第二段以后**——放错位置只会被删掉、还会让声音忽高忽低。情绪不强就别标。
-
-2) **句中语气声**（要克制）：偶尔想要笑、叹气这种真实反应，直接写官方英文标签（**别写中文的（轻笑）（叹气）**）：
-\`(chuckle) (laughs) (sighs) (coughs) (groans) (breath) (pant) (gasps) (sniffs) (snorts) (hissing) (emm)\`
-   例：\`(sighs) 算了，听你的。\`
-   **整段回复里这种标签最多一两个**，多了声音会飘、很假。
-
-注意：不要写小说式中文旁白，如”（我靠在椅背上，目光看向远方）”——会被直接删掉，等于白写。
-
-${getVoicePromptOverride(getTtsProvider()) ?? (getTtsProvider() === 'fishaudio' ? FISH_VOICE_ACTING_GUIDE : getTtsProvider() === 'qwen' ? QWEN_VOICE_ACTING_GUIDE : getTtsProvider() === 'xiaomi' ? XIAOMI_VOICE_ACTING_GUIDE : VOICE_ACTING_GUIDE)}
+${getTtsProvider() === 'minimax' ? '' : (getVoicePromptOverride(getTtsProvider()) ?? (getTtsProvider() === 'fishaudio' ? FISH_VOICE_ACTING_GUIDE : getTtsProvider() === 'qwen' ? QWEN_VOICE_ACTING_GUIDE : getTtsProvider() === 'xiaomi' ? XIAOMI_VOICE_ACTING_GUIDE : VOICE_ACTING_GUIDE))}
 
 ### 历史消息的来源标记（重要）
 
@@ -509,19 +499,19 @@ ${getVoicePromptOverride(getTtsProvider()) ?? (getTtsProvider() === 'fishaudio' 
 
 你的回复格式必须是：
 1. 先用中文自然地写出你要说的话（给对方看的文字，中文舞台指示写在这里没关系）
-2. 然后换行，在 <语音> 标签里写出这句话的${langLabel}翻译——这才是真正会被读出来的部分。可选地用 emotion 属性标整句情绪：\`<语音 emotion="happy">…</语音>\`（情绪只能取 happy/sad/angry/fearful/disgusted/surprised/calm/fluent）
+2. 然后换行，在 <语音> 标签里写出这句话的${langLabel}翻译——这才是真正会被读出来的部分。不要添加 emotion 属性或任何语气标签。
 
 示例：
 啊，我知道了
-<语音 emotion="happy">Ok, I get it (chuckle)</语音>
+<语音>Ok, I get it.</语音>
 
 你说真的？那也太离谱了吧。
-<语音 emotion="surprised">Wait... are you serious? That's insane.</语音>
+<语音>Wait... are you serious? That's insane.</语音>
 
 要求：
 - <语音> 里的翻译要自然口语化，不要机翻味，要符合你的角色性格
-- <语音> 里只写会被朗读的文字；想要笑/叹气等真实语气，用官方英文标签 (laughs)/(sighs)/(chuckle) 等，**不要写中文（轻笑）**，也不要写中文舞台旁白
-- 每条消息只有一个 <语音> 标签，emotion 属性可选；情绪不强就别加
+- <语音> 里只写会被朗读的文字，不要写任何语气标签或中文舞台旁白
+- 每条消息只有一个不带属性的 <语音> 标签
 - 中文部分和 <语音> 部分表达的意思要一致` : '';
   return [coreContext, timeContext, callPrompt, voiceLangPrompt].filter(Boolean).join('\n\n');
 };
@@ -609,6 +599,7 @@ const CallApp: React.FC = () => {
   // Active camera mode is intentionally never persisted: every new app session
   // starts private/off. Only the still-image token is remembered locally.
   const [userCameraMode, setUserCameraMode] = useState<UserCameraMode>('off');
+  const [userCameraFacing, setUserCameraFacing] = useState<'user' | 'environment'>('user');
   const [showUserCameraModePicker, setShowUserCameraModePicker] = useState(false);
   const [userCameraLoading, setUserCameraLoading] = useState(false);
   const [fakeUserCameraRef, setFakeUserCameraRef] = useState<string>(() => {
@@ -662,17 +653,23 @@ const CallApp: React.FC = () => {
     clearDetectedUserEmotion();
     releaseUserCameraEmotionDetector();
   };
-  const startUserCamera = async (nextMode: Extract<UserCameraMode, 'emotion' | 'snapshot'>) => {
+  const startUserCamera = async (
+    nextMode: Extract<UserCameraMode, 'emotion' | 'snapshot'>,
+    facing: 'user' | 'environment' = userCameraFacing,
+  ) => {
     if (userCameraLoading) return;
     if (!navigator.mediaDevices?.getUserMedia) {
       addToast('当前浏览器不支持摄像头，或页面不是安全连接', 'error');
       return;
     }
     const requestId = ++userCameraRequestRef.current;
+    userCameraStreamRef.current?.getTracks().forEach(track => track.stop());
+    userCameraStreamRef.current = null;
+    if (userCameraVideoRef.current) userCameraVideoRef.current.srcObject = null;
     setUserCameraLoading(true);
     try {
       const stream = await navigator.mediaDevices.getUserMedia({
-        video: { facingMode: 'user', width: { ideal: 480 }, height: { ideal: 640 }, frameRate: { ideal: 15, max: 24 } },
+        video: { facingMode: { ideal: facing }, width: { ideal: 480 }, height: { ideal: 640 }, frameRate: { ideal: 15, max: 24 } },
         audio: false,
       });
       if (requestId !== userCameraRequestRef.current) {
@@ -685,6 +682,8 @@ const CallApp: React.FC = () => {
         if (userCameraStreamRef.current === stream) stopUserCamera();
       }, { once: true });
       userCameraStreamRef.current = stream;
+      const actualFacing = track.getSettings?.().facingMode;
+      setUserCameraFacing(actualFacing === 'environment' ? 'environment' : facing);
       setUserCameraMode(nextMode);
       setShowUserCameraModePicker(false);
       if (nextMode === 'emotion') {
@@ -704,6 +703,13 @@ const CallApp: React.FC = () => {
     } finally {
       if (requestId === userCameraRequestRef.current) setUserCameraLoading(false);
     }
+  };
+  const flipUserCamera = () => {
+    const mode = userCameraMode;
+    if (mode !== 'emotion' && mode !== 'snapshot') return;
+    if (!userCameraStreamRef.current?.active || userCameraLoading) return;
+    const nextFacing = userCameraFacing === 'user' ? 'environment' : 'user';
+    void startUserCamera(mode, nextFacing);
   };
   const chooseFakeUserCameraImage = (activate = true) => {
     const input = document.createElement('input');
@@ -803,7 +809,7 @@ const CallApp: React.FC = () => {
     const video = userCameraVideoRef.current;
     if (userCameraMode !== 'snapshot' || !stream?.active || !video) return '';
     try {
-      return captureUserCameraSnapshot(video) || '';
+      return captureUserCameraSnapshot(video, 640, 0.76, userCameraFacing === 'user') || '';
     } catch (error) {
       console.warn('[camera-snapshot] frame skipped:', error);
       return '';
@@ -1436,21 +1442,25 @@ const CallApp: React.FC = () => {
     }
     return extras;
   };
-  const resolveVoiceSettingFields = (emotionOverride?: string) => {
+  const resolveVoiceSettingFields = (_emotionOverride?: string) => {
     const vp = selectedChar?.voiceProfile;
-    // Per-utterance emotion from <语音 emotion="…"> wins over the static voiceProfile emotion.
-    const emotion = (emotionOverride && VALID_EMOTIONS.has(emotionOverride)) ? emotionOverride : (vp?.emotion || '');
+    // Keep MiniMax calls on the stable character voice. Avatar emotions remain
+    // visual-only and must not alter TTS prosody.
     return {
       // Clamp speed & pitch to safe human-like ranges
       speed: Math.max(0.75, Math.min(1.4, vp?.speed ?? 1)),
       vol: Math.max(0.3, Math.min(2, vp?.vol ?? 1)),
       pitch: Math.max(-8, Math.min(8, vp?.pitch ?? 0)),
       english_normalization: true,
-      ...(emotion ? { emotion } : {}),
     };
   };
   // ── TTS 服务商分发：电话语音也支持 MiniMax ↔ 鱼声二选一 ──
   const isFishTts = resolveTtsProvider(apiConfig) === 'fishaudio';
+  const cleanCallSpeechText = (rawText: string) => cleanTextForTts(rawText)
+    .replace(/\((?:chuckle|laughs|sighs|coughs|clear-throat|groans|breath|pant|inhale|exhale|gasps|sniffs|snorts|lip-smacking|humming|hissing|emm)\)/gi, '')
+    .replace(/<#[\d.]+#>/g, '')
+    .replace(/\s{2,}/g, ' ')
+    .trim();
   const isQwenTts = resolveTtsProvider(apiConfig) === 'qwen';
   const isXiaomiTts = resolveTtsProvider(apiConfig) === 'xiaomi';
   // 当前服务商下，这个角色能否合成语音（决定要不要走 TTS / 给"语音未配置"提示）。
@@ -1500,7 +1510,7 @@ const CallApp: React.FC = () => {
     const minimaxApiKey = resolveMiniMaxApiKey(apiConfig);
     const voiceId = resolveVoiceId();
     const groupId = resolveGroupId();
-    const speechText = insertSpeechBreaks(cleanTextForTts(rawText));
+    const speechText = insertSpeechBreaks(cleanCallSpeechText(rawText));
     const model = resolveModel();
     if (!speechText.trim()) throw new Error('可朗读文本为空');
 
@@ -1621,7 +1631,7 @@ const CallApp: React.FC = () => {
     });
     return { url: finalUrl, traceIds };
   };
-  const callAudioPrefetchKey = (rawText: string, emotion?: string) => `${emotion || ''}\u0000${rawText}`;
+  const callAudioPrefetchKey = (rawText: string, emotion?: string) => `${isFishTts ? (emotion || '') : ''}\u0000${rawText}`;
   const prefetchCallAudio = (rawText: string, emotion?: string) => {
     if (!canSpeakVoice()) return;
     const key = callAudioPrefetchKey(rawText, emotion);
@@ -1675,6 +1685,9 @@ const CallApp: React.FC = () => {
       setPendingAvatarTouchCount(restoredTouches.length);
       setViewMode('in-call');
       setCallState('listening');
+      autoVoiceModeRef.current = callMode === 'video';
+      setAutoVoiceMode(callMode === 'video');
+      if (callMode === 'video') void startAutoStt();
       clearSuspendedCall();
     }
   }, [suspendedCall]);
@@ -1727,7 +1740,11 @@ const CallApp: React.FC = () => {
           sttSessionRef.current = null;
           setIsListening(false);
           if (sttSubmittingRef.current) { sttSubmittingRef.current = false; return; }
-          if (latest.trim() && autoVoiceModeRef.current) armSttSilenceTimer(latest);
+          if (latest.trim() && autoVoiceModeRef.current) {
+            armSttSilenceTimer(latest);
+          } else if (autoVoiceModeRef.current) {
+            window.setTimeout(() => { void startAutoStt(); }, 180);
+          }
         },
       }, { provider: sttProvider, siliconflow: speechConfig, silenceMs: sttSilenceSeconds * 1000 });
     } catch (e: any) {
@@ -1882,6 +1899,13 @@ const CallApp: React.FC = () => {
     markCallTurnDirty();
   };
   const resetCurrentCall = () => {
+    autoVoiceModeRef.current = false;
+    setAutoVoiceMode(false);
+    clearSttSilenceTimer();
+    sttSubmittingRef.current = false;
+    sttSessionRef.current?.stop();
+    sttSessionRef.current = null;
+    setIsListening(false);
     revokeSessionBlobs();
     stopPlayback();
     pendingAvatarTouchesRef.current = [];
@@ -1918,6 +1942,12 @@ const CallApp: React.FC = () => {
     setViewMode('in-call');
     setCallStartedAt(Date.now());
     setCallState('listening');
+    if (callMode === 'video') {
+      autoVoiceModeRef.current = true;
+      setAutoVoiceMode(true);
+      // The call button supplies the browser user gesture for microphone access.
+      void startAutoStt();
+    }
     trackEvent('发起通话');
     if (callMode !== 'video' || cameraMode === 'off') {
       stopUserCamera();
@@ -3492,13 +3522,24 @@ ${sentencePlan}`;
                   ? fakeUserCameraUrl
                     ? <img src={fakeUserCameraUrl} alt="用户静态画面" className="h-full w-full object-cover" />
                     : <div className="flex h-full w-full items-center justify-center text-[8px] text-white/35">NO IMAGE</div>
-                  : <video ref={userCameraVideoRef} muted playsInline autoPlay className="h-full w-full scale-x-[-1] object-cover" />}
+                  : <video ref={userCameraVideoRef} muted playsInline autoPlay className={`h-full w-full object-cover ${userCameraFacing === 'user' ? 'scale-x-[-1]' : ''}`} />}
                 <div className="pointer-events-none absolute inset-x-0 bottom-0 h-10 bg-gradient-to-t from-black/70 to-transparent" aria-hidden />
                 <span
                   className={`absolute left-2 top-2 rounded-full border border-white/15 bg-black/50 px-1.5 py-0.5 text-[6px] font-semibold tracking-[0.14em] backdrop-blur-md ${userCameraMode === 'emotion' ? 'text-emerald-200' : userCameraMode === 'snapshot' ? 'text-violet-200' : 'text-white/70'}`}
                 >
                   {userCameraMode === 'emotion' ? 'LIVE · YOU' : userCameraMode === 'snapshot' ? 'SNAP · YOU' : 'YOU'}
                 </span>
+                {userCameraMode !== 'fake' && (
+                  <button
+                    type="button"
+                    onClick={flipUserCamera}
+                    disabled={userCameraLoading}
+                    title={userCameraFacing === 'user' ? '切换到后置摄像头' : '切换到前置摄像头'}
+                    className="absolute right-1.5 top-1.5 flex h-6 w-6 items-center justify-center rounded-full border border-white/15 bg-black/55 text-white/80 backdrop-blur-md transition active:scale-90 disabled:opacity-45"
+                  >
+                    <ArrowsClockwise size={13} weight="bold" />
+                  </button>
+                )}
                 <div
                   className="absolute bottom-1.5 left-1/2 flex -translate-x-1/2 items-center rounded-full border border-white/15 bg-black/55 p-0.5 backdrop-blur-md"
                   data-testid="user-camera-preview-size-picker"
