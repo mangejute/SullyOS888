@@ -1,4 +1,5 @@
 import type { CharacterProfile, CharacterWorldLocation, CharacterWorldNpc, CharacterWorldState, DailySchedule, ScheduleSlot } from '../types';
+import { nowInTimeZone, resolveCharTimeZone } from './timezone';
 
 type LegacyNpcEnvelope = { sourceText?: string; npcs?: CharacterWorldNpc[]; updatedAt?: number };
 
@@ -90,6 +91,26 @@ export function buildCharacterWorldContext(char: CharacterProfile, schedule?: Da
     const home = locationById(char, state.homeLocationId);
     const work = locationById(char, state.workLocationId);
     const active = currentScheduleSlot(schedule || null, now);
+    // 地图是完整资料库，但聊天只需要此刻可影响行动的那一小块。
+    // 否则地点和 NPC 越积越多，每一轮对话都会无意义地膨胀上下文。
+    const relevantLocationIds = new Set<string>([
+        state.currentLocationId,
+        state.homeLocationId,
+        state.workLocationId,
+        resolveSlotLocation(char, active || {} as ScheduleSlot)?.id,
+    ].filter(Boolean) as string[]);
+    for (const id of Array.from(relevantLocationIds)) {
+        locationById(char, id)?.connectedLocationIds?.forEach(linkedId => relevantLocationIds.add(linkedId));
+    }
+    const contextLocations = locations.filter(location => relevantLocationIds.has(location.id));
+    if (!contextLocations.length) contextLocations.push(...locations.slice(0, 12));
+    const samePlaceNpcs = npcs.filter(npc => npc.currentLocationId && npc.currentLocationId === state.currentLocationId);
+    const relatedNpcs = npcs.filter(npc =>
+        npc.currentLocationId && relevantLocationIds.has(npc.currentLocationId)
+        || npc.homeLocationId && relevantLocationIds.has(npc.homeLocationId)
+        || npc.workLocationId && relevantLocationIds.has(npc.workLocationId)
+    );
+    const contextNpcs = Array.from(new Map([...samePlaceNpcs, ...relatedNpcs, ...npcs].map(npc => [npc.id, npc])).values()).slice(0, 20);
     const lines: string[] = ['### 【你的城市世界状态】', '以下是地图、NPC、日程和家园共同使用的事实。地点必须优先按 ID 理解，不要凭空改名或瞬移。'];
     if (char.worldMap?.referenceCity) lines.push(`参考城市：${char.worldMap.referenceCity}`);
     if (current) lines.push(`当前所在：${current.name}（${current.description || current.purpose}）`);
@@ -105,21 +126,23 @@ export function buildCharacterWorldContext(char: CharacterProfile, schedule?: Da
     }
     if (locations.length) {
         lines.push('地点索引：');
-        for (const location of locations.slice(0, 80)) {
+        for (const location of contextLocations.slice(0, 24)) {
             const links = location.connectedLocationIds?.map(id => locationById(char, id)?.name).filter(Boolean).join('、');
             lines.push(`- ${location.id}｜${location.name}｜${location.purpose || location.category}${links ? `｜相连：${links}` : ''}`);
         }
+        if (locations.length > contextLocations.length) lines.push(`（其余 ${locations.length - contextLocations.length} 个远处地点暂不展开，用户明确提到时再按地图资料理解。）`);
     }
     if (npcs.length) {
         lines.push('附近与关系网络：');
-        const samePlace = npcs.filter(npc => npc.currentLocationId && npc.currentLocationId === state.currentLocationId).map(npc => npc.name);
+        const samePlace = samePlaceNpcs.map(npc => npc.name);
         if (samePlace.length) lines.push(`同地点 NPC：${samePlace.join('、')}（可以自然相遇，但不要替他们编造内心）`);
-        for (const npc of npcs.slice(0, 60)) {
+        for (const npc of contextNpcs) {
             const rawNpc = npc as CharacterWorldNpc & { homeLocationName?: string; workLocationName?: string; frequentLocationNames?: string[] };
             const npcLocation = locationById(char, npc.currentLocationId || npc.workLocationId || npc.homeLocationId)
                 || locationByName(char, rawNpc.workLocationName || rawNpc.homeLocationName || rawNpc.frequentLocationNames?.[0]);
             lines.push(`- ${npc.id}｜${npc.name}｜${npc.role}｜年龄：${npc.age}｜性别：${npc.gender}｜关系：${npc.relation}${npcLocation ? `｜常在：${npcLocation.name}` : ''}${npc.description ? `｜${npc.description}` : ''}`);
         }
+        if (npcs.length > contextNpcs.length) lines.push(`（其余 ${npcs.length - contextNpcs.length} 位 NPC 不在当前场景，不要主动让他们出现。）`);
     }
     lines.push('行动约束：从一个地点去另一个地点需要经过相连地点或合理的移动时间；聊天中只有明确说出“去/回/到某地”等行动时，才改变当前所在。');
     return lines.join('\n') + '\n';
@@ -163,7 +186,8 @@ function npcLocationForClock(char: CharacterProfile, npc: CharacterWorldNpc, hou
 /** 根据当前日程和世界钟计算角色/NPC位置，不负责持久化。 */
 export function deriveCharacterWorldClock(char: CharacterProfile, schedule: DailySchedule | null, at = new Date()): CharacterProfile | null {
     if (!char.worldMap && !char.worldNpcs && !char.worldState) return null;
-    const active = currentScheduleSlot(schedule, at);
+    const localNow = nowInTimeZone(resolveCharTimeZone(char), at);
+    const active = currentScheduleSlot(schedule, localNow);
     const oldState = getCharacterWorldState(char);
     const target = active ? resolveSlotLocation(char, active) : locationById(char, oldState.currentLocationId);
     const now = at.getTime();
@@ -183,13 +207,17 @@ export function deriveCharacterWorldClock(char: CharacterProfile, schedule: Dail
         ...(active ? { lastScheduleId: `${char.id}:${schedule?.date || ''}:${active.startTime}` } : {}),
     };
     const npcs = getCharacterNpcs(char);
-    const hour = at.getHours();
+    const hour = localNow.getHours();
     const nextNpcs = npcs.map(npc => ({ ...npc, currentLocationId: npcLocationForClock(char, npc, hour) || npc.currentLocationId }));
     const npcsChanged = nextNpcs.some((npc, i) => npc.currentLocationId !== npcs[i]?.currentLocationId);
     const nextWorldNpcs = Array.isArray(char.worldNpcs)
         ? nextNpcs
         : char.worldNpcs
-            ? { ...(char.worldNpcs as { sourceText?: string; updatedAt?: number }), npcs: nextNpcs }
+            ? {
+                sourceText: (char.worldNpcs as LegacyNpcEnvelope).sourceText || '',
+                updatedAt: (char.worldNpcs as LegacyNpcEnvelope).updatedAt || 0,
+                npcs: nextNpcs,
+            }
             : char.worldNpcs;
     if (!stateChanged && !npcsChanged && char.worldState?.lastScheduleId === nextState.lastScheduleId) return null;
     return { ...char, worldState: nextState, ...(nextWorldNpcs ? { worldNpcs: nextWorldNpcs } : {}) };
