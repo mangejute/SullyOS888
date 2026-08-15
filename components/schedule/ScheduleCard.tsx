@@ -2,6 +2,8 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { DailySchedule, ScheduleSlot, CharacterProfile } from '../../types';
 import { getCurrentScheduleSlotIndex, getScheduleWallClock } from '../../utils/scheduleTime';
+import { CalendarBlank } from '@phosphor-icons/react';
+import { getChinaCalendarDay } from '../../utils/chinaCalendar2026';
 import { resolveCharTimeZone, tzShortLabel } from '../../utils/timezone';
 import { useOS } from '../../context/OSContext';
 import { resolveScheduleCardPalette } from '../../utils/scheduleAppearance';
@@ -19,6 +21,7 @@ interface ScheduleCardProps {
     onCoverImageChange?: (dataUrl: string) => void;
     onPlayTheater?: (index: number) => void; // 点某个「已过去/正在进行」时段的播放按钮 → 小剧场
     isGenerating?: boolean;
+    onOpenCalendar?: () => void;
 }
 
 const formatDate = (now: Date): string => {
@@ -54,6 +57,7 @@ const ScheduleCard: React.FC<ScheduleCardProps> = ({
     onCoverImageChange,
     onPlayTheater,
     isGenerating = false,
+    onOpenCalendar,
 }) => {
     const { theme } = useOS();
     const [editingIdx, setEditingIdx] = useState<number | null>(null);
@@ -106,6 +110,7 @@ const ScheduleCard: React.FC<ScheduleCardProps> = ({
     const charAvatar = character?.avatar;
     const charName = character?.name || '角色';
     const coverImage = schedule?.coverImage;
+    const calendarDay = getChinaCalendarDay(wallClock);
 
     const startEdit = (idx: number, slot: ScheduleSlot) => {
         setEditingIdx(idx);
@@ -204,6 +209,7 @@ const ScheduleCard: React.FC<ScheduleCardProps> = ({
                         >
                             {formatDate(wallClock)}
                         </span>
+                        {!compact && onOpenCalendar && <button onClick={onOpenCalendar} title="查看 2026 中国日历" aria-label="查看 2026 中国日历" className="flex h-6 w-6 items-center justify-center rounded-full border transition-colors" style={{ background: accentBg, borderColor: palette.line, color: accentHsl }}><CalendarBlank size={14}/></button>}
                         <ScheduleAppearanceButton compact />
                     </div>
                     {charTzName && (
@@ -211,6 +217,9 @@ const ScheduleCard: React.FC<ScheduleCardProps> = ({
                             {charTzName}
                         </span>
                     )}
+                    <span className={`text-[9px] font-bold ${calendarDay.kind === 'holiday' ? 'text-rose-500' : calendarDay.kind === 'makeup_workday' ? 'text-amber-600' : 'opacity-45'}`}>
+                        {calendarDay.kind === 'holiday' ? `${calendarDay.label} · 放假` : calendarDay.kind === 'makeup_workday' ? '调休补班' : calendarDay.label}
+                    </span>
                     {!compact && onReroll && (
                         <button
                             onClick={onReroll}

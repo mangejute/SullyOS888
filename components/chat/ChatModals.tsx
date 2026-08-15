@@ -1,8 +1,10 @@
 
 import React, { useRef, useState } from 'react';
 import Modal from '../os/Modal';
-import { CharacterProfile, Message, EmojiCategory, DailySchedule, ScheduleSlot, ApiPreset, APIConfig } from '../../types';
+import { CharacterProfile, Message, EmojiCategory, DailySchedule, ScheduleSlot, ApiPreset, APIConfig, CharacterRoutineProfile, Worldbook } from '../../types';
 import ScheduleCard from '../schedule/ScheduleCard';
+import ChinaCalendarPanel from '../schedule/ChinaCalendarPanel';
+import RoutinePanel from '../schedule/RoutinePanel';
 import EmotionSettingsPanel from './EmotionSettingsPanel';
 import { isTranslationLangPreset, normalizeTranslationLangLabel, TRANSLATION_LANG_MAX_LENGTH, TRANSLATION_LANG_PRESETS } from '../../utils/translationLang';
 import type { ContextRangeMode, ContextRangeSnapshot } from '../../utils/chatContextRange';
@@ -138,6 +140,10 @@ interface ChatModalsProps {
     onScheduleCoverChange?: (dataUrl: string) => void;
     onScheduleStyleChange?: (style: 'lifestyle' | 'mindful') => void;
     onPlayTheater?: (index: number) => void;
+    isRoutineGenerating?: boolean;
+    worldbooks?: Worldbook[];
+    onRoutineAnalyze?: (worldbookIds: string[]) => void;
+    onRoutineSave?: (profile: CharacterRoutineProfile) => void;
     // Schedule master toggle
     isScheduleFeatureEnabled?: boolean;
     onToggleScheduleFeature?: () => void;
@@ -274,7 +280,7 @@ const ChatModals: React.FC<ChatModalsProps> = ({
     callDreamTalkEnabled, onToggleCallDreamTalk, callSleepNoiseId, callCustomSleepNoises = [], onSelectCallSleepNoise, onAddCallSleepNoise, onRemoveCallSleepNoise,
     onGenerateVoice, voiceAvailable, onDownloadVoice, voiceDownloadable,
     scheduleData, isScheduleGenerating, onScheduleEdit, onScheduleDelete, onScheduleReroll, onScheduleCoverChange,
-    onScheduleStyleChange, onPlayTheater,
+    onScheduleStyleChange, onPlayTheater, isRoutineGenerating, worldbooks = [], onRoutineAnalyze, onRoutineSave,
     isScheduleFeatureEnabled, onToggleScheduleFeature,
     isMemoryPalaceEnabled, isVectorizing, vectorizePendingCount, vectorizeProgress,
     retainRecentForVectorize, setRetainRecentForVectorize, vectorizeResult, onForceVectorize,
@@ -283,6 +289,7 @@ const ChatModals: React.FC<ChatModalsProps> = ({
     const bgInputRef = useRef<HTMLInputElement>(null);
     const referenceInputRef = useRef<HTMLInputElement>(null);
     const sleepNoiseInputRef = useRef<HTMLInputElement>(null);
+    const [calendarOpen, setCalendarOpen] = useState(false);
     const [imageReferences, setImageReferences] = useState<string[]>(activeCharacter.imageGenerationReferences || []);
     React.useEffect(() => {
         setImageReferences(activeCharacter.imageGenerationReferences || []);
@@ -1284,7 +1291,9 @@ const ChatModals: React.FC<ChatModalsProps> = ({
                                 onCoverImageChange={onScheduleCoverChange}
                                 onPlayTheater={onPlayTheater}
                                 isGenerating={isScheduleGenerating}
+                                onOpenCalendar={() => setCalendarOpen(value => !value)}
                             />
+                            {calendarOpen && <ChinaCalendarPanel />}
                             <p className="text-[10px] text-slate-400 text-center mt-3 leading-relaxed">
                                 点击日程项可编辑 · 长按可删除
                             </p>
@@ -1346,6 +1355,16 @@ const ChatModals: React.FC<ChatModalsProps> = ({
                                         </button>
                                     </div>
                                 </div>
+                            )}
+
+                            {activeCharacter && onRoutineAnalyze && onRoutineSave && (
+                                <RoutinePanel
+                                    character={activeCharacter}
+                                    worldbooks={worldbooks}
+                                    busy={isRoutineGenerating}
+                                    onAnalyze={onRoutineAnalyze}
+                                    onSave={onRoutineSave}
+                                />
                             )}
 
                             {/* 情绪 / 意识流 API — 与日程强制同步 */}

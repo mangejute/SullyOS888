@@ -1624,6 +1624,17 @@ export interface CharacterWorldState {
     lastTravelToLocationId?: string;
 }
 
+/** AI 从角色人设识别出的长期基础作息；日程、家园和聊天共用此事实。 */
+export interface CharacterRoutineProfile {
+    summary: string;
+    workday: { wakeTime: string; breakfastTime: string; lunchTime: string; dinnerTime: string; sleepTime: string; workStartTime?: string; workEndTime?: string; note?: string };
+    restday: { wakeTime: string; breakfastTime: string; lunchTime: string; dinnerTime: string; sleepTime: string; note?: string };
+    /** 作息 AI 识别时由用户选择的世界书；正文不重复存进角色档案。 */
+    sourceWorldbookIds?: string[];
+    sourceWorldbookLabels?: string[];
+    updatedAt: number;
+}
+
 /** 用户以“上帝视角”指定的下一段世界走向。所有角色与 NPC 都必须服从，演完即消费。 */
 export interface WorldStoryDirective {
     id: string;
@@ -2894,6 +2905,8 @@ export interface CharacterProfile {
   worldNpcs?: CharacterWorldNpc[] | { sourceText: string; npcs: CharacterWorldNpc[]; updatedAt: number };
   /** 地图/NPC/日程/家园共享的实时世界状态。 */
   worldState?: CharacterWorldState;
+  /** 角色基础作息，由 AI 识别后保存；法定节假日和补班日仍以中国日历为准。 */
+  routineProfile?: CharacterRoutineProfile;
 
   /**
    * HTML 模块模式（per-character）。

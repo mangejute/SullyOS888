@@ -29,6 +29,7 @@ import { isMcdActivatedInMessages, MCD_ACTIVATE_TRIGGER, MCD_DEACTIVATE_TRIGGER 
 import { isLuckinConfigured } from '../utils/luckinMcpClient';
 import { isLuckinActivatedInMessages, LUCKIN_ACTIVATE_TRIGGER, LUCKIN_DEACTIVATE_TRIGGER } from '../utils/luckinToolBridge';
 import { getCharacterWorldState, parseExplicitLocationAction } from '../utils/characterWorld';
+import { ensureCharacterRoutine } from '../utils/characterRoutine';
 import MessageItem, { ThinkingChainBlock } from '../components/chat/MessageItem';
 import McdMiniApp from '../components/mcd/McdMiniApp';
 import LuckinMiniApp from '../components/luckin/LuckinMiniApp';
@@ -162,6 +163,7 @@ const Chat: React.FC = () => {
     const [theaterSlotIdx, setTheaterSlotIdx] = useState<number | null>(null);
     const [isTheaterGenerating, setIsTheaterGenerating] = useState(false);
     const [isScheduleGenerating, setIsScheduleGenerating] = useState(false);
+    const [isRoutineGenerating, setIsRoutineGenerating] = useState(false);
     const [allHistoryMessages, setAllHistoryMessages] = useState<Message[]>([]);
     const [transferAmt, setTransferAmt] = useState('');
     const [transferNote, setTransferNote] = useState('');
@@ -1927,6 +1929,30 @@ const Chat: React.FC = () => {
         }
     };
 
+    const handleRoutineAnalyze = async (worldbookIds: string[] = []) => {
+        if (!char || isRoutineGenerating) return;
+        setIsRoutineGenerating(true);
+        try {
+            const updated = await ensureCharacterRoutine(char, userProfile, apiConfig, true, worldbooks, worldbookIds);
+            if (!updated.routineProfile) {
+                addToast('作息识别失败，请检查 API 后重试', 'error');
+                return;
+            }
+            updateCharacter(char.id, { routineProfile: updated.routineProfile });
+            addToast('基础作息已识别，正在按新作息更新今日日程', 'success');
+            await generateDailySchedule(updated, true);
+        } finally {
+            setIsRoutineGenerating(false);
+        }
+    };
+
+    const handleRoutineSave = async (routineProfile: NonNullable<typeof char>['routineProfile']) => {
+        if (!char || !routineProfile) return;
+        updateCharacter(char.id, { routineProfile });
+        await generateDailySchedule({ ...char, routineProfile }, true);
+        addToast('基础作息已保存，今日日程已按新规律更新', 'success');
+    };
+
     const handleScheduleStyleChange = async (style: 'lifestyle' | 'mindful') => {
         if (!char) return;
         // 与情绪/意识流强制同步：启用日程时自动启用情绪感知
@@ -3324,6 +3350,10 @@ const Chat: React.FC = () => {
                 onScheduleCoverChange={handleScheduleCoverChange}
                 onScheduleStyleChange={handleScheduleStyleChange}
                 onPlayTheater={handlePlayTheater}
+                isRoutineGenerating={isRoutineGenerating}
+                worldbooks={worldbooks}
+                onRoutineAnalyze={handleRoutineAnalyze}
+                onRoutineSave={handleRoutineSave}
                 isScheduleFeatureEnabled={isScheduleFeatureOn(char)}
                 onToggleScheduleFeature={handleToggleScheduleFeature}
                 isMemoryPalaceEnabled={!!char.memoryPalaceEnabled}

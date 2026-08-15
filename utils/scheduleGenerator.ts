@@ -14,6 +14,7 @@ import { enforceWorldLifePlanOnSchedule, formatWorldLifeContext, getWorldLifeCon
 import { worldNow } from './worldHome/prompts';
 import { recordPromptHistory } from './promptHistory';
 import { applyScheduleTravelModel, buildCharacterWorldContext, normalizeScheduleSlot } from './characterWorld';
+import { ensureCharacterRoutine, formatRoutineContext } from './characterRoutine';
 
 export { getFlowNarrativeKey, isScheduleFeatureOn } from './scheduleFeature';
 
@@ -260,6 +261,8 @@ export async function generateDailyScheduleForChar(
     // 总开关关闭时直接短路，避免副 API / 兜底调用
     if (!isScheduleFeatureOn(char)) return null;
 
+    // 第一次生成日程先建立角色长期作息；之后完全复用，不增加每日 API 调用。
+    char = await ensureCharacterRoutine(char, userProfile, apiConfig);
     const worldLifeContext: WorldLifeContext | null = await getWorldLifeContextForCharacter(char.id, apiConfig);
     const baseNow = worldLifeContext ? worldNow(worldLifeContext.world) : new Date();
     const now = getScheduleWallClock(char, baseNow);
@@ -314,6 +317,7 @@ export async function generateDailyScheduleForChar(
     const worldLifeText = [
         worldLifeContext ? formatWorldLifeContext(worldLifeContext) : '',
         buildCharacterWorldContext(char),
+        formatRoutineContext(char, now),
     ].filter(Boolean).join('\n');
     const prompt = style === 'mindful'
         ? buildMindfulPrompt(baseContext, char, userProfile, today, dayOfWeek, chatHistoryBlock, worldLifeText)
