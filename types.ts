@@ -1567,6 +1567,8 @@ export interface CharacterWorldLocation {
     purpose: string;
     distance: string;
     category: string;
+    /** 地点所属街区/片区，用于城市地图与日程的空间语境。 */
+    district?: string;
     x: number;
     y: number;
     isHome?: boolean;
