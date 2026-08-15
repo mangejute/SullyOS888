@@ -40,6 +40,8 @@ const TTL_RULES: Array<{ path: string; ttl: number; exact?: boolean }> = [
 
   // 歌词基本不会改
   { path: '/lyric',              ttl: 24 * 60 * 60 * 1000 },
+  // 热门评论变化不快；分享同一首歌给不同角色时复用，避免重复请求。
+  { path: '/comment/music',      ttl: 5 * 60 * 1000 },
 
   // 榜单半小时够了
   { path: '/toplist',            ttl: 30 * 60 * 1000 },

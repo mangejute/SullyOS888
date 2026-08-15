@@ -1,10 +1,12 @@
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useOS } from '../context/OSContext';
-import { useMusic, musicApi, normalizeCookie, toHttps, Song } from '../context/MusicContext';
+import { useMusic, musicApi, normalizeCookie, parseLyric, toHttps, Song } from '../context/MusicContext';
 import { getProxyWorkerUrl } from '../utils/proxyWorker';
 import { DB } from '../utils/db';
 import { trackEvent } from '../utils/analytics';
+import { markPendingMusicShareReply } from '../utils/musicShare';
+import { AppID } from '../types';
 import { Gear, User as UserIcon, Crosshair, Play as PlayIcon, Pause as PauseIcon } from '@phosphor-icons/react';
 import {
   C, Sparkle, CrossStar, MizuHeader, SearchBar, SongRow, MiniPlayer,
@@ -26,7 +28,7 @@ type View = 'search' | 'settings' | 'player' | 'profile' | 'visit_char';
 
 // ========================= 主组件 =========================
 const MusicApp: React.FC = () => {
-  const { closeApp, addToast, characters, userProfile } = useOS();
+  const { closeApp, addToast, characters, userProfile, openApp, setActiveCharacterId } = useOS();
   const {
     cfg, setCfg,
     current, playing, progress, duration, loadingSong,
@@ -105,7 +107,92 @@ const MusicApp: React.FC = () => {
   const [keyword, setKeyword] = useState('');
   const [results, setResults] = useState<Song[]>([]);
   const [searching, setSearching] = useState(false);
+  const [sharePanelOpen, setSharePanelOpen] = useState(false);
+  const [sharing, setSharing] = useState(false);
+  const [commentsOpen, setCommentsOpen] = useState(false);
+  const [commentsLoading, setCommentsLoading] = useState(false);
+  const [currentComments, setCurrentComments] = useState<Array<{ nickname: string; content: string; likedCount: number }>>([]);
+  const [commentsStatus, setCommentsStatus] = useState<'idle' | 'available' | 'empty' | 'unavailable' | 'local'>('idle');
   const lyricBoxRef = useRef<HTMLDivElement | null>(null);
+
+  const loadCurrentComments = useCallback(async () => {
+    if (!current) return;
+    if (current.local) {
+      setCurrentComments([]);
+      setCommentsStatus('local');
+      return;
+    }
+    setCommentsLoading(true);
+    setCommentsStatus('idle');
+    try {
+      const result = await musicApi.comments(cfg, current.id, 12);
+      const rawComments = result?.hotComments?.length ? result.hotComments : result?.comments || [];
+      const comments = Array.isArray(rawComments) ? rawComments.slice(0, 12).map((comment: any) => ({
+        nickname: String(comment?.user?.nickname || '网易云用户').slice(0, 80),
+        content: String(comment?.content || '').trim().slice(0, 400),
+        likedCount: Number(comment?.likedCount) || 0,
+      })).filter(comment => comment.content) : [];
+      setCurrentComments(comments);
+      setCommentsStatus(comments.length ? 'available' : 'empty');
+    } catch (error) {
+      console.warn('[music-comments] failed', error);
+      setCurrentComments([]);
+      setCommentsStatus('unavailable');
+    } finally {
+      setCommentsLoading(false);
+    }
+  }, [current, cfg]);
+
+  const shareCurrentSong = useCallback(async (charId: string) => {
+    if (!current || sharing) return;
+    const target = characters.find(character => character.id === charId);
+    if (!target) return;
+    setSharing(true);
+    try {
+      const [lyricResult, commentResult] = await Promise.allSettled([
+        current.local ? Promise.resolve(null) : musicApi.lyric(cfg, current.id),
+        current.local ? Promise.resolve(null) : musicApi.comments(cfg, current.id, 12),
+      ]);
+      const lyrics = current.local
+        ? (current.localLyrics || '').trim()
+        : lyricResult.status === 'fulfilled'
+          ? parseLyric(lyricResult.value?.lrc?.lyric || '').map(line => line.text).join('\n')
+          : '';
+      const rawComments = !current.local && commentResult.status === 'fulfilled'
+        ? (commentResult.value?.hotComments?.length ? commentResult.value.hotComments : commentResult.value?.comments || [])
+        : [];
+      const comments = Array.isArray(rawComments) ? rawComments.slice(0, 12).map((comment: any) => ({
+        nickname: String(comment?.user?.nickname || '网易云用户').slice(0, 80),
+        content: String(comment?.content || '').trim().slice(0, 400),
+        likedCount: Number(comment?.likedCount) || 0,
+      })).filter(comment => comment.content) : [];
+      const commentsStatus = current.local ? 'local' : commentResult.status === 'fulfilled' ? 'available' : 'unavailable';
+      const messageId = await DB.saveMessage({
+        charId,
+        role: 'user',
+        type: 'music_card',
+        content: `[音乐分享] ${current.name}`,
+        metadata: {
+          shared: true,
+          song: { songId: current.id, name: current.name, artists: current.artists, album: current.album, albumPic: current.albumPic },
+          lyrics,
+          comments,
+          commentsStatus,
+        },
+      } as any);
+      markPendingMusicShareReply(charId, messageId);
+      setSharePanelOpen(false);
+      setActiveCharacterId(charId);
+      openApp(AppID.Chat);
+      addToast(`已分享给${target.name}`, 'success');
+      trackEvent('分享音乐给角色', { local: !!current.local, hasLyrics: !!lyrics, commentCount: comments.length });
+    } catch (error) {
+      console.error('[music-share] failed', error);
+      addToast('分享失败，请重试', 'error');
+    } finally {
+      setSharing(false);
+    }
+  }, [current, sharing, characters, cfg, setActiveCharacterId, openApp, addToast]);
 
   // 歌词自动滚动：把 current line 对齐到滚动容器视觉中心
   // 注意 offsetTop 依赖 offsetParent，容器没 position:relative 时会跨到祖先节点、值偏大，
@@ -445,6 +532,15 @@ const MusicApp: React.FC = () => {
               }}
               showDownload={!!(current.local && current.localAssetKey)}
               onDownload={downloadCurrentLocal}
+              onComments={() => {
+                setCommentsOpen(true);
+                void loadCurrentComments();
+                trackEvent('打开歌曲热门评论');
+              }}
+              onShare={() => {
+                if (!characters.length) { addToast('请先创建一个角色', 'info'); return; }
+                setSharePanelOpen(true);
+              }}
               playMode={playMode}
               onCyclePlayMode={cyclePlayMode}
             />
@@ -740,6 +836,79 @@ const MusicApp: React.FC = () => {
           onBack={() => { setView('profile'); setVisitCharId(null); }}
           onOpenPlayer={() => setView('player')}
         />
+      )}
+
+      {commentsOpen && current && (
+        <div className="absolute inset-0 z-50 flex items-end bg-black/35" onClick={() => !commentsLoading && setCommentsOpen(false)}>
+          <div className="w-full max-h-[78%] overflow-y-auto rounded-t-2xl px-4 pt-4 pb-7" onClick={event => event.stopPropagation()}
+            style={{ background: 'rgba(255,255,255,0.98)', boxShadow: '0 -8px 28px rgba(73, 57, 118, 0.18)' }}>
+            <div className="mx-auto h-1 w-9 rounded-full" style={{ background: C.faint }} />
+            <div className="mt-4 flex items-center gap-3">
+              {current.albumPic ? <img src={current.albumPic} alt="" className="h-11 w-11 rounded object-cover" referrerPolicy="no-referrer" /> : <div className="h-11 w-11 rounded flex items-center justify-center text-lg" style={{ background: C.lavender, color: C.primary }}>♪</div>}
+              <div className="min-w-0">
+                <div className="text-sm font-semibold truncate" style={{ color: C.text }}>《{current.name}》的热门评论</div>
+                <div className="text-[11px] truncate" style={{ color: C.muted }}>{current.artists}</div>
+              </div>
+              <button aria-label="关闭评论" title="关闭" onClick={() => setCommentsOpen(false)} className="ml-auto h-8 w-8 shrink-0 rounded-full text-lg" style={{ color: C.muted }}>×</button>
+            </div>
+
+            {commentsLoading && (
+              <div className="py-12 text-center text-xs" style={{ color: C.muted }}>正在加载热门评论…</div>
+            )}
+            {!commentsLoading && commentsStatus === 'local' && (
+              <div className="py-12 text-center text-xs" style={{ color: C.muted }}>这是本地创作，暂无网易云评论</div>
+            )}
+            {!commentsLoading && commentsStatus === 'unavailable' && (
+              <div className="py-10 text-center">
+                <div className="text-xs" style={{ color: C.muted }}>暂时无法获取网易云评论</div>
+                <button onClick={() => void loadCurrentComments()} className="mt-3 text-[11px] underline" style={{ color: C.primary }}>重新加载</button>
+              </div>
+            )}
+            {!commentsLoading && commentsStatus === 'empty' && (
+              <div className="py-12 text-center text-xs" style={{ color: C.muted }}>这首歌暂时没有可展示的评论</div>
+            )}
+            {!commentsLoading && commentsStatus === 'available' && (
+              <div className="mt-4 space-y-2.5">
+                {currentComments.map((comment, index) => (
+                  <div key={`${comment.nickname}-${index}`} className="rounded-xl px-3 py-2.5" style={{ background: `${C.bg}aa`, border: `1px solid ${C.faint}28` }}>
+                    <div className="flex items-center justify-between gap-3">
+                      <span className="min-w-0 truncate text-[11px] font-medium" style={{ color: C.primary }}>{comment.nickname}</span>
+                      <span className="shrink-0 text-[10px]" style={{ color: C.muted }}>♡ {comment.likedCount.toLocaleString()}</span>
+                    </div>
+                    <div className="mt-1.5 whitespace-pre-wrap break-words text-[12px] leading-relaxed" style={{ color: C.text }}>{comment.content}</div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {sharePanelOpen && current && (
+        <div className="absolute inset-0 z-50 flex items-end bg-black/35" onClick={() => !sharing && setSharePanelOpen(false)}>
+          <div className="w-full max-h-[72%] overflow-y-auto rounded-t-2xl px-4 pt-4 pb-7" onClick={event => event.stopPropagation()}
+            style={{ background: 'rgba(255,255,255,0.98)', boxShadow: '0 -8px 28px rgba(73, 57, 118, 0.18)' }}>
+            <div className="mx-auto h-1 w-9 rounded-full" style={{ background: C.faint }} />
+            <div className="mt-4 flex items-center gap-3">
+              {current.albumPic ? <img src={current.albumPic} alt="" className="h-11 w-11 rounded object-cover" referrerPolicy="no-referrer" /> : <div className="h-11 w-11 rounded flex items-center justify-center text-lg" style={{ background: C.lavender, color: C.primary }}>♪</div>}
+              <div className="min-w-0">
+                <div className="text-sm font-semibold truncate" style={{ color: C.text }}>分享《{current.name}》</div>
+                <div className="text-[11px] truncate" style={{ color: C.muted }}>{current.artists}</div>
+              </div>
+            </div>
+            <div className="mt-4 text-[11px]" style={{ color: C.muted }}>{sharing ? '正在整理歌词和热门评论…' : '选择要分享的角色'}</div>
+            <div className="mt-2 space-y-1">
+              {characters.map(character => (
+                <button key={character.id} disabled={sharing} onClick={() => shareCurrentSong(character.id)}
+                  className="flex w-full items-center gap-3 rounded-lg px-2 py-2.5 text-left disabled:opacity-55 active:opacity-70">
+                  {character.avatar ? <img src={character.avatar} alt="" className="h-9 w-9 rounded-full object-cover" referrerPolicy="no-referrer" /> : <div className="h-9 w-9 rounded-full flex items-center justify-center text-sm text-white" style={{ background: C.primary }}>{character.name.slice(0, 1)}</div>}
+                  <span className="min-w-0 flex-1 truncate text-sm" style={{ color: C.text }}>{character.name}</span>
+                  <span className="text-[11px]" style={{ color: C.muted }}>分享</span>
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );

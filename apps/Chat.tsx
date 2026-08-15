@@ -65,6 +65,7 @@ import { normalizeTranslationLangLabel, isTranslationLangPreset } from '../utils
 import { CharacterGroupFilterBar, filterCharactersByGroup, GROUP_FILTER_ALL } from '../components/character/CharacterGroupFilter';
 import { trackEvent, noteMessageSent, presetOrCustom } from '../utils/analytics';
 import { markAmsgStateDirty, markAmsgStateDirtyForAll } from '../utils/amsgStateSync';
+import { consumePendingMusicShareReply, peekPendingMusicShareReply } from '../utils/musicShare';
 import { AMSG_INSTANT_CHAT_PENDING_EVENT, AMSG_INSTANT_CHAT_PENDING_LS_KEY, getInstantChatPending } from '../utils/amsgInstantChat';
 import { formatAmsgToolTrace } from '../utils/amsgToolTrace';
 import { retryImageGeneration } from '../utils/imageGeneration';
@@ -367,6 +368,31 @@ const Chat: React.FC = () => {
         luckinChatRef,
         updateCharacter,
     });
+
+    // 音乐 App 分享后切进聊天：确认分享卡已经落库，再用正常聊天管线请求角色回应。
+    // 标记按角色存储，切换角色或刷新页面都不会把分享卡误发给另一位角色。
+    const musicShareReplyStartedRef = useRef<Set<number>>(new Set());
+    useEffect(() => {
+        if (!char || isTyping) return;
+        const pendingId = peekPendingMusicShareReply(char.id);
+        if (pendingId == null || musicShareReplyStartedRef.current.has(pendingId)) return;
+        musicShareReplyStartedRef.current.add(pendingId);
+        const consumed = consumePendingMusicShareReply(char.id);
+        if (consumed == null) return;
+        let cancelled = false;
+        void (async () => {
+            try {
+                const recent = await DB.getRecentMessagesByCharId(char.id, 200);
+                if (cancelled || !recent.some(message => message.id === consumed)) return;
+                setMessages(recent);
+                triggerAI(recent);
+            } catch (error) {
+                musicShareReplyStartedRef.current.delete(consumed);
+                console.warn('[music-share] reply trigger failed', error);
+            }
+        })();
+        return () => { cancelled = true; };
+    }, [char?.id, isTyping, triggerAI]);
 
     // --- Voice TTS for chat messages ---
     interface VoiceData { url: string; originalText: string; spokenText?: string; lang?: string; }

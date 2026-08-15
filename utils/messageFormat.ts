@@ -187,10 +187,32 @@ export function normalizeMessageContent(
     // "[音乐卡片]" 这种没信息量的占位，丢掉"谁因为什么歌做了什么"的语义
     if (type === 'music_card') {
         const song = msg.metadata?.song as { name?: string; artists?: string } | undefined;
+        const isSharedByUser = msg.metadata?.shared === true;
         const intent = msg.metadata?.intent as 'join' | 'add' | 'join_and_add' | undefined;
         const addedTo = msg.metadata?.addedToPlaylistTitle as string | undefined;
         if (song?.name) {
             const songDesc = song.artists ? `《${song.name}》— ${song.artists}` : `《${song.name}》`;
+            if (isSharedByUser) {
+                const lyrics = typeof msg.metadata?.lyrics === 'string' ? msg.metadata.lyrics.trim() : '';
+                const comments = Array.isArray(msg.metadata?.comments) ? msg.metadata.comments : [];
+                const commentText = comments
+                    .map((comment: any, index: number) => {
+                        const content = typeof comment?.content === 'string' ? comment.content.trim() : '';
+                        if (!content) return '';
+                        const nickname = typeof comment?.nickname === 'string' && comment.nickname.trim()
+                            ? comment.nickname.trim() : '网易云用户';
+                        const likes = Number.isFinite(comment?.likedCount) ? `（获赞 ${comment.likedCount}）` : '';
+                        return `${index + 1}. ${nickname}${likes}：${content}`;
+                    })
+                    .filter(Boolean)
+                    .join('\n');
+                return [
+                    `[音乐分享] ${userName}分享给${charName}${songDesc}。`,
+                    `歌词（完整）：\n${lyrics || '这首歌暂未提供歌词。'}`,
+                    `网易云热门评论：\n${commentText || (msg.metadata?.commentsStatus === 'unavailable' ? '暂时无法获取评论。' : '没有可用评论。')}`,
+                    '[回应规则：先回应这次音乐分享。若确实知道这首歌，可以结合自己的记忆谈聆听感受、创作或发行背景、歌手；不知道就坦诚，不要编造事实。可以对歌词和热门评论表达自己的看法，但不要逐字复述整篇歌词。]',
+                ].join('\n');
+            }
             const action =
                 intent === 'join' ? `决定和${userName}一起听这首`
                 : intent === 'add' ? `把这首收进了自己的歌单${addedTo ? `《${addedTo}》` : ''}`

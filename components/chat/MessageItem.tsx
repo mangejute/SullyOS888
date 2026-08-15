@@ -2070,6 +2070,25 @@ const MessageItem = React.memo(({
     // --- Music Card Rendering (一起听 / 加入歌单) ---
     if (m.type === 'music_card' && m.metadata?.song) {
         const song = m.metadata.song as { songId: number; name: string; artists: string; albumPic: string };
+        if (m.metadata.shared === true) {
+            const commentCount = Array.isArray(m.metadata.comments) ? m.metadata.comments.length : 0;
+            return commonLayout(
+                <div className="w-64 overflow-hidden rounded-2xl border shadow-sm"
+                    style={{ borderColor: '#d8e0f1', background: 'linear-gradient(135deg, #f5f8ff 0%, #fff7fb 100%)' }}>
+                    <div className="flex items-center gap-2.5 px-3 py-2.5" style={{ background: 'rgba(255,255,255,0.58)' }}>
+                        {song.albumPic ? <img src={song.albumPic} alt="" className="h-11 w-11 shrink-0 rounded object-cover" referrerPolicy="no-referrer" /> : <div className="h-11 w-11 shrink-0 rounded flex items-center justify-center text-lg" style={{ background: '#d9d5ee', color: '#66548c' }}>♪</div>}
+                        <div className="min-w-0">
+                            <div className="truncate text-sm font-semibold" style={{ color: '#2a3150' }}>{song.name || '未命名'}</div>
+                            <div className="mt-0.5 truncate text-[10px]" style={{ color: '#68708f' }}>{song.artists || '未知歌手'}</div>
+                        </div>
+                    </div>
+                    <div className="border-t px-3 py-2 text-[10px]" style={{ borderColor: '#e4e7f1', color: '#69718d' }}>
+                        <div className="flex items-center justify-between"><span>音乐分享</span><span>{m.metadata.commentsStatus === 'unavailable' ? '评论暂不可用' : `热门评论 ${commentCount} 条`}</span></div>
+                        <div className="mt-1" style={{ color: '#8b91a8' }}>已附完整歌词，等你聊聊这首歌</div>
+                    </div>
+                </div>
+            );
+        }
         const intent = (m.metadata.intent || 'join') as 'join' | 'add' | 'join_and_add';
         const isTogether = intent === 'join' || intent === 'join_and_add';
         const addedTo = m.metadata.addedToPlaylistTitle as string | undefined;

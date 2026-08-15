@@ -245,6 +245,9 @@ export const musicApi = {
   lyric(cfg: MusicCfg, id: number) {
     return musicApi.call(cfg, '/lyric', { id });
   },
+  comments(cfg: MusicCfg, id: number, limit = 12) {
+    return musicApi.call(cfg, '/comment/music', { id, limit, offset: 0 });
+  },
   loginStatus(cfg: MusicCfg) {
     return musicApi.call(cfg, '/login/status', {});
   },

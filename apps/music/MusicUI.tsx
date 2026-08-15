@@ -491,10 +491,12 @@ export const SubActions: React.FC<{
   showSync?: boolean;
   onDownload?: () => void;         // 下载本地生成的音频 (仅本地歌显示)
   showDownload?: boolean;
+  onShare?: () => void;
+  onComments?: () => void;
   playMode?: SubPlayMode;
   onCyclePlayMode?: () => void;    // 循环模式切换
   onAdd?: () => void;
-}> = ({ onLike, liked, onSync, showSync, onDownload, showDownload, playMode = 'loop', onCyclePlayMode, onAdd }) => {
+}> = ({ onLike, liked, onSync, showSync, onDownload, showDownload, onShare, onComments, playMode = 'loop', onCyclePlayMode, onAdd }) => {
   const Item = ({ icon, label, onClick, active }: { icon: React.ReactNode; label: string; onClick?: () => void; active?: boolean }) => (
     <button onClick={onClick}
       className="flex flex-col items-center gap-1 transition-opacity active:scale-95"
@@ -552,12 +554,26 @@ export const SubActions: React.FC<{
       <path d="M5 20h14" />
     </svg>
   );
+  const shareSvg = (
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke={C.primary} strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+      <circle cx="18" cy="5" r="2.5" /><circle cx="6" cy="12" r="2.5" /><circle cx="18" cy="19" r="2.5" />
+      <path d="m8.2 10.8 7.6-4.4M8.2 13.2l7.6 4.4" />
+    </svg>
+  );
+  const commentsSvg = (
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke={C.primary} strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M20 11.5a7.5 7.5 0 0 1-8 7.5 8.6 8.6 0 0 1-3.5-.75L4 20l1.75-3.5A7.25 7.25 0 0 1 4.5 12 7.5 7.5 0 0 1 12 4.5a7.5 7.5 0 0 1 8 7Z" />
+      <path d="M8 12h.01M12 12h.01M16 12h.01" strokeWidth="2.4" />
+    </svg>
+  );
 
   const playModeLabel: Record<SubPlayMode, string> = { loop: 'Loop', single: 'One', shuffle: 'Mix' };
 
   return (
     <div className="flex items-end justify-around gap-4 max-w-[280px] mx-auto">
       <Item onClick={onLike} active={liked} label="Like" icon={heartSvg} />
+      {onComments && <Item onClick={onComments} active label="评论" icon={commentsSvg} />}
+      {onShare && <Item onClick={onShare} active label="Share" icon={shareSvg} />}
       {showSync && onSync && <Item onClick={onSync} active label="Sync" icon={syncSvg} />}
       {showDownload && onDownload && <Item onClick={onDownload} active label="Save" icon={downloadSvg} />}
       {onCyclePlayMode && <Item onClick={onCyclePlayMode} active={playMode !== 'loop'} label={playModeLabel[playMode]} icon={loopSvg} />}
