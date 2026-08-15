@@ -55,9 +55,10 @@ export const captureUserCameraSnapshot = (
 
 export const attachSnapshotToLatestUserMessage = <T extends CameraChatMessage>(
   messages: readonly T[],
-  snapshotDataUrl: string,
+  snapshotDataUrls: readonly string[],
 ): T[] => {
-  if (!snapshotDataUrl.startsWith('data:image/')) return [...messages];
+  const validSnapshots = snapshotDataUrls.filter(snapshot => snapshot.startsWith('data:image/'));
+  if (!validSnapshots.length) return [...messages];
   const targetIndex = [...messages].map(message => message.role).lastIndexOf('user');
   if (targetIndex < 0) return [...messages];
   return messages.map((message, index) => {
@@ -69,7 +70,10 @@ export const attachSnapshotToLatestUserMessage = <T extends CameraChatMessage>(
       ...message,
       content: [
         { type: 'text', text },
-        { type: 'image_url', image_url: { url: snapshotDataUrl } },
+        ...validSnapshots.map(snapshotDataUrl => ({
+          type: 'image_url',
+          image_url: { url: snapshotDataUrl },
+        })),
       ],
     } as T;
   });
@@ -81,5 +85,5 @@ export const isVisionInputUnsupportedError = (error: unknown): boolean => {
   return /image_url|image input|vision|multimodal|multi-modal|unsupported[^\n]*image|does not support[^\n]*image|unknown variant[^\n]*image|content[^\n]*array/i.test(message);
 };
 
-export const USER_CAMERA_SNAPSHOT_SYSTEM_NOTE = `【本轮用户摄像头快照】
-用户主动选择了“每轮快照”模式；最后一条用户消息附带的是点击发送瞬间的一帧，仅作为当前对话的即时非语言线索。自然结合画面与文字回应；文字语义优先。不要进行身份、医学或心理诊断，也不要解释系统如何获得图片。`;
+export const USER_CAMERA_SNAPSHOT_SYSTEM_NOTE = `【本轮用户摄像头连续快照】
+用户主动选择了“每轮快照”模式；最后一条用户消息附带的是用户说话期间按时间采样的连续画面，仅作为当前对话的即时非语言线索。自然结合多张画面与文字回应，按时间顺序理解用户的表情和动作变化；文字语义优先。不要进行身份、医学或心理诊断，也不要解释系统如何获得图片。`;

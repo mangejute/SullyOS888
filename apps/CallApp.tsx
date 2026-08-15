@@ -567,7 +567,12 @@ const CallApp: React.FC = () => {
   const sttButtonLongPressTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const sttButtonLongPressRef = useRef(false);
   const sttSubmittingRef = useRef(false);
+  const sttStartingRef = useRef(false);
   const autoVoiceModeRef = useRef(false);
+  // 免手模式可以保持开启，但只有角色完整说完后才允许真正启动 STT。
+  const assistantPlaybackActiveRef = useRef(false);
+  const pendingUserSnapshotsRef = useRef<string[]>([]);
+  const userSnapshotSamplingTimerRef = useRef<number | null>(null);
   const handleTurnRef = useRef<(spoken?: string) => void>(() => undefined);
   const finishCallRef = useRef<() => void>(() => undefined);
   const sttProvider = apiConfig.speechRecognition?.provider === 'siliconflow' ? 'siliconflow' : 'browser';
@@ -1454,6 +1459,28 @@ const CallApp: React.FC = () => {
       english_normalization: true,
     };
   };
+  const stopUserSnapshotSampling = () => {
+    if (userSnapshotSamplingTimerRef.current !== null) {
+      window.clearInterval(userSnapshotSamplingTimerRef.current);
+      userSnapshotSamplingTimerRef.current = null;
+    }
+  };
+  const sampleUserCameraSnapshot = () => {
+    if (callMode !== 'video' || userCameraMode !== 'snapshot') return;
+    const snapshot = captureUserCameraSnapshotContext();
+    if (!snapshot) return;
+    const existing = pendingUserSnapshotsRef.current;
+    // Keep the first frame plus the two most recent frames: long turns stay
+    // bounded while still showing how the user's expression changed.
+    pendingUserSnapshotsRef.current = existing.length < 3
+      ? [...existing, snapshot]
+      : [existing[0], existing[2], snapshot];
+  };
+  const startUserSnapshotSampling = () => {
+    if (callMode !== 'video' || userCameraMode !== 'snapshot' || userSnapshotSamplingTimerRef.current !== null) return;
+    sampleUserCameraSnapshot();
+    userSnapshotSamplingTimerRef.current = window.setInterval(sampleUserCameraSnapshot, 1500);
+  };
   // ── TTS 服务商分发：电话语音也支持 MiniMax ↔ 鱼声二选一 ──
   const isFishTts = resolveTtsProvider(apiConfig) === 'fishaudio';
   const cleanCallSpeechText = (rawText: string) => cleanTextForTts(rawText)
@@ -1695,6 +1722,7 @@ const CallApp: React.FC = () => {
     revokeSessionBlobs();
     if (sttSilenceTimerRef.current) clearTimeout(sttSilenceTimerRef.current);
     if (sttButtonLongPressTimerRef.current) clearTimeout(sttButtonLongPressTimerRef.current);
+    stopUserSnapshotSampling();
     sttSessionRef.current?.stop();
   }, []);
   const clearSttSilenceTimer = () => {
@@ -1704,12 +1732,13 @@ const CallApp: React.FC = () => {
   const armSttSilenceTimer = (text: string) => {
     clearSttSilenceTimer();
     const spoken = text.trim();
-    if (!spoken || !autoVoiceModeRef.current) return;
+    if (!spoken || !autoVoiceModeRef.current || assistantPlaybackActiveRef.current) return;
     sttSilenceTimerRef.current = setTimeout(() => {
       sttSilenceTimerRef.current = null;
-      if (!autoVoiceModeRef.current || !spoken) return;
+      if (!autoVoiceModeRef.current || !spoken || assistantPlaybackActiveRef.current) return;
       sttButtonLongPressRef.current = false;
       sttSubmittingRef.current = true;
+      stopUserSnapshotSampling();
       sttSessionRef.current?.stop();
       sttSessionRef.current = null;
       setIsListening(false);
@@ -1717,15 +1746,24 @@ const CallApp: React.FC = () => {
     }, sttSilenceSeconds * 1000);
   };
   const startAutoStt = async () => {
-    if (!autoVoiceModeRef.current || isListening || !sttSupported || ['connecting', 'thinking', 'speaking'].includes(callState)) return;
+    if (!autoVoiceModeRef.current || assistantPlaybackActiveRef.current || sttStartingRef.current || sttSessionRef.current || isListening || !sttSupported || ['connecting', 'thinking', 'speaking'].includes(callState)) return;
+    sttStartingRef.current = true;
     try {
       setIsListening(true);
       let latest = '';
       const speechConfig = apiConfig.speechRecognition;
-      sttSessionRef.current = await startStt(speechConfig?.language || 'zh-CN', {
-        onPartial: (t) => { latest = t; setDraftInput(t); armSttSilenceTimer(t); },
+      const session = await startStt(speechConfig?.language || 'zh-CN', {
+        onPartial: (t) => {
+          if (assistantPlaybackActiveRef.current) return;
+          latest = t;
+          setDraftInput(t);
+          if (t.trim()) startUserSnapshotSampling();
+          armSttSilenceTimer(t);
+        },
         onFinal: (t) => {
+          if (assistantPlaybackActiveRef.current) return;
           latest = t; setDraftInput(t);
+          if (t.trim()) startUserSnapshotSampling();
           if (sttProvider === 'siliconflow') {
             clearSttSilenceTimer();
             sttSubmittingRef.current = true;
@@ -1740,14 +1778,23 @@ const CallApp: React.FC = () => {
           sttSessionRef.current = null;
           setIsListening(false);
           if (sttSubmittingRef.current) { sttSubmittingRef.current = false; return; }
-          if (latest.trim() && autoVoiceModeRef.current) {
+          if (latest.trim() && autoVoiceModeRef.current && !assistantPlaybackActiveRef.current) {
             armSttSilenceTimer(latest);
-          } else if (autoVoiceModeRef.current) {
+          } else if (autoVoiceModeRef.current && !assistantPlaybackActiveRef.current) {
             window.setTimeout(() => { void startAutoStt(); }, 180);
           }
         },
       }, { provider: sttProvider, siliconflow: speechConfig, silenceMs: sttSilenceSeconds * 1000 });
+      if (!autoVoiceModeRef.current || assistantPlaybackActiveRef.current) {
+        session.stop();
+        setIsListening(false);
+        sttStartingRef.current = false;
+        return;
+      }
+      sttSessionRef.current = session;
+      sttStartingRef.current = false;
     } catch (e: any) {
+      sttStartingRef.current = false;
       setIsListening(false);
       sttSessionRef.current = null;
       addToast(e?.message || '无法启动语音输入', 'error');
@@ -1763,6 +1810,8 @@ const CallApp: React.FC = () => {
       sttSessionRef.current?.stop();
       sttSessionRef.current = null;
       setIsListening(false);
+      stopUserSnapshotSampling();
+      pendingUserSnapshotsRef.current = [];
       trackEvent('切换语音输入', { action: 'stop' });
       return;
     }
@@ -1900,9 +1949,13 @@ const CallApp: React.FC = () => {
   };
   const resetCurrentCall = () => {
     autoVoiceModeRef.current = false;
+    assistantPlaybackActiveRef.current = false;
+    stopUserSnapshotSampling();
+    pendingUserSnapshotsRef.current = [];
     setAutoVoiceMode(false);
     clearSttSilenceTimer();
     sttSubmittingRef.current = false;
+    sttStartingRef.current = false;
     sttSessionRef.current?.stop();
     sttSessionRef.current = null;
     setIsListening(false);
@@ -2247,7 +2300,7 @@ ${sentencePlan}`;
     skipDbId?: number,
     pendingTouches: AvatarTouchRecord[] = [],
     includeUserCameraContext = false,
-    userCameraSnapshotForTurn?: string,
+    userCameraSnapshotsForTurn: string[] = [],
   ): Promise<ParsedCallReply> => {
     const baseUrl = apiConfig.baseUrl?.replace(/\/+$/, '');
     if (!baseUrl) throw new Error('请先在设置里配置聊天 API URL');
@@ -2285,21 +2338,18 @@ ${sentencePlan}`;
       && userCameraMode === 'emotion'
       ? await captureUserCameraEmotionContext()
       : '';
-    const userCameraSnapshot = includeUserCameraContext
+    const userCameraSnapshots = includeUserCameraContext
       && callMode === 'video'
       && userCameraMode === 'snapshot'
-      ? (userCameraSnapshotForTurn ?? captureUserCameraSnapshotContext())
-      : '';
-    if (includeUserCameraContext && callMode === 'video' && userCameraMode === 'snapshot' && !userCameraSnapshot && userCameraSnapshotForTurn === undefined) {
-      addToast('摄像头画面还没准备好，本轮已只发送文字', 'info');
-    }
+      ? userCameraSnapshotsForTurn.filter(Boolean)
+      : [];
     const baseSystemPrompt = [
       baseCallPrompt,
       callMode === 'video' && !highQualityPerformance ? buildAvatarPerformancePrompt(allowedModelActions) : '',
       userCameraEmotionContext,
       thinkingPrompt,
     ].filter(Boolean).join('\n\n');
-    const systemPrompt = [baseSystemPrompt, userCameraSnapshot ? USER_CAMERA_SNAPSHOT_SYSTEM_NOTE : '']
+    const systemPrompt = [baseSystemPrompt, userCameraSnapshots.length ? USER_CAMERA_SNAPSHOT_SYSTEM_NOTE : '']
       .filter(Boolean)
       .join('\n\n');
     const touchContext = selectedChar
@@ -2310,8 +2360,8 @@ ${sentencePlan}`;
         )
       : '';
     const messages = await buildHistoryMessages(input, skipDbId, touchContext);
-    const requestMessages = userCameraSnapshot
-      ? attachSnapshotToLatestUserMessage(messages, userCameraSnapshot)
+    const requestMessages = userCameraSnapshots.length
+      ? attachSnapshotToLatestUserMessage(messages, userCameraSnapshots)
       : messages;
     const sendChatRequest = (
       nextMessages: any[],
@@ -2333,16 +2383,16 @@ ${sentencePlan}`;
     }, maxRetries, 0, { appName: '电话', charId: selectedChar?.id, charName: selectedChar?.name, purpose });
     let chatData: any;
     try {
-      // Do not repeat a rejected base64 frame three times. Text-only calls keep
-      // the normal transient-error retries; snapshot calls first try vision once.
+      // Do not repeat rejected base64 frames. Text-only calls keep the normal
+      // transient-error retries; snapshot calls first try vision once.
       chatData = await sendChatRequest(
         requestMessages,
         systemPrompt,
-        userCameraSnapshot ? 0 : 2,
-        userCameraSnapshot ? '视频通话·用户快照' : '语音通话',
+        userCameraSnapshots.length ? 0 : 2,
+        userCameraSnapshots.length ? '视频通话·连续快照' : '语音通话',
       );
     } catch (error) {
-      if (!userCameraSnapshot || !isVisionInputUnsupportedError(error)) throw error;
+      if (!userCameraSnapshots.length || !isVisionInputUnsupportedError(error)) throw error;
       console.warn('[camera-snapshot] provider rejected vision input; retrying text-only:', error);
       addToast('当前模型不支持图片；本轮已自动改为只发文字', 'info');
       chatData = await sendChatRequest(messages, baseSystemPrompt, 2, '视频通话·快照降级为文字');
@@ -2403,6 +2453,11 @@ ${sentencePlan}`;
     const durationMs = durationOverrideMs || estimateSpeechMs(text);
     clearSilentSpeechTimer();
     pendingCueScheduleRef.current = null;
+    assistantPlaybackActiveRef.current = true;
+    clearSttSilenceTimer();
+    sttSessionRef.current?.stop();
+    sttSessionRef.current = null;
+    setIsListening(false);
     setIsAudioPlaying(false);
     setCallState('speaking');
     schedulePerformanceCues(cues, durationMs);
@@ -2410,6 +2465,7 @@ ${sentencePlan}`;
       silentSpeechTimerRef.current = null;
       clearPerformanceCueTimers();
       setCallState(prev => (prev === 'speaking' ? 'listening' : prev));
+      assistantPlaybackActiveRef.current = false;
       if (autoVoiceModeRef.current) window.setTimeout(() => { void startAutoStt(); }, 180);
     }, durationMs);
   };
@@ -2426,6 +2482,11 @@ ${sentencePlan}`;
       return;
     }
     clearSilentSpeechTimer();
+    assistantPlaybackActiveRef.current = true;
+    clearSttSilenceTimer();
+    sttSessionRef.current?.stop();
+    sttSessionRef.current = null;
+    setIsListening(false);
     if (audioUrl !== targetUrl) setAudioUrl(targetUrl);
     // 时间轴在 onPlay 时用真实音频时长调度；拿不到时长再用估计值。
     pendingCueScheduleRef.current = cues?.length ? { cues, fallbackMs: estimatedDurationMs } : null;
@@ -2446,7 +2507,9 @@ ${sentencePlan}`;
   const pauseAudio = () => {
     if (!audioRef.current) return;
     audioRef.current.pause();
-    setCallState('listening');
+    // Pausing is not the end of the assistant's turn. Keep the playback lock
+    // so ambient sound cannot start a new user turn while audio is paused.
+    setCallState('speaking');
   };
   const handleAvatarTouch = (hit: AvatarTouchHit) => {
     const character = selectedChar;
@@ -2558,6 +2621,11 @@ ${sentencePlan}`;
     const input = typedInput || retryInput;
     if (!input) return addToast('说点什么吧', 'info');
     if (['connecting', 'thinking'].includes(callState)) return addToast(`${selectedChar?.name || '对方'}还在想，等一等`, 'info');
+    assistantPlaybackActiveRef.current = true;
+    clearSttSilenceTimer();
+    stopUserSnapshotSampling();
+    const userCameraSnapshotsForTurn = pendingUserSnapshotsRef.current.slice(-3);
+    pendingUserSnapshotsRef.current = [];
     if (isAudioPlaying) pauseAudio();
     const pendingTouchesForTurn = pendingAvatarTouchesRef.current.slice();
     const latestBubble = bubbles[bubbles.length - 1];
@@ -2565,17 +2633,12 @@ ${sentencePlan}`;
       ? latestBubble
       : null;
     const isRetry = !!retryBubble;
-    const userCameraSnapshotForTurn = callMode === 'video' && userCameraMode === 'snapshot'
-      ? captureUserCameraSnapshotContext()
-      : '';
-    if (callMode === 'video' && userCameraMode === 'snapshot' && !userCameraSnapshotForTurn) {
-      addToast('摄像头画面还没准备好，本轮已只发送文字', 'info');
-    }
+    const userCameraSnapshotForTurn = userCameraSnapshotsForTurn[0] || '';
     let newSnapshotRef: string | undefined;
     if (userCameraSnapshotForTurn) {
       try {
         newSnapshotRef = await putImageBlob(dataUrlToBlob(userCameraSnapshotForTurn));
-        trackEvent('保存视频通话单帧快照');
+        trackEvent('保存视频通话代表快照', { count: userCameraSnapshotsForTurn.length });
       } catch (error) {
         console.warn('[camera-snapshot] failed to save the local call-record frame:', error);
         addToast('快照仍会交给角色，但未能写入本地通话记录', 'info');
@@ -2613,6 +2676,7 @@ ${sentencePlan}`;
             callSessionId: currentSessionId,
             callMode,
             ...(newSnapshotRef ? { cameraSnapshotRef: newSnapshotRef } : {}),
+            ...(userCameraSnapshotsForTurn.length ? { cameraSnapshotCount: userCameraSnapshotsForTurn.length } : {}),
             ...(pendingTouchesForTurn.length ? {
               avatarTouches: pendingTouchesForTurn.map(({ zone, part, rawAreas, timestamp }) => ({
                 zone,
@@ -2635,6 +2699,7 @@ ${sentencePlan}`;
             callMode,
             cameraSnapshotRef: newSnapshotRef,
             cameraSnapshotExpired: false,
+            cameraSnapshotCount: userCameraSnapshotsForTurn.length || 1,
           }));
           if (previousSnapshotRef && previousSnapshotRef !== newSnapshotRef) {
             await deleteBlobRef(previousSnapshotRef);
@@ -2663,7 +2728,7 @@ ${sentencePlan}`;
     try {
       setCallState('thinking');
       const reply = prepareCallAssistantReply(
-        await requestAssistantReply(input, userDbId, pendingTouchesForTurn, true, userCameraSnapshotForTurn),
+        await requestAssistantReply(input, userDbId, pendingTouchesForTurn, true, userCameraSnapshotsForTurn),
         callMode === 'video' && selectedChar?.videoCallPerformanceQuality !== 'high',
       );
       if (pendingTouchesForTurn.length) {
@@ -2689,6 +2754,8 @@ ${sentencePlan}`;
         : rawError;
       setErrorMessage(friendlyError);
       setCallState('error');
+      assistantPlaybackActiveRef.current = false;
+      if (autoVoiceModeRef.current) window.setTimeout(() => { void startAutoStt(); }, 180);
       return addToast(`文本回复失败：${friendlyError}`, 'error');
     }
     const assistantBubbleId = `${Date.now()}-a`;
@@ -2730,6 +2797,7 @@ ${sentencePlan}`;
       if (callMode === 'video') {
         playSilentAvatarSpeech(assistantText, turnPerformanceCues);
       } else {
+        assistantPlaybackActiveRef.current = false;
         setCallState('listening');
       }
       if (isSpeakerOn) addToast('语音未配置，先用文字聊吧', 'info');
@@ -3834,6 +3902,7 @@ ${sentencePlan}`;
         muted={!isSpeakerOn}
         onPlay={() => {
           clearSilentSpeechTimer();
+          assistantPlaybackActiveRef.current = true;
           setIsAudioPlaying(true);
           setCallState('speaking');
           const pending = pendingCueScheduleRef.current;
@@ -3846,8 +3915,14 @@ ${sentencePlan}`;
             schedulePerformanceCues(pending.cues, durationMs);
           }
         }}
-        onPause={() => { setIsAudioPlaying(false); clearPerformanceCueTimers(); if (callState === 'speaking') setCallState('listening'); }}
-        onEnded={() => { setIsAudioPlaying(false); clearPerformanceCueTimers(); if (callState === 'speaking') setCallState('listening'); if (autoVoiceModeRef.current) window.setTimeout(() => { void startAutoStt(); }, 180); }}
+        onPause={() => { setIsAudioPlaying(false); clearPerformanceCueTimers(); }}
+        onEnded={() => {
+          setIsAudioPlaying(false);
+          clearPerformanceCueTimers();
+          assistantPlaybackActiveRef.current = false;
+          if (callState === 'speaking') setCallState('listening');
+          if (autoVoiceModeRef.current) window.setTimeout(() => { void startAutoStt(); }, 180);
+        }}
       />
       {showVoiceInputSettings && (
         <div className="absolute inset-0 z-[220] flex items-end bg-black/60 backdrop-blur-sm" onClick={() => setShowVoiceInputSettings(false)}>
