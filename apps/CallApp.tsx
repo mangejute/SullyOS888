@@ -123,6 +123,7 @@ type CallBubble = {
   performance?: AvatarPerformanceDirection;
   performanceTimeline?: AvatarPerformanceCue[];
   cameraSnapshotRef?: string;
+  cameraSnapshotCount?: number;
   cameraSnapshotExpired?: boolean;
 };
 type CallRecord = {
@@ -199,17 +200,21 @@ const buildMiniMaxErrorMessage = (rawMessage: string, traceId?: string): string 
 const formatTime = () => new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' });
 const formatDuration = (seconds: number) => `${String(Math.floor(seconds / 60)).padStart(2, '0')}:${String(seconds % 60).padStart(2, '0')}`;
 const formatTimeByTs = (ts: number) => new Date(ts).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' });
-const CallSnapshotImage: React.FC<{ imageRef?: string; expired?: boolean; compact?: boolean }> = ({ imageRef, expired, compact = false }) => {
+const CallSnapshotImage: React.FC<{ imageRef?: string; expired?: boolean; count?: number; compact?: boolean }> = ({ imageRef, expired, count = 1, compact = false }) => {
   const imageUrl = useBlobRefUrl(imageRef);
   if (!imageUrl) {
+    if (count > 1) return <div className="mt-1.5 text-[11px] text-white/38">已合并发送 {count} 张连续画面</div>;
     return expired ? <div className="mt-1.5 text-[11px] text-white/38">[图片]</div> : null;
   }
   return (
-    <img
-      src={imageUrl}
-      alt="本轮视频通话快照"
-      className={`${compact ? 'ml-auto max-h-28 max-w-[9rem]' : 'max-h-52 max-w-full'} mt-2 rounded-xl border border-white/12 object-cover`}
-    />
+    <div className={`${compact ? 'ml-auto' : ''} mt-2`}>
+      <img
+        src={imageUrl}
+        alt="本轮视频通话快照"
+        className={`${compact ? 'max-h-28 max-w-[9rem]' : 'max-h-52 max-w-full'} rounded-xl border border-white/12 object-cover`}
+      />
+      {count > 1 && <div className="mt-1 text-right text-[10px] text-white/40">已合并发送 {count} 张连续画面</div>}
+    </div>
   );
 };
 const summarizeKeepsakeLine = (transcript: CallBubble[], charName: string) => {
@@ -1479,7 +1484,7 @@ const CallApp: React.FC = () => {
   const startUserSnapshotSampling = () => {
     if (callMode !== 'video' || userCameraMode !== 'snapshot' || userSnapshotSamplingTimerRef.current !== null) return;
     sampleUserCameraSnapshot();
-    userSnapshotSamplingTimerRef.current = window.setInterval(sampleUserCameraSnapshot, 1500);
+    userSnapshotSamplingTimerRef.current = window.setInterval(sampleUserCameraSnapshot, 2000);
   };
   // ── TTS 服务商分发：电话语音也支持 MiniMax ↔ 鱼声二选一 ──
   const isFishTts = resolveTtsProvider(apiConfig) === 'fishaudio';
@@ -1750,6 +1755,9 @@ const CallApp: React.FC = () => {
     sttStartingRef.current = true;
     try {
       setIsListening(true);
+      // Some browsers only emit a final transcript for a long sentence. Start
+      // sampling with recognition so the turn still gets a real sequence of frames.
+      if (callMode === 'video' && userCameraMode === 'snapshot') startUserSnapshotSampling();
       let latest = '';
       const speechConfig = apiConfig.speechRecognition;
       const session = await startStt(speechConfig?.language || 'zh-CN', {
@@ -1763,7 +1771,10 @@ const CallApp: React.FC = () => {
         onFinal: (t) => {
           if (assistantPlaybackActiveRef.current) return;
           latest = t; setDraftInput(t);
-          if (t.trim()) startUserSnapshotSampling();
+          if (t.trim()) {
+            startUserSnapshotSampling();
+            sampleUserCameraSnapshot();
+          }
           if (sttProvider === 'siliconflow') {
             clearSttSilenceTimer();
             sttSubmittingRef.current = true;
@@ -1918,6 +1929,7 @@ const CallApp: React.FC = () => {
           cameraSnapshotRef: typeof m.metadata?.cameraSnapshotRef === 'string' && m.metadata.cameraSnapshotRef
             ? m.metadata.cameraSnapshotRef
             : undefined,
+          cameraSnapshotCount: Number(m.metadata?.cameraSnapshotCount) > 0 ? Number(m.metadata.cameraSnapshotCount) : undefined,
           cameraSnapshotExpired: m.metadata?.cameraSnapshotExpired === true,
           time: formatTimeByTs(m.timestamp),
           timestamp: m.timestamp,
@@ -2647,14 +2659,14 @@ ${sentencePlan}`;
     const nowTs = Date.now();
     const now = formatTime();
     const userBubble: CallBubble = retryBubble
-      ? { ...retryBubble, ...(newSnapshotRef ? { cameraSnapshotRef: newSnapshotRef, cameraSnapshotExpired: false } : {}) }
+      ? { ...retryBubble, ...(newSnapshotRef ? { cameraSnapshotRef: newSnapshotRef, cameraSnapshotCount: userCameraSnapshotsForTurn.length || 1, cameraSnapshotExpired: false } : {}) }
       : {
           id: `${nowTs}-u`,
           role: 'user',
           text: input,
           time: now,
           timestamp: nowTs,
-          ...(newSnapshotRef ? { cameraSnapshotRef: newSnapshotRef } : {}),
+          ...(newSnapshotRef ? { cameraSnapshotRef: newSnapshotRef, cameraSnapshotCount: userCameraSnapshotsForTurn.length || 1 } : {}),
         };
     if (isRetry && newSnapshotRef) {
       setBubbles(previous => previous.map(bubble => bubble.id === userBubble.id ? userBubble : bubble));
@@ -3404,7 +3416,7 @@ ${sentencePlan}`;
           {recordDetail.transcript.map(item => (
             <div key={item.id} className={`rounded-2xl px-3.5 py-2.5 border border-white/10 backdrop-blur-md ${item.role === 'user' ? 'bg-white/[0.07] ml-6' : 'bg-white/[0.03] mr-6'}`}>
               <div className="text-[10px] text-white/45">{item.role === 'user' ? '你' : recordDetail.characterName} · {item.time}</div>
-              {item.role === 'user' && <CallSnapshotImage imageRef={item.cameraSnapshotRef} expired={item.cameraSnapshotExpired} />}
+              {item.role === 'user' && <CallSnapshotImage imageRef={item.cameraSnapshotRef} expired={item.cameraSnapshotExpired} count={item.cameraSnapshotCount} />}
               <div className="text-sm mt-1 leading-relaxed">{(() => {
                 if (item.role !== 'assistant') return item.text;
                 const { display, voiceText } = extractVoiceTag(item.text);
@@ -3774,7 +3786,7 @@ ${sentencePlan}`;
               <span style={bubble.role !== 'user' ? { color: `${accentColor}dd` } : undefined}>{bubble.role === 'user' ? '你' : selectedChar?.name}</span>
               <span>· {bubble.time}</span>
             </div>
-            {bubble.role === 'user' && <CallSnapshotImage imageRef={bubble.cameraSnapshotRef} expired={bubble.cameraSnapshotExpired} compact />}
+            {bubble.role === 'user' && <CallSnapshotImage imageRef={bubble.cameraSnapshotRef} expired={bubble.cameraSnapshotExpired} count={bubble.cameraSnapshotCount} compact />}
             <div className={`${sizeClass} whitespace-pre-wrap leading-relaxed ${bubble.role === 'user' ? 'inline-block text-left text-white/90 bg-white/[0.06] border border-white/10 rounded-2xl rounded-tr-sm px-3 py-1.5' : 'text-white/95'}`}>
               {bubble.role === 'assistant' ? (() => {
                 const { display, voiceText } = extractVoiceTag(line || bubble.text);
@@ -3841,11 +3853,11 @@ ${sentencePlan}`;
           {/* mic */}
           <button onClick={() => setShowInputPanel(prev => !prev)} className={`flex flex-col items-center transition active:scale-95 ${callMode === 'video' ? 'gap-0.5' : 'gap-1.5'}`}>
             <span className={`${callControlSize} rounded-full border flex items-center justify-center backdrop-blur-md transition mx-auto`}
-              style={showInputPanel ? { background: `${accentColor}33`, borderColor: `${accentColor}88`, boxShadow: `0 0 18px ${accentColor}55` } : { background: 'rgba(255,255,255,0.06)', borderColor: 'rgba(255,255,255,0.15)' }}>
-              <Microphone size={22} weight="fill" className="text-white/90" />
+              style={isListening ? { background: `${accentColor}66`, borderColor: `${accentColor}`, boxShadow: `0 0 0 4px ${accentColor}22, 0 0 24px ${accentColor}88` } : showInputPanel ? { background: `${accentColor}33`, borderColor: `${accentColor}88`, boxShadow: `0 0 18px ${accentColor}55` } : { background: 'rgba(255,255,255,0.06)', borderColor: 'rgba(255,255,255,0.15)' }}>
+              <Microphone size={22} weight="fill" className={isListening ? 'text-white animate-pulse' : 'text-white/90'} />
             </span>
-            <span className="text-[10px] text-white/70">麦克风</span>
-            {callMode !== 'video' && <span className="text-[8px] tracking-[0.15em]" style={{ color: showInputPanel ? accentColor : 'rgba(255,255,255,0.3)' }}>{showInputPanel ? 'ON' : 'OFF'}</span>}
+            <span className="text-[10px] text-white/70">{isListening ? '识别中' : '麦克风'}</span>
+            {callMode !== 'video' && <span className="text-[8px] tracking-[0.15em]" style={{ color: isListening || showInputPanel ? accentColor : 'rgba(255,255,255,0.3)' }}>{isListening ? 'LISTENING' : showInputPanel ? 'ON' : 'OFF'}</span>}
           </button>
           {callMode === 'video' && (
             <button onClick={() => setShowUserCameraModePicker(true)} title="选择用户摄像头方式" className="flex flex-col items-center gap-0.5 transition active:scale-95">
@@ -3941,8 +3953,12 @@ ${sentencePlan}`;
           </div>
         </div>
       )}
-      {showSleepMode && (
-        <div className="sully-stage-dark absolute inset-0 z-[220] flex items-end bg-black/55 backdrop-blur-sm" onClick={() => setShowSleepMode(false)}>
+      {(
+        <div
+          className={`sully-stage-dark absolute inset-0 z-[220] flex items-end bg-black/55 backdrop-blur-sm transition-opacity duration-150 ${showSleepMode ? 'opacity-100' : 'pointer-events-none opacity-0'}`}
+          aria-hidden={!showSleepMode}
+          onClick={() => setShowSleepMode(false)}
+        >
           <div className="w-full max-h-[84%] overflow-y-auto rounded-t-[1.75rem] border-t border-white/30 bg-[#171a2a] px-5 pb-[max(1.5rem,var(--safe-bottom))] pt-5 text-white shadow-[0_-18px_50px_rgba(0,0,0,.45)]" onClick={event => event.stopPropagation()}>
             <div className="flex items-start justify-between gap-3"><div><div className="text-[10px] font-semibold tracking-[.2em] text-white/70">SLEEP COMPANION</div><h2 className="mt-1 text-xl font-semibold text-white">🌙 陪睡 · 哄睡</h2></div><button type="button" onClick={() => setShowSleepMode(false)} className="rounded-full border border-white/30 bg-white/[.08] px-3 py-1.5 text-xs font-medium text-white">完成</button></div>
             <p className="mt-3 text-[12px] leading-5 text-white/80">开启后会先让角色轻声陪你说几句，之后保持安静。定时结束控制整通电话；白噪音时长只控制声音，声音结束后电话仍会继续。</p>
