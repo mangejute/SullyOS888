@@ -183,9 +183,10 @@ let preciseTimer: ReturnType<typeof setTimeout> | null = null;
 
 // Main-thread polling acts as the bottom-line safety net in case Service
 // Worker timers get terminated by the browser AND the precise setTimeout gets
-// throttled in a background tab.  20 s is cheap (just a localStorage read)
-// and keeps the worst-case delay under one bucket for hidden-tab throttling.
-const MAIN_THREAD_CHECK_INTERVAL = 20_000;
+// throttled in a background tab.  This is only a localStorage read, not an AI
+// request.  Five minutes is enough for the 30-minute minimum schedule while
+// avoiding an unnecessarily frequent background wake-up.
+const MAIN_THREAD_CHECK_INTERVAL = 5 * 60_000;
 
 function handleSWMessage(e: MessageEvent) {
   if (e.data?.type !== 'proactive-trigger') return;
