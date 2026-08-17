@@ -2832,7 +2832,7 @@ export interface CharacterProfile {
     mode?: 'human' | 'fixed';
     /** 3.0 主动程度，影响角色的判断倾向。 */
     proactiveLevel?: 'low' | 'balanced' | 'high';
-    /** 后台检查间隔（5 分钟至 365 天）；不是保证发送间隔。 */
+    /** 角色 AI 判断间隔（5 分钟至 365 天）；不是保证发送间隔。 */
     intervalMinutes: number;
     /** 本地设备时间的勿扰时段，跨午夜也支持。 */
     quietHours?: { enabled: boolean; start: string; end: string };

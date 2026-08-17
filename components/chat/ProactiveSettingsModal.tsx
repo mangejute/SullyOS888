@@ -161,7 +161,7 @@ const ProactiveSettingsModal: React.FC<ProactiveSettingsModalProps> = ({
                         </div>}
 
                         <div>
-                            <label className="text-sm font-bold text-slate-700 block mb-2">后台检查频率</label>
+                                <label className="text-sm font-bold text-slate-700 block mb-2">角色判断间隔</label>
                             <div className="grid grid-cols-3 gap-2">
                                 {INTERVAL_OPTIONS.map(opt => (
                                     <button
@@ -177,7 +177,7 @@ const ProactiveSettingsModal: React.FC<ProactiveSettingsModalProps> = ({
                                 ))}
                             </div>
                             <label className="text-xs text-slate-500 block mt-3">
-                                自定义间隔（分钟）
+                                自定义判断间隔（分钟）
                                 <input
                                     type="number"
                                     inputMode="numeric"
