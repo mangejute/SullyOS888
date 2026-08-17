@@ -4,7 +4,7 @@ export const CALL_SNAPSHOT_RETAINED_ROUNDS = 3;
 
 export interface ExpiredCallSnapshot {
   messageId: number;
-  ref: string;
+  refs: string[];
 }
 
 /**
@@ -23,13 +23,18 @@ export const findExpiredCallSnapshots = (
       message.role === 'user'
       && message.metadata?.source === 'call'
       && String(message.metadata?.callSessionId || '') === sessionId
-      && typeof message.metadata?.cameraSnapshotRef === 'string'
-      && message.metadata.cameraSnapshotRef.length > 0
+      && (
+        (Array.isArray(message.metadata?.cameraSnapshotRefs) && message.metadata.cameraSnapshotRefs.some((ref: unknown) => typeof ref === 'string' && ref.length > 0))
+        || (typeof message.metadata?.cameraSnapshotRef === 'string' && message.metadata.cameraSnapshotRef.length > 0)
+      )
     ))
     .sort((a, b) => b.timestamp - a.timestamp || b.id - a.id)
     .slice(retainedCount)
     .map(message => ({
       messageId: message.id,
-      ref: message.metadata.cameraSnapshotRef,
+      refs: Array.from(new Set([
+        ...(Array.isArray(message.metadata?.cameraSnapshotRefs) ? message.metadata.cameraSnapshotRefs : []),
+        ...(typeof message.metadata?.cameraSnapshotRef === 'string' ? [message.metadata.cameraSnapshotRef] : []),
+      ].filter((ref): ref is string => typeof ref === 'string' && ref.length > 0))),
     }));
 };
