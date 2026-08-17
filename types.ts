@@ -2828,7 +2828,16 @@ export interface CharacterProfile {
   // 主动消息配置
   proactiveConfig?: {
     enabled: boolean;
-    intervalMinutes: number; // 30, 60, 120, 240, etc.
+    /** 3.0 human = 由角色按人设决定是否此刻联系；fixed = 每次心跳都生成。 */
+    mode?: 'human' | 'fixed';
+    /** 3.0 主动程度，影响角色的判断倾向与每日上限默认值。 */
+    proactiveLevel?: 'low' | 'balanced' | 'high';
+    /** 后台检查心跳间隔；不是保证发送间隔。 */
+    intervalMinutes: number;
+    /** 本地设备时间的勿扰时段，跨午夜也支持。 */
+    quietHours?: { enabled: boolean; start: string; end: string };
+    /** 每个本地日最多真正发出的主动消息数；0 表示不限制。 */
+    maxDailyMessages?: number;
     useSecondaryApi?: boolean;
     secondaryApi?: {
       baseUrl: string;

@@ -12,7 +12,7 @@ import { SULLY_DEFAULT_AVATAR_URL, shouldMigrateSullyAvatar } from '../utils/sul
 import { exportStoryTheaterAppearanceSetting, restoreStoryTheaterAppearanceSetting } from '../utils/storyTheaterBackup';
 import { createV2ArrayFieldWriter, writeV2Backup, assembleV2Backup, type BackupManifest, type ZipFileWriter, type ZipFileReader } from '../utils/backupFormat';
 import { encodeVectorsForBackup, encodeVectorsForBackupChunked } from '../utils/memoryPalace/db';
-import { ProactiveChat } from '../utils/proactiveChat';
+import { ProactiveChat, getDailyProactiveSendCount, isWithinProactiveQuietHours, recordDailyProactiveSend } from '../utils/proactiveChat';
 import { VRScheduler } from '../utils/vrWorld/scheduler';
 import { runVRSession } from '../utils/vrWorld/runSession';
 import { VR_DEFAULT_INTERVAL_MIN } from '../utils/vrWorld/constants';
@@ -2199,6 +2199,18 @@ export const OSProvider: React.FC<{ children: React.ReactNode }> = ({ children }
 
           // Determine which API to use
           const pCfg = char.proactiveConfig;
+          const proactiveNow = new Date();
+          const maxDaily = Math.max(0, Number(pCfg?.maxDailyMessages) || 0);
+          if (isWithinProactiveQuietHours(proactiveNow, pCfg?.quietHours)) {
+              drainQueuedProactive();
+              console.log(`🔕 [Proactive/3.0] Skipped for ${char.name}: 勿扰时段`);
+              return;
+          }
+          if (maxDaily > 0 && getDailyProactiveSendCount(charId, proactiveNow) >= maxDaily) {
+              drainQueuedProactive();
+              console.log(`🔕 [Proactive/3.0] Skipped for ${char.name}: 已达到每日上限 ${maxDaily}`);
+              return;
+          }
           const useSecondary = pCfg?.useSecondaryApi && pCfg.secondaryApi?.baseUrl;
           const api = useSecondary ? pCfg!.secondaryApi! : currentApiConfig;
           if (!api.baseUrl) {
@@ -2241,11 +2253,16 @@ export const OSProvider: React.FC<{ children: React.ReactNode }> = ({ children }
               const justMetOffline = lastRealMsgRaw?.metadata?.source === 'date'
                   && (now.getTime() - lastRealMsgRaw.timestamp) < DATE_AFTERGLOW_MS;
 
+              const mode = pCfg?.mode ?? 'human';
+              const level = pCfg?.proactiveLevel ?? 'balanced';
+              const humanDecisionHint = mode === 'human'
+                  ? `这是小雨手机 3.0 的一次后台检查，不代表你必须发消息。你的主动程度是“${level === 'low' ? '少' : level === 'high' ? '频繁' : '适中'}”：请结合你的人设、自己的生活、关系状态、最近聊天和当前时间判断现在是否真的想联系${userName}。如果此刻没有自然的念头、刚聊过、或打扰不合适，只输出 [PROACTIVE_SKIP]，不要解释；如果想联系，只发一两句像真人随手发出的内容，不要提到系统、检查、主动消息或这个标记。`
+                  : `这是旧版固定主动消息模式，请直接自然地给${userName}发一两句，不要提到系统或主动消息。`;
               const hintContent = justMetOffline
                       ? `[系统提示（非${userName}发言）: 现在是 ${timeStr}。你和${userName}刚刚在线下见过面（如果上下文里有标着 [约会] 的内容，那就是你们见面时发生的事），现在你们暂时分开了，你拿起手机想给${userName}发条消息。请基于刚才的见面来发——可以回味见面里的某个细节、补一句当时没说出口的话、关心${userName}到家了没，或者就是刚分开就有点想念。绝对不要表现得好像很久没联系，更不要对刚才的见面毫不知情。一两句话就好。]`
-                      : `[系统提示（非${userName}发言）: 现在是 ${timeStr}。${timeSinceUser ? `${userName}已经 ${timeSinceUser} 没有找你说话了。` : ''}这是系统给你的一次主动发消息机会——${userName}并没有在跟你说话，是你想主动找${userName}。像真人一样随意地发条消息吧，比如：随手拍了张照片想分享、刚看到个有趣的事想说、突然想到个冷知识、吐槽今天的天气/食物/见闻、或者就是单纯想找${userName}聊几句。不要刻意，不要像在"汇报近况"，就像你真的拿起手机随手发了条消息。一两句话就好。${timeSinceUser && parseInt(timeSinceUser) > 2 ? `（${userName}挺久没找你了，你也可以表达想念、好奇${userName}在干嘛、或者小小地抱怨一下。）` : ''}]`;
+                      : `[系统提示（非${userName}发言）: 现在是 ${timeStr}。${humanDecisionHint}${timeSinceUser ? ` ${userName}已经 ${timeSinceUser} 没有找你说话了。` : ''}]`;
 
-              await DB.saveMessage({
+              const proactiveHintId = await DB.saveMessage({
                   charId,
                   role: 'user',
                   type: 'text',
@@ -2357,6 +2374,12 @@ export const OSProvider: React.FC<{ children: React.ReactNode }> = ({ children }
               aiContent = aiContent.replace(/\[\d{4}[-/年]\d{1,2}[-/月]\d{1,2}.*?\]/g, '');
               aiContent = aiContent.replace(/^[\w一-龥]+:\s*/, '');
               aiContent = aiContent.replace(/\s*\[(?:聊天|通话|约会)\]\s*/g, '\n').trim();
+
+              if (mode === 'human' && /^\s*\[PROACTIVE_SKIP\]\s*$/i.test(aiContent)) {
+                  await DB.deleteMessage(proactiveHintId);
+                  console.log(`[Proactive/3.0] ${char.name} decided not to send`);
+                  return;
+              }
 
               aiContent = normalizeProactiveAiContent(aiContent);
 
@@ -2541,6 +2564,7 @@ export const OSProvider: React.FC<{ children: React.ReactNode }> = ({ children }
               }
 
               if (offset > 0) {
+                  recordDailyProactiveSend(charId);
                   const previewSource = savedPreviewChunks.join(' ').trim();
                   const preview = previewSource.replace(/\s+/g, ' ').trim().slice(0, 120)
                       || `${char.name} sent a proactive message`;

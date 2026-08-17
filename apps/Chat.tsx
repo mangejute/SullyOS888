@@ -3966,7 +3966,15 @@ const Chat: React.FC = () => {
                                     '没设',
                                 ),
                             });
-                            addToast(`已启动主动消息，每 ${config.intervalMinutes >= 60 ? (config.intervalMinutes / 60) + ' 小时' : config.intervalMinutes + ' 分钟'}发送一次`, 'success');
+                            const intervalLabel = config.intervalMinutes >= 60
+                                ? `${config.intervalMinutes / 60} 小时`
+                                : `${config.intervalMinutes} 分钟`;
+                            addToast(
+                                config.mode === 'fixed'
+                                    ? `已启动固定主动消息，每 ${intervalLabel}生成一次`
+                                    : `已启动真人主动消息，后台每 ${intervalLabel}检查一次`,
+                                'success',
+                            );
                         } else {
                             stopProactiveChat();
                             addToast('已关闭主动消息', 'info');
