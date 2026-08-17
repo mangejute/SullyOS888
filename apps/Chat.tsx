@@ -3962,7 +3962,7 @@ const Chat: React.FC = () => {
                             trackEvent('启动主动消息', {
                                 intervalMinutes: presetOrCustom(
                                     String(config.intervalMinutes),
-                                    ['30', '60', '120', '240', '480', '720', '1440'],
+                                    ['5', '15', '30', '60', '120', '240', '480', '720', '1440'],
                                     '没设',
                                 ),
                             });

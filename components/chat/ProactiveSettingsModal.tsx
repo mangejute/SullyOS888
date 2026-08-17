@@ -2,6 +2,11 @@
 import React, { useState, useEffect } from 'react';
 import Modal from '../os/Modal';
 import { CharacterProfile } from '../../types';
+import {
+    normalizeProactiveIntervalMinutes,
+    PROACTIVE_MAX_INTERVAL_MINUTES,
+    PROACTIVE_MIN_INTERVAL_MINUTES,
+} from '../../utils/proactiveChat';
 
 interface ProactiveSettingsModalProps {
     isOpen: boolean;
@@ -13,6 +18,8 @@ interface ProactiveSettingsModalProps {
 }
 
 const INTERVAL_OPTIONS = [
+    { label: '5 分钟', value: 5 },
+    { label: '15 分钟', value: 15 },
     { label: '30 分钟', value: 30 },
     { label: '1 小时', value: 60 },
     { label: '2 小时', value: 120 },
@@ -65,11 +72,12 @@ const ProactiveSettingsModal: React.FC<ProactiveSettingsModalProps> = ({
     }, [isOpen, char.id]);
 
     const handleSave = () => {
+        const normalizedInterval = normalizeProactiveIntervalMinutes(interval);
         onSave({
             enabled,
             mode,
             proactiveLevel,
-            intervalMinutes: interval,
+            intervalMinutes: normalizedInterval,
             quietHours: { enabled: quietEnabled, start: quietStart, end: quietEnd },
             useSecondaryApi: useSecondaryApi && !!secUrl,
             secondaryApi: useSecondaryApi && secUrl ? {
@@ -106,7 +114,7 @@ const ProactiveSettingsModal: React.FC<ProactiveSettingsModalProps> = ({
             <div className="space-y-5">
                 {/* Description */}
                 <p className="text-xs text-slate-400 leading-relaxed">
-                    小雨手机 3.0 会沿用系统后台和通知。后台只是定期叫醒角色，{char.name} 会根据自己的人设、最近聊天和当下生活判断要不要真的来找你，不会机械报时。
+                    小雨手机 3.0 会沿用系统后台和通知。后台只是定期叫醒角色，{char.name} 会根据自己的人设、最近聊天和当下生活判断要不要真的来找你，不会机械报时。间隔最短 5 分钟、最长 365 天，中间可以自己输入分钟数。
                 </p>
 
                 {/* Enable Toggle */}
@@ -168,7 +176,20 @@ const ProactiveSettingsModal: React.FC<ProactiveSettingsModalProps> = ({
                                     </button>
                                 ))}
                             </div>
-                            <p className="text-[11px] text-slate-400 mt-2">到这个时间，后台才会唤醒角色判断一次“现在想不想联系”。这是判断间隔，不是发送间隔；角色也可能选择不发。系统内部的本地兜底检查不调用 AI。</p>
+                            <label className="text-xs text-slate-500 block mt-3">
+                                自定义间隔（分钟）
+                                <input
+                                    type="number"
+                                    inputMode="numeric"
+                                    min={PROACTIVE_MIN_INTERVAL_MINUTES}
+                                    max={PROACTIVE_MAX_INTERVAL_MINUTES}
+                                    step={1}
+                                    value={interval}
+                                    onChange={e => setInterval_(normalizeProactiveIntervalMinutes(Number(e.target.value)))}
+                                    className="mt-1 w-full px-3 py-2 bg-white rounded-xl text-sm border border-slate-200 focus:border-violet-300 focus:outline-none transition-colors"
+                                />
+                            </label>
+                            <p className="text-[11px] text-slate-400 mt-2">本地每 5 分钟只检查时间，不调用 AI。到你设定的间隔后，才会调用一次 AI 判断“现在想不想联系”；这是判断间隔，不是发送间隔，角色也可能选择不发。</p>
                         </div>
 
                         <div className="pt-2 border-t border-slate-100">

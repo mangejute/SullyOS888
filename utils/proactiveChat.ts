@@ -26,7 +26,7 @@ import {
 
 export interface ProactiveSchedule {
   charId: string;
-  intervalMs: number; // must be multiple of 30 * 60 * 1000
+  intervalMs: number; // at least 5 * 60 * 1000
 }
 
 export interface ProactiveQuietHours {
@@ -42,6 +42,20 @@ const STORAGE_KEY = 'proactive_schedules';
 const LAST_FIRE_KEY = 'proactive_last_fire_map';
 const LEGACY_STORAGE_KEY = 'proactive_schedule';
 const LEGACY_LAST_FIRE_KEY = 'proactive_last_fire';
+
+/** User-configurable 3.0 interval bounds. The value is stored in minutes. */
+export const PROACTIVE_MIN_INTERVAL_MINUTES = 5;
+export const PROACTIVE_MAX_INTERVAL_MINUTES = 365 * 24 * 60;
+
+export function normalizeProactiveIntervalMinutes(value: number, fallback = 60): number {
+  const parsed = Number(value);
+  const safeFallback = Number.isFinite(fallback) ? fallback : 60;
+  const candidate = Number.isFinite(parsed) ? parsed : safeFallback;
+  return Math.min(
+    PROACTIVE_MAX_INTERVAL_MINUTES,
+    Math.max(PROACTIVE_MIN_INTERVAL_MINUTES, Math.round(candidate)),
+  );
+}
 
 function loadSchedules(): ProactiveScheduleMap {
   try {
@@ -157,9 +171,9 @@ let preciseTimer: ReturnType<typeof setTimeout> | null = null;
 
 // Main-thread polling acts as the bottom-line safety net in case Service
 // Worker timers get terminated by the browser AND the precise setTimeout gets
-// throttled in a background tab.  This is only a localStorage read, not an AI
-// request.  Five minutes is enough for the 30-minute minimum schedule while
-// avoiding an unnecessarily frequent background wake-up.
+// throttled in a background tab. This is only a localStorage read, not an AI
+// request. Five minutes matches the smallest user interval while avoiding an
+// unnecessarily frequent background wake-up.
 const MAIN_THREAD_CHECK_INTERVAL = 5 * 60_000;
 
 function handleSWMessage(e: MessageEvent) {
@@ -323,7 +337,7 @@ export const ProactiveChat = {
    * Start or update one character's proactive schedule.
    */
   start(charId: string, intervalMinutes: number) {
-    const clamped = Math.max(30, Math.round(intervalMinutes / 30) * 30);
+    const clamped = normalizeProactiveIntervalMinutes(intervalMinutes);
     const intervalMs = clamped * 60 * 1000;
     const schedules = loadSchedules();
     schedules[charId] = { charId, intervalMs };
