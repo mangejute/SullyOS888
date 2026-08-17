@@ -91,7 +91,7 @@ const ProactiveSettingsModal: React.FC<ProactiveSettingsModalProps> = ({
     };
 
     return (
-        <Modal isOpen={isOpen} title="主动消息" onClose={onClose} footer={
+        <Modal isOpen={isOpen} title="主动消息 3.0" onClose={onClose} footer={
             <>
                 <button onClick={onClose} className="flex-1 py-3 bg-slate-100 text-slate-500 font-bold rounded-2xl active:scale-95 transition-transform">
                     取消

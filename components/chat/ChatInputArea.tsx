@@ -829,7 +829,7 @@ const ChatInputArea: React.FC<ChatInputAreaProps> = ({
                                 <div className={`w-14 h-14 rounded-2xl flex items-center justify-center shadow-sm border ${isProactiveActive ? (isDiscordStyle ? 'bg-violet-500/15 text-violet-300 border-violet-400/30' : 'bg-violet-50 text-violet-500 border-violet-200') : (isDiscordStyle ? 'bg-slate-800 text-slate-400 border-white/10' : 'bg-slate-50 text-slate-400 border-slate-100')}`}>
                                     <ChatCircleDots className="w-6 h-6" weight="bold" />
                                 </div>)}
-                                <span className="text-xs font-bold">主动消息</span>
+                                <span className="text-xs font-bold">主动消息 3.0</span>
                                 {isProactiveActive && <span className={`absolute top-0 right-1 w-2.5 h-2.5 rounded-full border-2 ${isDiscordStyle ? 'bg-violet-400 border-slate-900' : 'bg-violet-500 border-white'}`} />}
                             </button>
 
@@ -839,7 +839,7 @@ const ChatInputArea: React.FC<ChatInputAreaProps> = ({
                                 <div className={`w-14 h-14 rounded-2xl flex items-center justify-center shadow-sm border ${isDiscordStyle ? 'bg-slate-800 text-indigo-300 border-indigo-400/20' : 'bg-indigo-50 text-indigo-500 border-indigo-100'}`}>
                                     <Alarm className="w-6 h-6" weight="bold" />
                                 </div>)}
-                                <span className="text-xs font-bold">主动消息 2.0</span>
+                                <span className="text-xs font-bold">主动消息 2.0（云端）</span>
                             </button>
 
                             <button
