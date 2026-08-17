@@ -42,7 +42,6 @@ const STORAGE_KEY = 'proactive_schedules';
 const LAST_FIRE_KEY = 'proactive_last_fire_map';
 const LEGACY_STORAGE_KEY = 'proactive_schedule';
 const LEGACY_LAST_FIRE_KEY = 'proactive_last_fire';
-const DAILY_SEND_KEY = 'proactive_daily_send_map';
 
 function loadSchedules(): ProactiveScheduleMap {
   try {
@@ -122,18 +121,6 @@ function removeLastFireTime(charId: string) {
   saveLastFireTimes(lastFireMap);
 }
 
-interface DailySendRecord { day: string; count: number }
-
-function loadDailySendMap(): Record<string, DailySendRecord> {
-  try {
-    const parsed = JSON.parse(localStorage.getItem(DAILY_SEND_KEY) || '{}');
-    return parsed && typeof parsed === 'object' ? parsed : {};
-  } catch { return {}; }
-}
-
-const localDay = (now = new Date()): string =>
-  `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
-
 export const isWithinProactiveQuietHours = (
   now: Date,
   quietHours?: ProactiveQuietHours,
@@ -148,19 +135,6 @@ export const isWithinProactiveQuietHours = (
   if (start == null || end == null || start === end) return false;
   const minute = now.getHours() * 60 + now.getMinutes();
   return start < end ? minute >= start && minute < end : minute >= start || minute < end;
-};
-
-export const getDailyProactiveSendCount = (charId: string, now = new Date()): number => {
-  const record = loadDailySendMap()[charId];
-  return record?.day === localDay(now) ? Math.max(0, record.count || 0) : 0;
-};
-
-export const recordDailyProactiveSend = (charId: string, now = new Date()): void => {
-  const map = loadDailySendMap();
-  const day = localDay(now);
-  const old = map[charId];
-  map[charId] = { day, count: old?.day === day ? old.count + 1 : 1 };
-  localStorage.setItem(DAILY_SEND_KEY, JSON.stringify(map));
 };
 
 function postToSW(msg: any) {

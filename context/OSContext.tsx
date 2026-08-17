@@ -12,7 +12,7 @@ import { SULLY_DEFAULT_AVATAR_URL, shouldMigrateSullyAvatar } from '../utils/sul
 import { exportStoryTheaterAppearanceSetting, restoreStoryTheaterAppearanceSetting } from '../utils/storyTheaterBackup';
 import { createV2ArrayFieldWriter, writeV2Backup, assembleV2Backup, type BackupManifest, type ZipFileWriter, type ZipFileReader } from '../utils/backupFormat';
 import { encodeVectorsForBackup, encodeVectorsForBackupChunked } from '../utils/memoryPalace/db';
-import { ProactiveChat, getDailyProactiveSendCount, isWithinProactiveQuietHours, recordDailyProactiveSend } from '../utils/proactiveChat';
+import { ProactiveChat, isWithinProactiveQuietHours } from '../utils/proactiveChat';
 import { VRScheduler } from '../utils/vrWorld/scheduler';
 import { runVRSession } from '../utils/vrWorld/runSession';
 import { VR_DEFAULT_INTERVAL_MIN } from '../utils/vrWorld/constants';
@@ -2200,15 +2200,9 @@ export const OSProvider: React.FC<{ children: React.ReactNode }> = ({ children }
           // Determine which API to use
           const pCfg = char.proactiveConfig;
           const proactiveNow = new Date();
-          const maxDaily = Math.max(0, Number(pCfg?.maxDailyMessages) || 0);
           if (isWithinProactiveQuietHours(proactiveNow, pCfg?.quietHours)) {
               drainQueuedProactive();
               console.log(`🔕 [Proactive/3.0] Skipped for ${char.name}: 勿扰时段`);
-              return;
-          }
-          if (maxDaily > 0 && getDailyProactiveSendCount(charId, proactiveNow) >= maxDaily) {
-              drainQueuedProactive();
-              console.log(`🔕 [Proactive/3.0] Skipped for ${char.name}: 已达到每日上限 ${maxDaily}`);
               return;
           }
           const useSecondary = pCfg?.useSecondaryApi && pCfg.secondaryApi?.baseUrl;
@@ -2564,7 +2558,6 @@ export const OSProvider: React.FC<{ children: React.ReactNode }> = ({ children }
               }
 
               if (offset > 0) {
-                  recordDailyProactiveSend(charId);
                   const previewSource = savedPreviewChunks.join(' ').trim();
                   const preview = previewSource.replace(/\s+/g, ' ').trim().slice(0, 120)
                       || `${char.name} sent a proactive message`;

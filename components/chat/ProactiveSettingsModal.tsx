@@ -39,7 +39,6 @@ const ProactiveSettingsModal: React.FC<ProactiveSettingsModalProps> = ({
     const [quietEnabled, setQuietEnabled] = useState(saved?.quietHours?.enabled ?? true);
     const [quietStart, setQuietStart] = useState(saved?.quietHours?.start ?? '23:00');
     const [quietEnd, setQuietEnd] = useState(saved?.quietHours?.end ?? '08:00');
-    const [maxDaily, setMaxDaily] = useState(String(saved?.maxDailyMessages ?? 0));
     const [useSecondaryApi, setUseSecondaryApi] = useState(saved?.useSecondaryApi ?? false);
     const [secUrl, setSecUrl] = useState(saved?.secondaryApi?.baseUrl ?? '');
     const [secKey, setSecKey] = useState(saved?.secondaryApi?.apiKey ?? '');
@@ -57,7 +56,6 @@ const ProactiveSettingsModal: React.FC<ProactiveSettingsModalProps> = ({
             setQuietEnabled(s?.quietHours?.enabled ?? true);
             setQuietStart(s?.quietHours?.start ?? '23:00');
             setQuietEnd(s?.quietHours?.end ?? '08:00');
-            setMaxDaily(String(s?.maxDailyMessages ?? 0));
             setUseSecondaryApi(s?.useSecondaryApi ?? false);
             setSecUrl(s?.secondaryApi?.baseUrl ?? '');
             setSecKey(s?.secondaryApi?.apiKey ?? '');
@@ -73,7 +71,6 @@ const ProactiveSettingsModal: React.FC<ProactiveSettingsModalProps> = ({
             proactiveLevel,
             intervalMinutes: interval,
             quietHours: { enabled: quietEnabled, start: quietStart, end: quietEnd },
-            maxDailyMessages: Math.max(0, Number(maxDaily) || 0),
             useSecondaryApi: useSecondaryApi && !!secUrl,
             secondaryApi: useSecondaryApi && secUrl ? {
                 baseUrl: secUrl,
@@ -171,7 +168,7 @@ const ProactiveSettingsModal: React.FC<ProactiveSettingsModalProps> = ({
                                     </button>
                                 ))}
                             </div>
-                            <p className="text-[11px] text-slate-400 mt-2">这只是后台问一次“现在想不想联系”，不是保证每隔这么久一定发消息。</p>
+                            <p className="text-[11px] text-slate-400 mt-2">到这个时间，后台才会唤醒角色判断一次“现在想不想联系”。这是判断间隔，不是发送间隔；角色也可能选择不发。系统内部的本地兜底检查不调用 AI。</p>
                         </div>
 
                         <div className="pt-2 border-t border-slate-100">
@@ -179,8 +176,6 @@ const ProactiveSettingsModal: React.FC<ProactiveSettingsModalProps> = ({
                             {quietEnabled && <div className="grid grid-cols-2 gap-2"><label className="text-xs text-slate-500">开始<input type="time" value={quietStart} onChange={e => setQuietStart(e.target.value)} className="mt-1 w-full px-3 py-2 bg-white rounded-xl text-sm border border-slate-200" /></label><label className="text-xs text-slate-500">结束<input type="time" value={quietEnd} onChange={e => setQuietEnd(e.target.value)} className="mt-1 w-full px-3 py-2 bg-white rounded-xl text-sm border border-slate-200" /></label></div>}
                             <p className="text-[11px] text-slate-400 mt-2">设备本地时间生效，支持跨午夜，例如 23:00 到 08:00。</p>
                         </div>
-
-                        <div className="pt-2 border-t border-slate-100"><label className="text-sm font-bold text-slate-700 block mb-1">每日最多主动消息</label><input type="number" min={0} max={99} value={maxDaily} onChange={e => setMaxDaily(e.target.value)} placeholder="0 = 不限制" className="w-full px-3 py-2 bg-white rounded-xl text-sm border border-slate-200" /><p className="text-[11px] text-slate-400 mt-1">只统计真正发出的消息，填 0 不限制。</p></div>
 
                         {/* Secondary API Toggle */}
                         <div className="pt-2 border-t border-slate-100">
