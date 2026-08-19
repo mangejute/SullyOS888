@@ -149,13 +149,15 @@ const ChatInputArea: React.FC<ChatInputAreaProps> = ({
         onSend();
     };
 
+    // 分享文案通常会带标题、推荐语和链接，不能只按“输入值等于 URL”判断。
+    const hasXhsShareUrl = (value: string) => /(?:https?:\/\/)?(?:www\.)?(?:xiaohongshu\.com|xhslink\.(?:com|cn)|rednote\.com)\b/i.test(value);
+
     const submitLinkShare = () => {
         const url = linkUrl.trim();
         if (!url) return;
-        if (!/(xiaohongshu\.com|xhslink\.(com|cn)|rednote\.com)/i.test(url)) return;
+        if (!hasXhsShareUrl(url)) return;
         setLinkComposerOpen(false);
         setLinkUrl('');
-        setShowPanel('none');
         if (onLinkShare) void onLinkShare(url);
         else {
             setInput(url);
@@ -450,6 +452,46 @@ const ChatInputArea: React.FC<ChatInputAreaProps> = ({
 
     return (
         <>
+        {linkComposerOpen && (
+            <div className="fixed inset-0 z-[70] flex items-center justify-center p-5 bg-slate-950/35 backdrop-blur-[2px]" role="dialog" aria-modal="true" aria-label="分享小红书链接">
+                <div className="w-full max-w-sm rounded-2xl bg-white shadow-[0_20px_60px_rgba(15,23,42,0.28)] overflow-hidden">
+                    <div className="flex items-start justify-between px-5 pt-5 pb-4 border-b border-slate-100">
+                        <div>
+                            <h2 className="text-[17px] font-bold text-slate-800">分享链接</h2>
+                            <p className="mt-1 text-xs leading-relaxed text-slate-400">把小红书分享文案或链接发给角色</p>
+                        </div>
+                        <button type="button" aria-label="关闭链接分享" onClick={() => setLinkComposerOpen(false)} className="w-9 h-9 -mt-1 -mr-1 rounded-full bg-slate-100 text-slate-500 flex items-center justify-center active:scale-95">
+                            <X className="w-5 h-5" weight="bold" />
+                        </button>
+                    </div>
+                    <div className="p-5 space-y-4">
+                        <div className="flex gap-2">
+                            <button type="button" className="flex-1 rounded-xl border border-rose-200 bg-rose-50 text-rose-600 py-2.5 text-sm font-bold flex items-center justify-center gap-2">
+                                <span aria-hidden>📕</span> 小红书
+                            </button>
+                            <button type="button" disabled className="flex-1 rounded-xl border border-slate-200 bg-slate-50 text-slate-300 py-2.5 text-sm font-bold">其他平台</button>
+                        </div>
+                        <textarea
+                            autoFocus
+                            rows={5}
+                            value={linkUrl}
+                            onChange={e => setLinkUrl(e.target.value)}
+                            onKeyDown={e => { if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) { e.preventDefault(); submitLinkShare(); } }}
+                            placeholder="粘贴小红书分享文案或链接"
+                            className="w-full resize-none rounded-xl border border-slate-200 bg-slate-50 px-3.5 py-3 text-sm leading-relaxed text-slate-700 outline-none focus:border-rose-300 focus:bg-white focus:ring-2 focus:ring-rose-100"
+                        />
+                        <button
+                            type="button"
+                            onClick={submitLinkShare}
+                            disabled={!hasXhsShareUrl(linkUrl.trim())}
+                            className="w-full rounded-xl bg-rose-500 py-3 text-sm font-bold text-white shadow-sm active:scale-[0.99] disabled:bg-slate-200 disabled:text-slate-400 disabled:shadow-none"
+                        >
+                            <PaperPlaneTilt className="inline-block w-4 h-4 mr-1.5" weight="fill" />发送给角色
+                        </button>
+                    </div>
+                </div>
+            </div>
+        )}
         {emojiSelectionMode && (
             <div className={`fixed inset-0 z-[-1] ${isPixelStyle ? 'bg-[#eadfce]/70 backdrop-blur-[2px]' : isDiscordStyle ? 'bg-slate-950/70 backdrop-blur-[2px]' : 'bg-white/60 backdrop-blur-[2px]'}`} />
         )}
@@ -753,41 +795,6 @@ const ChatInputArea: React.FC<ChatInputAreaProps> = ({
                             onTouchEnd={handleActionsSwipeEnd}
                             onClickCapture={handleActionsClickCapture}
                         >
-                          {linkComposerOpen && (
-                            <div className="absolute inset-0 z-10 bg-white/95 backdrop-blur-xl p-3 flex flex-col gap-3">
-                              <div className="flex items-center justify-between">
-                                <div>
-                                  <div className="text-sm font-bold text-slate-800">分享链接</div>
-                                  <div className="text-[10px] text-slate-400 mt-0.5">先支持小红书，角色会读取笔记内容</div>
-                                </div>
-                                <button type="button" aria-label="关闭链接分享" onClick={() => setLinkComposerOpen(false)} className="w-7 h-7 rounded-full bg-slate-100 text-slate-500 flex items-center justify-center">
-                                  <X className="w-4 h-4" weight="bold" />
-                                </button>
-                              </div>
-                              <div className="flex gap-2">
-                                <button type="button" className="flex-1 rounded-xl border border-rose-200 bg-rose-50 text-rose-600 py-2 text-xs font-bold flex items-center justify-center gap-1.5">
-                                  <span aria-hidden>📕</span> 小红书
-                                </button>
-                                <button type="button" disabled className="flex-1 rounded-xl border border-slate-200 bg-slate-50 text-slate-300 py-2 text-xs font-bold">其他平台</button>
-                              </div>
-                              <input
-                                autoFocus
-                                value={linkUrl}
-                                onChange={e => setLinkUrl(e.target.value)}
-                                onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); submitLinkShare(); } }}
-                                placeholder="粘贴小红书链接"
-                                className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-xs text-slate-700 outline-none focus:border-rose-300 focus:ring-2 focus:ring-rose-100"
-                              />
-                              <button
-                                type="button"
-                                onClick={submitLinkShare}
-                                disabled={!/(xiaohongshu\\.com|xhslink\\.(com|cn)|rednote\\.com)/i.test(linkUrl.trim())}
-                                className="w-full rounded-xl bg-rose-500 py-2.5 text-xs font-bold text-white shadow-sm disabled:bg-slate-200 disabled:text-slate-400"
-                              >
-                                <PaperPlaneTilt className="inline-block w-3.5 h-3.5 mr-1" weight="fill" />发送给角色
-                              </button>
-                            </div>
-                          )}
                           <div className="sully-action-list px-3 py-1">
                             {/* 主动消息 3.0 放在功能菜单第一项，方便直接进入设置。 */}
                             <button onClick={() => onPanelAction('proactive')} className={`flex flex-col items-center gap-2 active:scale-95 transition-transform relative ${acnh ? 'text-[#725d42]' : isDiscordStyle ? 'text-slate-200' : 'text-slate-600'}`}>
@@ -798,7 +805,7 @@ const ChatInputArea: React.FC<ChatInputAreaProps> = ({
                                 <span className="text-xs font-bold">主动消息 3.0</span>
                                 {isProactiveActive && <span className={`absolute top-0 right-1 w-2.5 h-2.5 rounded-full border-2 ${isDiscordStyle ? 'bg-violet-400 border-slate-900' : 'bg-violet-500 border-white'}`} />}
                             </button>
-                            <button onClick={() => setLinkComposerOpen(true)} className={`flex flex-col items-center gap-2 active:scale-95 transition-transform ${acnh ? 'text-[#725d42]' : isDiscordStyle ? 'text-slate-200' : 'text-slate-600'}`}>
+                            <button onClick={() => { setShowPanel('none'); setLinkComposerOpen(true); }} className={`flex flex-col items-center gap-2 active:scale-95 transition-transform ${acnh ? 'text-[#725d42]' : isDiscordStyle ? 'text-slate-200' : 'text-slate-600'}`}>
                                 <div className="w-14 h-14 rounded-2xl flex items-center justify-center shadow-sm border bg-rose-50 text-rose-500 border-rose-100">
                                     <LinkSimple className="w-6 h-6" weight="bold" />
                                 </div>
