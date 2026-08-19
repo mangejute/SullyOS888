@@ -2234,6 +2234,9 @@ const MessageItem = React.memo(({
     // --- XHS Card Rendering (小红书笔记卡片) ---
     if (m.type === 'xhs_card' && m.metadata?.xhsNote) {
         const note = m.metadata.xhsNote;
+        const noteImages = Array.isArray(note.images)
+            ? note.images.filter((url: any) => typeof url === 'string' && url.trim()).slice(0, 9)
+            : [];
         const openXhsNote = () => {
             const nid = note.noteId || note.note_id || note.id;
             if (!nid) return;
@@ -2281,6 +2284,22 @@ const MessageItem = React.memo(({
                         <span className="text-white/80 text-xs font-medium tracking-wide">小红书笔记</span>
                     </div>
                 )}
+                {noteImages.length > 1 && (
+                    <div className="flex gap-1.5 px-3 pt-2 overflow-hidden">
+                        {noteImages.slice(0, 4).map((url: string, index: number) => (
+                            <img
+                                key={`${url}-${index}`}
+                                src={url}
+                                alt={`第${index + 1}张配图`}
+                                loading="lazy"
+                                referrerPolicy="no-referrer"
+                                className="w-12 h-10 rounded-md object-cover bg-slate-100 shrink-0"
+                                onError={(e: any) => { e.currentTarget.style.visibility = 'hidden'; }}
+                            />
+                        ))}
+                        {noteImages.length > 4 && <span className="self-center text-[10px] text-slate-400">+{noteImages.length - 4} 张</span>}
+                    </div>
+                )}
                 <div className="p-3">
                     {/* Title */}
                     <div className="font-bold text-sm text-slate-800 line-clamp-2 leading-snug mb-1.5">{note.title || '无标题笔记'}</div>
@@ -2299,7 +2318,7 @@ const MessageItem = React.memo(({
                     </div>
                     {/* Footer label */}
                     <div className="mt-2 pt-1.5 flex items-center gap-1 text-[9px] text-slate-300">
-                        <span className="text-red-400 font-bold">小红书</span> <span>·</span> <span>{note.type === 'video' ? '视频' : '笔记'}{isUser ? '分享' : '推荐'}</span>
+                        <span className="text-red-400 font-bold">小红书</span> <span>·</span> <span>{note.type === 'video' ? '视频' : '笔记'}{isUser ? '分享' : '推荐'}</span>{noteImages.length > 0 && <span>· {noteImages.length}图</span>}
                     </div>
                 </div>
             </div>

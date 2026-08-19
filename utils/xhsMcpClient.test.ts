@@ -35,6 +35,21 @@ describe('XHS Lite response normalization', () => {
         });
     });
 
+    it('keeps the complete image gallery and normalizes CDN URLs', () => {
+        expect(normalizeNote({
+            note_id: 'note-gallery',
+            image_list: [
+                { url_default: 'http://ci.example/one.jpg' },
+                { url: '//ci.example/two.jpg' },
+                { url: 'https://ci.example/one.jpg' },
+            ],
+        })).toMatchObject({
+            noteId: 'note-gallery',
+            coverUrl: 'https://ci.example/one.jpg',
+            images: ['https://ci.example/one.jpg', 'https://ci.example/two.jpg'],
+        });
+    });
+
     it('keeps user/user_info authors and nested sub_comments', () => {
         const payload = {
             data: {

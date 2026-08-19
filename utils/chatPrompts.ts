@@ -1361,6 +1361,27 @@ ${userProfile.name} 给你反馈时，别当成约束，当成信任——ta 在
                 }
                 else content = `${timeStr} ${sourceTag} ${content}`;
 
+                // 小红书图集在用户刚分享的这一轮以视觉块发送给支持视觉的模型。
+                // 只发送当前回合的图片，避免旧 CDN 链接失效拖垮后续请求。
+                if (m.type === 'xhs_card' && m.role === 'user' && index > lastAssistantIndex) {
+                    const noteImages = Array.isArray(m.metadata?.xhsNote?.images)
+                        ? m.metadata.xhsNote.images
+                            .map((url: any) => String(url || '').trim())
+                            .map((url: string) => url.startsWith('//') ? `https:${url}` : url)
+                            .filter((url: string) => /^https?:\/\//i.test(url))
+                            .slice(0, 9)
+                        : [];
+                    if (noteImages.length > 0 && typeof content === 'string') {
+                        return {
+                            role: m.role,
+                            content: [
+                                { type: 'text', text: content },
+                                ...noteImages.map((url: string) => ({ type: 'image_url', image_url: { url } })),
+                            ],
+                        };
+                    }
+                }
+
                 return { role: m.role, content };
             }),
             historySlice // Return original slice for Quote lookup

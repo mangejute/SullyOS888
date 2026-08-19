@@ -3892,6 +3892,7 @@ const Chat: React.FC = () => {
                     customThemes={customThemes} onUpdateTheme={(id) => updateCharacter(char.id, { bubbleStyle: id })}
                     onRemoveTheme={removeCustomTheme} activeThemeId={currentThemeId}
                     onPanelAction={handlePanelAction}
+                    onLinkShare={(url) => handleSendText(url, 'text', undefined, true)}
                     onImageSelect={handleImageSelect}
                     isSummarizing={isSummarizing}
                     categories={visibleCategories}

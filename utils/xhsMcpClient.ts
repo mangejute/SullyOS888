@@ -974,15 +974,28 @@ export const normalizeNote = (n: any): {
     shareCount: number;
     xsecToken?: string;
     coverUrl?: string;
+    images?: string[];
     type?: string;
 } => {
     const card = n.noteCard || n.note_card || n.notecard;
-    // 封面：cover 对象 / 字符串，或笔记图片列表首图（feed detail 返回 image_list）。
-    const coverObj = card?.cover || n.cover || n.image_list?.[0] || card?.image_list?.[0];
-    const rawCoverUrl = typeof coverObj === 'string' ? coverObj
-        : coverObj?.urlDefault || coverObj?.url_default || coverObj?.url || coverObj?.urlPre
-        || coverObj?.info_list?.[0]?.url || undefined;
-    const coverUrl = rawCoverUrl?.replace(/^http:\/\//, 'https://');
+    // 图片字段在不同后端里叫法不一：统一收集整组图，第一张作为封面。
+    const rawImageList = [
+        ...(Array.isArray(n.image_list) ? n.image_list : []),
+        ...(Array.isArray(n.imageList) ? n.imageList : []),
+        ...(Array.isArray(card?.image_list) ? card.image_list : []),
+        ...(Array.isArray(card?.imageList) ? card.imageList : []),
+    ];
+    const imageObjects = [n.cover, card?.cover, ...rawImageList].filter(Boolean);
+    const imageUrls = imageObjects
+        .map((image: any) => typeof image === 'string' ? image : (
+            image?.urlDefault || image?.url_default || image?.url || image?.urlPre
+            || image?.info_list?.[0]?.url || image?.infoList?.[0]?.url || ''
+        ))
+        .map((url: string) => String(url || '').replace(/\\u002F/g, '/').replace(/^http:\/\//, 'https://'))
+        .map((url: string) => url.startsWith('//') ? `https:${url}` : url)
+        .filter(Boolean)
+        .filter((url: string, index: number, all: string[]) => all.indexOf(url) === index);
+    const coverUrl = imageUrls[0];
     // 点赞数：支持 interactInfo.likedCount (profile notes) 和 interact_info.liked_count (search results)
     const interact = n.interact_info || n.interactInfo
         || card?.interact_info || card?.interactInfo || {};
@@ -1002,6 +1015,7 @@ export const normalizeNote = (n: any): {
         shareCount: parseXhsCount(shareCountRaw),
         xsecToken: n.xsecToken || n.xsec_token || card?.xsec_token || card?.xsecToken || undefined,
         coverUrl,
+        images: imageUrls.length ? imageUrls : undefined,
         type: n.type || card?.type || undefined,
     };
 };

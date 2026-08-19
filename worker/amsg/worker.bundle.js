@@ -8936,9 +8936,15 @@ var normalizeXhsComments = (payload) => {
 };
 var normalizeNote = (n) => {
   const card = n.noteCard || n.note_card || n.notecard;
-  const coverObj = card?.cover || n.cover || n.image_list?.[0] || card?.image_list?.[0];
-  const rawCoverUrl = typeof coverObj === "string" ? coverObj : coverObj?.urlDefault || coverObj?.url_default || coverObj?.url || coverObj?.urlPre || coverObj?.info_list?.[0]?.url || void 0;
-  const coverUrl = rawCoverUrl?.replace(/^http:\/\//, "https://");
+  const rawImageList = [
+    ...Array.isArray(n.image_list) ? n.image_list : [],
+    ...Array.isArray(n.imageList) ? n.imageList : [],
+    ...Array.isArray(card?.image_list) ? card.image_list : [],
+    ...Array.isArray(card?.imageList) ? card.imageList : []
+  ];
+  const imageObjects = [n.cover, card?.cover, ...rawImageList].filter(Boolean);
+  const imageUrls = imageObjects.map((image) => typeof image === "string" ? image : image?.urlDefault || image?.url_default || image?.url || image?.urlPre || image?.info_list?.[0]?.url || image?.infoList?.[0]?.url || "").map((url) => String(url || "").replace(/\\u002F/g, "/").replace(/^http:\/\//, "https://")).map((url) => url.startsWith("//") ? `https:${url}` : url).filter(Boolean).filter((url, index, all) => all.indexOf(url) === index);
+  const coverUrl = imageUrls[0];
   const interact = n.interact_info || n.interactInfo || card?.interact_info || card?.interactInfo || {};
   const likesRaw = n.likes ?? n.liked_count ?? interact.liked_count ?? interact.likedCount ?? 0;
   const collectsRaw = n.collects ?? n.collected_count ?? interact.collected_count ?? interact.collectedCount ?? 0;
@@ -8956,6 +8962,7 @@ var normalizeNote = (n) => {
     shareCount: parseXhsCount(shareCountRaw),
     xsecToken: n.xsecToken || n.xsec_token || card?.xsec_token || card?.xsecToken || void 0,
     coverUrl,
+    images: imageUrls.length ? imageUrls : void 0,
     type: n.type || card?.type || void 0
   };
 };

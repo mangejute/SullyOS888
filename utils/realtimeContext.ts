@@ -1610,6 +1610,8 @@ export interface XhsNote {
     authorId: string;
     xsecToken?: string;
     coverUrl?: string;
+    /** 笔记图集（第一张与 coverUrl 相同），用于卡片缩略图和视觉模型。 */
+    images?: string[];
     type?: string;  // 'normal' | 'video'
     comments?: {
         author: string;
