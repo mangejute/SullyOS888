@@ -10,7 +10,7 @@ vi.mock('./db', () => ({
 }));
 
 import { DB } from './db';
-import { advanceGoal, applyCityLifeToSchedule, buildCityLifeContext, chooseEventBranch, generateCityLife, generateEventThread, getCityLifeEventArchive, getRelevantCityEvents, settleCityLife, settleCityLifeState } from './cityLife';
+import { applyCityLifeToSchedule, buildCityLifeContext, chooseEventBranch, generateCityLife, generateEventThread, getCityLifeEventArchive, getRelevantCityEvents, settleCityLife, settleCityLifeState } from './cityLife';
 
 const makeCharacter = (): CharacterProfile => ({
     id: 'city-life-test',
@@ -94,15 +94,6 @@ describe('城市事件生成数量', () => {
 });
 
 describe('目标按真实日期自动结算', () => {
-    it('记录一次行动只推进目标，不制造负面影响', async () => {
-        const char = makeCharacter();
-        const next = await advanceGoal(char, 'goal');
-        const goal = next.cityLife!.goals[0];
-        expect(goal.progress).toBe(15);
-        expect(goal.status).toBe('active');
-        expect(goal.setbackUntil).toBeUndefined();
-    });
-
     it('补齐离线期间每一天已排定的目标行动', async () => {
         const char = makeCharacter();
         vi.mocked(DB.getDailySchedule).mockImplementation(async (_charId, date) => (

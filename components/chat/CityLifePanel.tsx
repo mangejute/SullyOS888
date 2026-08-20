@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { CalendarDots, Target, Sparkle, ArrowClockwise, CheckCircle, Info, GitBranch, UsersThree, X } from '@phosphor-icons/react';
+import { CalendarDots, Target, Sparkle, ArrowClockwise, GitBranch, UsersThree, X } from '@phosphor-icons/react';
 import type { APIConfig, CharacterProfile, CityLifeEvent, CityLifeGoal, CityLifeThread } from '../../types';
-import { generateCityLife, settleCityLife, advanceGoal, characterCityDate, getCityLifeEventArchive, generateEventThread, chooseEventBranch } from '../../utils/cityLife';
+import { generateCityLife, settleCityLife, characterCityDate, getCityLifeEventArchive, generateEventThread, chooseEventBranch } from '../../utils/cityLife';
 import { getCharacterNpcs } from '../../utils/characterWorld';
 
 type Props = { char: CharacterProfile; apiConfig: APIConfig; mode: 'events' | 'goals'; onClose: () => void; onChange: (char: CharacterProfile) => void };
@@ -13,7 +13,6 @@ const CityLifePanel: React.FC<Props> = ({ char, apiConfig, mode, onClose, onChan
     const [branchWorking, setBranchWorking] = useState(false);
     const [notice, setNotice] = useState('');
     const [eventCount, setEventCount] = useState(char.cityLife?.eventGenerationCount || 40);
-    const [infoGoalId, setInfoGoalId] = useState<string | null>(null);
     const today = characterCityDate(char);
     const phasedEvents = useMemo(() => getCityLifeEventArchive(char, today), [char, today]);
     const activeEvents = phasedEvents.filter(event => event.phase === 'active');
@@ -35,9 +34,6 @@ const CityLifePanel: React.FC<Props> = ({ char, apiConfig, mode, onClose, onChan
     }
     async function refresh() {
         setWorking(true); const next = await settleCityLife(char); onChange(next); setWorking(false); setNotice('已按今天的真实日期推进');
-    }
-    async function goalAction(goal: CityLifeGoal) {
-        setWorking(true); const next = await advanceGoal(char, goal.id); onChange(next); setWorking(false); setNotice('已记录一步完成，目标进度已推进');
     }
     async function createThread(event: CityLifeEvent) {
         setBranchWorking(true); setNotice('AI 正在听取 NPC 的意见…');
@@ -69,7 +65,7 @@ const CityLifePanel: React.FC<Props> = ({ char, apiConfig, mode, onClose, onChan
                     <button onClick={generate} disabled={working} className="w-full rounded-2xl border border-indigo-100 bg-indigo-50 py-3 text-xs font-bold text-indigo-700">重新生成一批城市生活</button>
                 </div>}
                 {char.cityLife && mode === 'goals' && <div className="space-y-3">
-                    {(['short', 'mid', 'long'] as const).map(horizon => <div key={horizon}><div className="mb-2 text-xs font-black text-slate-500">{horizonLabel[horizon]}目标</div><div className="space-y-2">{goals.filter(g => g.horizon === horizon).map(goal => <div key={goal.id} className="rounded-2xl border border-slate-100 bg-slate-50/70 p-3"><div className="flex items-start justify-between gap-3"><div><div className="text-sm font-bold text-slate-800">{goal.title}</div><div className="mt-1 text-[11px] leading-relaxed text-slate-500">{goal.description}</div></div><span className={`shrink-0 rounded-full px-2 py-1 text-[10px] font-bold ${goal.status === 'completed' ? 'bg-emerald-100 text-emerald-700' : goal.status === 'setback' ? 'bg-amber-100 text-amber-700' : 'bg-indigo-100 text-indigo-700'}`}>{goal.status === 'completed' ? '已完成' : goal.status === 'setback' ? '短暂受挫' : `${goal.progress}%`}</span></div><div className="mt-2 h-1.5 overflow-hidden rounded-full bg-slate-200"><div className="h-full rounded-full bg-indigo-500" style={{ width: `${goal.progress}%` }} /></div><div className="mt-2 text-[11px] text-slate-500">预计 {goal.targetDate} · 下一步：{goal.nextAction}</div>{goal.status === 'completed' && <div className="mt-2 text-[11px] text-emerald-700">完成收获：{goal.completionBenefit}</div>}{goal.status === 'setback' && <div className="mt-2 text-[11px] text-amber-700">{goal.setbackImpact}，预计 {goal.setbackUntil || '稍后'} 恢复。</div>}{goal.status !== 'completed' && <div className="mt-2 flex gap-2"><button onClick={() => goalAction(goal)} title="记录已完成一步" className="flex-1 rounded-xl bg-emerald-50 py-2 text-[11px] font-bold text-emerald-700"><CheckCircle className="mr-1 inline" />记录已完成一步</button><button onClick={() => setInfoGoalId(infoGoalId === goal.id ? null : goal.id)} title="查看目标规则" aria-label="查看目标规则" className="rounded-xl bg-slate-100 px-3 py-2 text-[11px] font-bold text-slate-500"><Info /></button></div>}{infoGoalId === goal.id && <div className="mt-2 rounded-xl bg-slate-100 px-3 py-2 text-[11px] leading-relaxed text-slate-600">“记录已完成一步”表示你确实完成了目标的下一步：{goal.nextAction}。每次推进 15%；负面影响由错过目标期限或城市事件自动产生，不会因为查看说明而触发。</div>}</div>)}</div></div>)}
+                    {(['short', 'mid', 'long'] as const).map(horizon => <div key={horizon}><div className="mb-2 text-xs font-black text-slate-500">{horizonLabel[horizon]}目标</div><div className="space-y-2">{goals.filter(g => g.horizon === horizon).map(goal => <div key={goal.id} className="rounded-2xl border border-slate-100 bg-slate-50/70 p-3"><div className="flex items-start justify-between gap-3"><div><div className="text-sm font-bold text-slate-800">{goal.title}</div><div className="mt-1 text-[11px] leading-relaxed text-slate-500">{goal.description}</div></div><span className={`shrink-0 rounded-full px-2 py-1 text-[10px] font-bold ${goal.status === 'completed' ? 'bg-emerald-100 text-emerald-700' : goal.status === 'setback' ? 'bg-amber-100 text-amber-700' : 'bg-indigo-100 text-indigo-700'}`}>{goal.status === 'completed' ? '已完成' : goal.status === 'setback' ? '短暂受挫' : `${goal.progress}%`}</span></div><div className="mt-2 h-1.5 overflow-hidden rounded-full bg-slate-200"><div className="h-full rounded-full bg-indigo-500" style={{ width: `${goal.progress}%` }} /></div><div className="mt-2 text-[11px] text-slate-500">预计 {goal.targetDate} · 下一步：{goal.nextAction}</div><div className="mt-2 grid gap-1.5 text-[11px] leading-relaxed"><div className="rounded-xl bg-emerald-50 px-2.5 py-2 text-emerald-700"><b>完成后的正面影响：</b>{goal.completionBenefit}</div><div className="rounded-xl bg-amber-50 px-2.5 py-2 text-amber-700"><b>未按期完成的负面影响：</b>{goal.setbackImpact}</div></div>{goal.status === 'setback' && <div className="mt-2 text-[11px] text-amber-700">当前受挫，预计 {goal.setbackUntil || '稍后'} 恢复。</div>}</div>)}</div></div>)}
                     <button onClick={generate} disabled={working} className="w-full rounded-2xl border border-indigo-100 bg-indigo-50 py-3 text-xs font-bold text-indigo-700">重新生成事件与目标</button>
                 </div>}
             </div>
