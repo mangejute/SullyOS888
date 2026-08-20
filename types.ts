@@ -1711,6 +1711,8 @@ export interface CharacterCityLifeState {
     cityName: string;
     events: CityLifeEvent[];
     goals: CityLifeGoal[];
+    /** 用户选择的下一次城市事件生成数量（20-80）。 */
+    eventGenerationCount?: number;
     lastSettledDate?: string;
     todaySummary?: string;
     threads?: CityLifeThread[];

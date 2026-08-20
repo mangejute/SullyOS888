@@ -3,14 +3,14 @@ import type { CharacterProfile } from '../types';
 
 vi.mock('./db', () => ({
     DB: {
-        getDailySchedule: vi.fn(),
+        getDailySchedule: vi.fn(async () => null),
         saveCharacter: vi.fn(),
         saveDailySchedule: vi.fn(),
     },
 }));
 
 import { DB } from './db';
-import { applyCityLifeToSchedule, buildCityLifeContext, chooseEventBranch, getRelevantCityEvents, settleCityLife } from './cityLife';
+import { advanceGoal, applyCityLifeToSchedule, buildCityLifeContext, chooseEventBranch, generateCityLife, generateEventThread, getCityLifeEventArchive, getRelevantCityEvents, settleCityLife, settleCityLifeState } from './cityLife';
 
 const makeCharacter = (): CharacterProfile => ({
     id: 'city-life-test',
@@ -61,9 +61,48 @@ describe('城市事件分阶段联动', () => {
         expect(schedule.slots[0].goalIds).toContain('goal');
         expect(schedule.slots[0].description).toContain('目标行动');
     });
+
+    it('跨日结算只更新阶段，不删除历史事件', () => {
+        const char = makeCharacter();
+        const settled = settleCityLifeState(char, new Date(2026, 7, 23));
+        expect(settled?.events.map(event => event.id)).toEqual(['active', 'upcoming', 'aftermath', 'later']);
+        expect(settled?.events.find(event => event.id === 'active')?.phase).toBe('aftermath');
+        expect(settled?.events.find(event => event.id === 'aftermath')?.phase).toBe('ended');
+    });
+
+    it('事件档案展示所有事件，而不是只取上下文窗口', () => {
+        const archive = getCityLifeEventArchive(makeCharacter(), '2026-08-20');
+        expect(archive.map(event => event.id)).toEqual(['aftermath', 'active', 'upcoming', 'later']);
+        expect(archive.at(-1)?.phase).toBe('upcoming');
+    });
+});
+
+describe('城市事件生成数量', () => {
+    it('按用户指定数量生成并保存数量配置', async () => {
+        const char = makeCharacter();
+        const events = Array.from({ length: 20 }, (_, i) => ({ id: `event-${i}`, title: `事件${i}`, startDate: '2026-08-20', endDate: '2026-08-20', durationDays: 1, intensity: 2 }));
+        const goals = [
+            { title: '短目标', horizon: 'short' }, { title: '中目标', horizon: 'mid' }, { title: '远目标', horizon: 'long' },
+        ];
+        vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ choices: [{ message: { content: JSON.stringify({ events, goals }) } }] }), { status: 200, headers: { 'content-type': 'application/json' } })));
+        const state = await generateCityLife(char, { baseUrl: 'https://example.test', apiKey: 'key', model: 'model' }, 20);
+        expect(state?.events).toHaveLength(20);
+        expect(state?.eventGenerationCount).toBe(20);
+        expect((vi.mocked(DB.saveCharacter).mock.calls.at(-1)?.[0] as CharacterProfile).cityLife?.eventGenerationCount).toBe(20);
+        vi.unstubAllGlobals();
+    });
 });
 
 describe('目标按真实日期自动结算', () => {
+    it('记录一次行动只推进目标，不制造负面影响', async () => {
+        const char = makeCharacter();
+        const next = await advanceGoal(char, 'goal');
+        const goal = next.cityLife!.goals[0];
+        expect(goal.progress).toBe(15);
+        expect(goal.status).toBe('active');
+        expect(goal.setbackUntil).toBeUndefined();
+    });
+
     it('补齐离线期间每一天已排定的目标行动', async () => {
         const char = makeCharacter();
         vi.mocked(DB.getDailySchedule).mockImplementation(async (_charId, date) => (
@@ -80,6 +119,20 @@ describe('目标按真实日期自动结算', () => {
 });
 
 describe('NPC 事件链', () => {
+    it('为进行中的事件生成 2-3 个可选分支', async () => {
+        const char = makeCharacter();
+        char.cityLife!.events = [char.cityLife!.events[0]];
+        const threadPayload = { choices: [
+            { id: 'choice-a', label: '去现场', followUpTitle: '现场处理', followUpDescription: '前往现场。', leadNpcId: 'npc-1' },
+            { id: 'choice-b', label: '先观望', followUpTitle: '观望余波', followUpDescription: '暂时观望。', leadNpcId: 'npc-1' },
+        ], title: '雨夜分歧', summary: 'NPC 提出两种处理方向。', leadNpcId: 'npc-1' };
+        vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ choices: [{ message: { content: JSON.stringify(threadPayload) } }] }), { status: 200, headers: { 'content-type': 'application/json' } })));
+        const next = await generateEventThread(char, 'active', { baseUrl: 'https://example.test', apiKey: 'key', model: 'model' });
+        expect(next?.threads?.[0].choices).toHaveLength(2);
+        expect(next?.threads?.[0].status).toBe('open');
+        vi.unstubAllGlobals();
+    });
+
     it('选择分支后生成带父事件引用的后续城市事件', async () => {
         const char = makeCharacter();
         char.cityLife!.threads = [{

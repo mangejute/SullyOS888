@@ -105,28 +105,33 @@ function normalizeBranchChoice(raw: any, index: number): CityLifeBranchChoice | 
     };
 }
 
-function buildPrompt(char: CharacterProfile, today: string): string {
+function clampEventGenerationCount(value: number | undefined): number {
+    return Math.max(20, Math.min(80, Math.round(value || 40)));
+}
+
+function buildPrompt(char: CharacterProfile, today: string, eventCount: number): string {
     const locations = getCharacterLocations(char).slice(0, 24).map(x => `${x.id}=${x.name}`).join('、') || '（暂无地图地点）';
     const npcs = getCharacterNpcs(char).slice(0, 18).map(x => `${x.id}=${x.name}(${x.relation})`).join('、') || '（暂无 NPC）';
     const city = char.worldMap?.referenceCity || '角色所在城市';
-    return `为角色「${char.name}」的城市生活生成第一批可持续状态。允许明显戏剧化，但仍要能落到日程、家园、地图和 NPC。今天是 ${today}，城市是「${city}」。\n角色人设：${(char.description || char.systemPrompt || '').slice(0, 5000)}\n地图地点：${locations}\nNPC：${npcs}\n\n严格只输出 JSON：{"events":[...],"goals":[...]}。events 生成 20-80 条，分散在未来 60 天；每条含 id,title,category,description,startDate,endDate,durationDays(1-14),intensity(1-5),district,affectedLocationIds,affectedNpcIds,homeImpact,scheduleImpact,characterAwareness,dailyUpdate。每天 0-2 条常见事件，至少一部分持续 2-5 天。goals 生成 1-3 个 short（1-3个月）、1-3 个 mid（3-6个月）、1-3 个 long（6-12个月），每条含 id,title,horizon,description,progress(0-30),startDate,targetDate,nextAction,actionLocationId,relatedNpcIds,homeLink,scheduleLink,completionBenefit,setbackImpact。`;
+    return `为角色「${char.name}」的城市生活生成第一批可持续状态。允许明显戏剧化，但仍要能落到日程、家园、地图和 NPC。今天是 ${today}，城市是「${city}」。\n角色人设：${(char.description || char.systemPrompt || '').slice(0, 5000)}\n地图地点：${locations}\nNPC：${npcs}\n\n严格只输出 JSON：{"events":[...],"goals":[...]}。events 必须生成 ${eventCount} 条，分散在未来 60 天；每条含 id,title,category,description,startDate,endDate,durationDays(1-14),intensity(1-5),district,affectedLocationIds,affectedNpcIds,homeImpact,scheduleImpact,characterAwareness,dailyUpdate。每天 0-2 条常见事件，至少一部分持续 2-5 天。goals 生成 1-3 个 short（1-3个月）、1-3 个 mid（3-6个月）、1-3 个 long（6-12个月），每条含 id,title,horizon,description,progress(0-30),startDate,targetDate,nextAction,actionLocationId,relatedNpcIds,homeLink,scheduleLink,completionBenefit,setbackImpact。`;
 }
 
-export async function generateCityLife(char: CharacterProfile, api: CityLifeApiConfig): Promise<CharacterCityLifeState | null> {
+export async function generateCityLife(char: CharacterProfile, api: CityLifeApiConfig, requestedEventCount?: number): Promise<CharacterCityLifeState | null> {
     if (!api.baseUrl || !api.apiKey || !api.model) return null;
     const today = characterCityDate(char);
+    const eventCount = clampEventGenerationCount(requestedEventCount ?? char.cityLife?.eventGenerationCount);
     try {
         const response = await fetch(`${api.baseUrl.replace(/\/+$/, '')}/chat/completions`, {
             method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${api.apiKey}` },
-            body: JSON.stringify({ model: api.model, messages: [{ role: 'user', content: buildPrompt(char, today) }], temperature: 0.9, max_tokens: 12000 }),
+            body: JSON.stringify({ model: api.model, messages: [{ role: 'user', content: buildPrompt(char, today, eventCount) }], temperature: 0.9, max_tokens: 12000 }),
         });
         if (!response.ok) return null;
         const parsed = extractJson(extractContent(await safeResponseJson(response)));
-        const events = (Array.isArray(parsed?.events) ? parsed.events : []).map((x: any, i: number) => normalizeEvent(x, i, today)).filter(Boolean).slice(0, 80) as CityLifeEvent[];
+        const events = (Array.isArray(parsed?.events) ? parsed.events : []).map((x: any, i: number) => normalizeEvent(x, i, today)).filter(Boolean).slice(0, eventCount) as CityLifeEvent[];
         const goals = (Array.isArray(parsed?.goals) ? parsed.goals : []).map((x: any, i: number) => normalizeGoal(x, i, today)).filter(Boolean).slice(0, 9) as CityLifeGoal[];
         const constrainedGoals = (['short', 'mid', 'long'] as const).flatMap(horizon => goals.filter(goal => goal.horizon === horizon).slice(0, 3));
-        if (events.length < 20 || constrainedGoals.some(goal => !goal) || !constrainedGoals.some(goal => goal.horizon === 'short') || !constrainedGoals.some(goal => goal.horizon === 'mid') || !constrainedGoals.some(goal => goal.horizon === 'long')) return null;
-        const state: CharacterCityLifeState = { generatedAt: Date.now(), cityName: char.worldMap?.referenceCity || '所在城市', events, goals: constrainedGoals, lastSettledDate: today };
+        if (events.length < eventCount || constrainedGoals.length < 3 || !constrainedGoals.some(goal => goal.horizon === 'short') || !constrainedGoals.some(goal => goal.horizon === 'mid') || !constrainedGoals.some(goal => goal.horizon === 'long')) return null;
+        const state: CharacterCityLifeState = { generatedAt: Date.now(), cityName: char.worldMap?.referenceCity || '所在城市', events, goals: constrainedGoals, eventGenerationCount: eventCount, lastSettledDate: today };
         const nextChar = { ...char, cityLife: state };
         await DB.saveCharacter(nextChar);
         await syncCityLifeToTodaySchedule(nextChar);
@@ -224,7 +229,7 @@ export function settleCityLifeState(char: CharacterProfile, at = new Date()): Ch
     const events: CityLifeEvent[] = state.events.map(event => ({
         ...event,
         phase: eventPhaseAt(event, today),
-    })).filter(event => event.phase !== 'ended');
+    }));
     const goals = state.goals.map(goal => {
         // 保留截止日作为结算记录；这样离线补算前几天时，仍能知道当时目标处于受挫恢复期。
         if (goal.setbackUntil && goal.setbackUntil <= today) return { ...goal, status: 'active' as const };
@@ -274,6 +279,12 @@ export function getRelevantCityEvents(char: CharacterProfile, date = characterCi
         .filter(event => event.phase === 'active' || event.phase === 'aftermath' || (event.phase === 'upcoming' && event.startDate <= addDays(date, 2)))
         .sort((a, b) => a.startDate.localeCompare(b.startDate) || b.intensity - a.intensity)
         .slice(0, 8);
+}
+
+/** 面板用完整事件档案；上下文注入仍使用 getRelevantCityEvents 的精简窗口。 */
+export function getCityLifeEventArchive(char: CharacterProfile, date = characterCityDate(char)): Array<CityLifeEvent & { phase: NonNullable<CityLifeEvent['phase']> }> {
+    return (char.cityLife?.events || []).map(event => ({ ...event, phase: eventPhaseAt(event, date) }))
+        .sort((a, b) => a.startDate.localeCompare(b.startDate) || b.intensity - a.intensity);
 }
 
 export function buildCityLifeContext(char: CharacterProfile, date = characterCityDate(char)): string {
