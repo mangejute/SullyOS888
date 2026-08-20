@@ -14,6 +14,7 @@ import { enforceWorldLifePlanOnSchedule, formatWorldLifeContext, getWorldLifeCon
 import { worldNow } from './worldHome/prompts';
 import { recordPromptHistory } from './promptHistory';
 import { applyScheduleTravelModel, buildCharacterWorldContext, normalizeScheduleSlot } from './characterWorld';
+import { applyCityLifeToSchedule, buildCityLifeContext, settleCityLife } from './cityLife';
 import { ensureCharacterRoutine, formatRoutineContext } from './characterRoutine';
 
 export { getFlowNarrativeKey, isScheduleFeatureOn } from './scheduleFeature';
@@ -263,6 +264,7 @@ export async function generateDailyScheduleForChar(
 
     // 第一次生成日程先建立角色长期作息；之后完全复用，不增加每日 API 调用。
     char = await ensureCharacterRoutine(char, userProfile, apiConfig);
+    char = await settleCityLife(char);
     const worldLifeContext: WorldLifeContext | null = await getWorldLifeContextForCharacter(char.id, apiConfig);
     const baseNow = worldLifeContext ? worldNow(worldLifeContext.world) : new Date();
     const now = getScheduleWallClock(char, baseNow);
@@ -318,6 +320,7 @@ export async function generateDailyScheduleForChar(
         worldLifeContext ? formatWorldLifeContext(worldLifeContext) : '',
         buildCharacterWorldContext(char),
         formatRoutineContext(char, now),
+        buildCityLifeContext(char, today),
     ].filter(Boolean).join('\n');
     const prompt = style === 'mindful'
         ? buildMindfulPrompt(baseContext, char, userProfile, today, dayOfWeek, chatHistoryBlock, worldLifeText)
@@ -399,7 +402,7 @@ export async function generateDailyScheduleForChar(
             if (Object.keys(flowNarrative).length === 0) flowNarrative = undefined;
         }
 
-        const schedule: DailySchedule = {
+        const schedule: DailySchedule = applyCityLifeToSchedule(char, {
             id: `${char.id}_${today}`,
             charId: char.id,
             date: today,
@@ -413,7 +416,7 @@ export async function generateDailyScheduleForChar(
                 dayKey: worldLifeContext.plan.dayKey,
                 plannedAt: worldLifeContext.plan.generatedAt,
             } : undefined,
-        };
+        });
 
         await DB.saveDailySchedule(schedule);
         return schedule;

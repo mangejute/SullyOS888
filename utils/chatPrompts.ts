@@ -25,6 +25,7 @@ import { getDailyScheduleForChar } from './dailySchedule';
 import { formatRelativeAge } from './groupChat/relativeTime';
 import { buildCharacterWorldContext } from './characterWorld';
 import { formatRoutineContext } from './characterRoutine';
+import { buildCityLifeContext } from './cityLife';
 
 // 语音格式指导按当前 TTS 服务商选择：MiniMax / Fish 使用各自标记，Qwen 直接输出自然文本。
 // 用户在「设置 → 其他 API → 语音提示词」里自定义过该服务商的指南时，优先用用户那份；留空则回退内置默认。
@@ -485,6 +486,8 @@ ${groupLogStr}\n`;
         if (!forFirePack) {
             const worldContext = buildCharacterWorldContext(char, schedule, charNow);
             if (worldContext) volatileState += `\n${worldContext}\n`;
+            const cityLifeContext = buildCityLifeContext(char, today);
+            if (cityLifeContext) volatileState += `\n${cityLifeContext}\n`;
         }
 
         // 2b. 音乐氛围（复用同一份 schedule）

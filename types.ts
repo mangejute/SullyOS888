@@ -740,6 +740,9 @@ export interface ScheduleSlot {
     travelMinutes?: number;
     /** 本时段可能遇到或共同活动的角色 NPC ID。 */
     participantNpcIds?: string[];
+    /** 本条日程由城市事件或人生目标联动产生时的引用。 */
+    cityEventIds?: string[];
+    goalIds?: string[];
     innerThought?: string; // 该时段的内心独白，生成时由AI写好，运行时直接注入
     theater?: SlotTheater; // 该时段的小剧场（窥视演出），按需生成并缓存
     /** 家园联动：该细日程归属的家园时间段。未绑定家园时为空。 */
@@ -1622,6 +1625,95 @@ export interface CharacterWorldState {
     lastTravelMinutes?: number;
     lastTravelFromLocationId?: string;
     lastTravelToLocationId?: string;
+}
+
+/** AI 生成的城市事件，日期按角色所在城市的本地日历保存。 */
+export interface CityLifeEvent {
+    id: string;
+    title: string;
+    category: string;
+    description: string;
+    district?: string;
+    startDate: string;
+    endDate: string;
+    durationDays: number;
+    intensity: 1 | 2 | 3 | 4 | 5;
+    phase?: 'upcoming' | 'active' | 'aftermath' | 'ended';
+    affectedLocationIds?: string[];
+    affectedNpcIds?: string[];
+    homeImpact?: string;
+    scheduleImpact?: string;
+    characterAwareness?: string;
+    dailyUpdate?: string;
+    /** 由事件链选择产生的后续事件，保留父事件引用便于回顾。 */
+    parentEventId?: string;
+}
+
+/** 城市事件进行到关键节点时，由 NPC 提出的可选分支。 */
+export interface CityLifeBranchChoice {
+    id: string;
+    label: string;
+    description: string;
+    leadNpcId?: string;
+    outcome: string;
+    followUpTitle: string;
+    followUpDescription: string;
+    followUpDurationDays: number;
+    followUpIntensity: 1 | 2 | 3 | 4 | 5;
+    followUpAffectedLocationIds?: string[];
+    followUpAffectedNpcIds?: string[];
+    followUpHomeImpact?: string;
+    followUpScheduleImpact?: string;
+    followUpDailyUpdate?: string;
+}
+
+/** 一条可恢复、可结算的城市事件链。 */
+export interface CityLifeThread {
+    id: string;
+    rootEventId: string;
+    title: string;
+    summary: string;
+    leadNpcId?: string;
+    choices: CityLifeBranchChoice[];
+    status: 'open' | 'resolved';
+    selectedChoiceId?: string;
+    resolutionNote?: string;
+    createdAt: number;
+    resolvedAt?: number;
+}
+
+export type LifeGoalHorizon = 'short' | 'mid' | 'long';
+
+/** 短、中、远期目标的可恢复项目状态。 */
+export interface CityLifeGoal {
+    id: string;
+    title: string;
+    horizon: LifeGoalHorizon;
+    description: string;
+    progress: number;
+    startDate: string;
+    targetDate: string;
+    nextAction: string;
+    actionLocationId?: string;
+    relatedNpcIds?: string[];
+    homeLink?: string;
+    scheduleLink?: string;
+    completionBenefit: string;
+    setbackImpact: string;
+    status: 'active' | 'completed' | 'setback';
+    setbackUntil?: string;
+    lastAdvancedDate?: string;
+}
+
+/** 城市事件与人生目标的共同持久化状态。 */
+export interface CharacterCityLifeState {
+    generatedAt: number;
+    cityName: string;
+    events: CityLifeEvent[];
+    goals: CityLifeGoal[];
+    lastSettledDate?: string;
+    todaySummary?: string;
+    threads?: CityLifeThread[];
 }
 
 /** AI 从角色人设识别出的长期基础作息；日程、家园和聊天共用此事实。 */
@@ -2912,6 +3004,8 @@ export interface CharacterProfile {
   worldNpcs?: CharacterWorldNpc[] | { sourceText: string; npcs: CharacterWorldNpc[]; updatedAt: number };
   /** 地图/NPC/日程/家园共享的实时世界状态。 */
   worldState?: CharacterWorldState;
+  /** AI 自动生成的城市事件池与短中远人生目标。 */
+  cityLife?: CharacterCityLifeState;
   /** 角色基础作息，由 AI 识别后保存；法定节假日和补班日仍以中国日历为准。 */
   routineProfile?: CharacterRoutineProfile;
 

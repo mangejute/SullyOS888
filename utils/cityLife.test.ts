@@ -1,0 +1,100 @@
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+import type { CharacterProfile } from '../types';
+
+vi.mock('./db', () => ({
+    DB: {
+        getDailySchedule: vi.fn(),
+        saveCharacter: vi.fn(),
+        saveDailySchedule: vi.fn(),
+    },
+}));
+
+import { DB } from './db';
+import { applyCityLifeToSchedule, buildCityLifeContext, chooseEventBranch, getRelevantCityEvents, settleCityLife } from './cityLife';
+
+const makeCharacter = (): CharacterProfile => ({
+    id: 'city-life-test',
+    name: '测试角色',
+    description: '住在一座有河岸和市集的城市。',
+    cityLife: {
+        generatedAt: 0,
+        cityName: '测试城',
+        lastSettledDate: '2026-08-17',
+        events: [
+            { id: 'active', title: '河岸暴雨', category: '天气', description: '河岸道路积水。', startDate: '2026-08-20', endDate: '2026-08-22', durationDays: 3, intensity: 4 },
+            { id: 'upcoming', title: '夜市开幕', category: '活动', description: '摊位正在搭建。', startDate: '2026-08-21', endDate: '2026-08-21', durationDays: 1, intensity: 2 },
+            { id: 'aftermath', title: '街区停电', category: '公共服务', description: '商户正在复电。', startDate: '2026-08-17', endDate: '2026-08-19', durationDays: 3, intensity: 3 },
+            { id: 'later', title: '远期展览', category: '活动', description: '不应提前占用今天的上下文。', startDate: '2026-08-30', endDate: '2026-08-30', durationDays: 1, intensity: 1 },
+        ],
+        goals: [{
+            id: 'goal', title: '完成作品集', horizon: 'short', description: '整理近期作品。', progress: 0,
+            startDate: '2026-08-01', targetDate: '2026-09-30', nextAction: '整理两页作品并写说明。',
+            completionBenefit: '获得更稳定的自信。', setbackImpact: '短暂焦虑后重新安排。', status: 'active', actionLocationId: 'studio',
+        }],
+    },
+} as CharacterProfile);
+
+beforeEach(() => vi.clearAllMocks());
+
+describe('城市事件分阶段联动', () => {
+    it('同时保留近期预告、进行中事件与余波，并明确阶段行为', () => {
+        const char = makeCharacter();
+        const events = getRelevantCityEvents(char, '2026-08-20');
+        expect(events.map(event => `${event.id}:${event.phase}`)).toEqual(['aftermath:aftermath', 'active:active', 'upcoming:upcoming']);
+        const context = buildCityLifeContext(char, '2026-08-20');
+        expect(context).toContain('预告');
+        expect(context).toContain('进行中');
+        expect(context).toContain('余波');
+        expect(context).not.toContain('远期展览');
+    });
+
+    it('把事件地点和目标行动一起写进当天日程', () => {
+        const char = makeCharacter();
+        const schedule = applyCityLifeToSchedule(char, {
+            id: 'city-life-test_2026-08-20', charId: char.id, date: '2026-08-20', generatedAt: 0,
+            slots: [
+                { startTime: '10:00', activity: '创作', locationId: 'studio', location: '工作室' },
+                { startTime: '20:00', activity: '休息' },
+            ],
+        });
+        expect(schedule.slots[0].cityEventIds).toContain('active');
+        expect(schedule.slots[0].goalIds).toContain('goal');
+        expect(schedule.slots[0].description).toContain('目标行动');
+    });
+});
+
+describe('目标按真实日期自动结算', () => {
+    it('补齐离线期间每一天已排定的目标行动', async () => {
+        const char = makeCharacter();
+        vi.mocked(DB.getDailySchedule).mockImplementation(async (_charId, date) => (
+            ['2026-08-17', '2026-08-18', '2026-08-19'].includes(date)
+                ? { id: `${char.id}_${date}`, charId: char.id, date, generatedAt: 0, slots: [{ startTime: '20:00', activity: '目标行动', goalIds: ['goal'] }] }
+                : null
+        ));
+        const settled = await settleCityLife(char, new Date(2026, 7, 20, 12));
+        const goal = settled.cityLife!.goals[0];
+        expect(goal.progress).toBe(24);
+        expect(goal.lastAdvancedDate).toBe('2026-08-19');
+        expect(settled.cityLife!.lastSettledDate).toBe('2026-08-20');
+    });
+});
+
+describe('NPC 事件链', () => {
+    it('选择分支后生成带父事件引用的后续城市事件', async () => {
+        const char = makeCharacter();
+        char.cityLife!.threads = [{
+            id: 'thread-1', rootEventId: 'active', title: '雨夜的求助', summary: 'NPC 带来一个请求。', leadNpcId: 'npc-1', status: 'open', createdAt: 0,
+            choices: [{
+                id: 'choice-1', label: '先去查看', description: '前往现场确认情况。', leadNpcId: 'npc-1', outcome: '角色决定亲自确认。',
+                followUpTitle: '雨后的现场', followUpDescription: '角色在雨后前往现场处理积水。', followUpDurationDays: 2, followUpIntensity: 3,
+                followUpAffectedLocationIds: ['river'], followUpAffectedNpcIds: ['npc-1'], followUpHomeImpact: '需要晾晒被雨打湿的物品。',
+            }],
+        }];
+        const next = await chooseEventBranch(char, 'thread-1', 'choice-1');
+        const followUp = next.cityLife!.events.find(event => event.parentEventId === 'active');
+        expect(followUp?.title).toBe('雨后的现场');
+        expect(followUp?.affectedNpcIds).toContain('npc-1');
+        expect(next.cityLife!.threads?.[0].status).toBe('resolved');
+        expect(next.cityLife!.threads?.[0].resolutionNote).toContain('亲自确认');
+    });
+});

@@ -5,6 +5,7 @@ import { getLocalDateKey } from '../localDate';
 import { worldNow } from './prompts';
 import { getCharacterNpcs, locationById, locationByName } from '../characterWorld';
 import { formatRoutineContext } from '../characterRoutine';
+import { buildCityLifeContext } from '../cityLife';
 
 type ApiConfig = { baseUrl: string; apiKey: string; model: string };
 
@@ -93,7 +94,8 @@ function buildLifePlanPrompt(world: WorldProfile, members: CharacterProfile[], d
             ? member.worldMap!.locations.slice(0, 24).map(location => `${location.id}=${location.name}`).join('、')
             : '';
         const npcs = getCharacterNpcs(member).slice(0, 16).map(npc => `${npc.id}=${npc.name}`).join('、');
-        return `- ${member.name}（id: ${member.id}）：${persona || '请按已有角色设定安排'}${places ? `\n  地图地点（必须优先使用 ID）：${places}` : ''}${npcs ? `\n  可同行 NPC：${npcs}` : ''}\n  ${formatRoutineContext(member, dayKey).replace(/\n/g, ' ')}`;
+        const cityLife = buildCityLifeContext(member, dayKey).replace(/\n/g, ' ').slice(0, 1400);
+        return `- ${member.name}（id: ${member.id}）：${persona || '请按已有角色设定安排'}${places ? `\n  地图地点（必须优先使用 ID）：${places}` : ''}${npcs ? `\n  可同行 NPC：${npcs}` : ''}\n  ${formatRoutineContext(member, dayKey).replace(/\n/g, ' ')}${cityLife ? `\n  城市事件与目标联动：${cityLife}` : ''}`;
     }).join('\n');
     return `你是共同家园「${world.name}」的当日生活规划器。现在要为 ${dayKey} 先排出共同生活的四段骨架；这只是计划，不是已经发生的剧情。
 

@@ -29,6 +29,7 @@ import { isMcdActivatedInMessages, MCD_ACTIVATE_TRIGGER, MCD_DEACTIVATE_TRIGGER 
 import { isLuckinConfigured } from '../utils/luckinMcpClient';
 import { isLuckinActivatedInMessages, LUCKIN_ACTIVATE_TRIGGER, LUCKIN_DEACTIVATE_TRIGGER } from '../utils/luckinToolBridge';
 import { getCharacterWorldState, parseExplicitLocationAction } from '../utils/characterWorld';
+import { settleCityLife } from '../utils/cityLife';
 import { ensureCharacterRoutine } from '../utils/characterRoutine';
 import MessageItem, { ThinkingChainBlock } from '../components/chat/MessageItem';
 import McdMiniApp from '../components/mcd/McdMiniApp';
@@ -49,6 +50,7 @@ import ProactiveSettingsModal from '../components/chat/ProactiveSettingsModal';
 import ActiveMsg2SettingsModal from '../components/chat/ActiveMsg2SettingsModal';
 import ThinkingChainSettingsModal from '../components/chat/ThinkingChainSettingsModal';
 import WorldSpaceModal from '../components/chat/WorldSpaceModal';
+import CityLifePanel from '../components/chat/CityLifePanel';
 import { useChatAI } from '../hooks/useChatAI';
 import { cleanTextForTts, parseVoiceOutput } from '../utils/minimaxTts';
 import { collectVoiceBatchSubtitle, isPoisonedVoiceSubtitle } from '../utils/voiceSubtitle';
@@ -199,6 +201,7 @@ const Chat: React.FC = () => {
     const [showActiveMsg2Modal, setShowActiveMsg2Modal] = useState(false);
     const [showThinkingChainModal, setShowThinkingChainModal] = useState(false);
     const [worldSpaceMode, setWorldSpaceMode] = useState<'none' | 'map' | 'npc'>('none');
+    const [cityLifeMode, setCityLifeMode] = useState<'none' | 'events' | 'goals'>('none');
 
     // Archive Prompts State
     const [archivePrompts, setArchivePrompts] = useState<{id: string, name: string, content: string}[]>(DEFAULT_ARCHIVE_PROMPTS);
@@ -977,6 +980,15 @@ const Chat: React.FC = () => {
         }).catch(() => {});
     }, [activeCharacterId, char?.scheduleFeatureEnabled, char?.customTimezoneEnabled, char?.customTimezone, charDateKey]);
 
+    useEffect(() => {
+        if (!char?.cityLife) return;
+        void settleCityLife(char).then(next => {
+            if (next.cityLife?.lastSettledDate !== char.cityLife?.lastSettledDate || next.cityLife?.events.length !== char.cityLife?.events.length) {
+                updateCharacter(char.id, { cityLife: next.cityLife });
+            }
+        });
+    }, [activeCharacterId, charDateKey]);
+
     // 每次真正打开聊天设置时从角色持久化值重新初始化；避免用户在记忆宫殿页
     // 切换全自动模式后，隐藏着的 Chat 组件仍带着旧拉杆状态。
     useEffect(() => {
@@ -1501,6 +1513,7 @@ const Chat: React.FC = () => {
             'meetup', 'proactive', 'active-msg-2', 'schedule', 'world-home', 'mcd-request', 'luckin-request',
             'html-mode-toggle', 'html-mode-settings', 'thinking-settings',
             'world-map', 'world-npc',
+            'city-events', 'life-goals',
             // 独立小功能：点一下就是用了一次，跟「打开某个面板」同一性质。
             // send-emoji / select-category 这些是「挑哪一个」，不进名单。
             'poke', 'emoji-import', 'add-category', 'mcd-end', 'luckin-end',
@@ -1515,6 +1528,8 @@ const Chat: React.FC = () => {
             case 'memory-link': setShowPanel('none'); setMemoryRepairOpen(true); break;
             case 'world-map': setShowPanel('none'); setWorldSpaceMode('map'); break;
             case 'world-npc': setShowPanel('none'); setWorldSpaceMode('npc'); break;
+            case 'city-events': setShowPanel('none'); setCityLifeMode('events'); break;
+            case 'life-goals': setShowPanel('none'); setCityLifeMode('goals'); break;
             case 'dev-debug':
                 setShowPanel('none');
                 window.dispatchEvent(new CustomEvent('open-dev-debug'));
@@ -3944,6 +3959,16 @@ const Chat: React.FC = () => {
                         }
                         addToast(mode === 'map' ? '城市地图已保存到当前角色' : 'NPC 档案已保存到当前角色', 'success');
                     }}
+                />
+            )}
+
+            {char && cityLifeMode !== 'none' && (
+                <CityLifePanel
+                    char={char}
+                    apiConfig={apiConfig}
+                    mode={cityLifeMode}
+                    onClose={() => setCityLifeMode('none')}
+                    onChange={next => updateCharacter(char.id, { cityLife: next.cityLife })}
                 />
             )}
 
