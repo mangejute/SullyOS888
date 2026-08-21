@@ -352,14 +352,14 @@ const ScheduleCard: React.FC<ScheduleCardProps> = ({
                             return (
                                 <div
                                     key={idx}
-                                    className={`sully-schedule-item ${isCurrent ? 'sully-schedule-item-current' : ''} relative flex items-start gap-3 py-2 px-3 rounded-xl transition-all ${
+                                    className={`sully-schedule-item ${isCurrent ? 'sully-schedule-item-current' : ''} relative flex items-start gap-2 py-2 px-2.5 rounded-xl transition-all ${
                                         isCurrent ? 'border' : 'border border-transparent'
                                     } ${editable ? 'cursor-pointer hover:bg-white/5 select-none' : ''}`}
                                     style={isCurrent ? { background: accentBg, borderColor: palette.line } : {}}
                                     {...pressHandlers}
                                 >
                                     {/* Time */}
-                                    <div className="flex flex-col items-center w-12 flex-shrink-0">
+                                    <div className="flex flex-col items-end w-10 flex-shrink-0 pr-0.5">
                                         <span className={`sully-schedule-time text-xs font-mono font-bold ${isPast ? 'opacity-30' : isCurrent ? 'opacity-100' : 'opacity-60'}`}>
                                             {slot.startTime}
                                         </span>
@@ -371,7 +371,7 @@ const ScheduleCard: React.FC<ScheduleCardProps> = ({
                                     </div>
 
                                     {/* Timeline dot + line */}
-                                    <div className="sully-schedule-timeline flex flex-col items-center pt-1.5 flex-shrink-0">
+                                    <div className="sully-schedule-timeline flex w-3 flex-col items-center pt-1.5 flex-shrink-0">
                                         <div
                                             className={`w-2.5 h-2.5 rounded-full border-2 ${isPast ? 'opacity-30' : ''}`}
                                             style={{
@@ -385,13 +385,13 @@ const ScheduleCard: React.FC<ScheduleCardProps> = ({
                                     </div>
 
                                     {/* Content */}
-                                    <div className={`flex-1 min-w-0 ${isPast ? 'opacity-30' : ''}`}>
+                                    <div className={`flex-1 min-w-0 pr-8 ${isPast ? 'opacity-30' : ''}`}>
                                         <div className="flex items-center gap-1.5">
                                             {slot.emoji && <span className="text-sm flex-shrink-0">{slot.emoji}</span>}
                                             <span className="sully-schedule-activity text-sm font-bold">{slot.activity}</span>
                                         </div>
                                         {slot.description && (
-                                            <p className="sully-schedule-description text-[11px] opacity-50 mt-0.5 leading-tight">{slot.description}</p>
+                                        <p className="sully-schedule-description text-[11px] opacity-50 mt-0.5 leading-[1.45] break-words">{slot.description}</p>
                                         )}
                                         {(slotLocation || slot.location || participantNames.length > 0 || slot.worldEvent) && (
                                             <div className="flex flex-wrap items-center gap-1 mt-1.5">
@@ -408,14 +408,14 @@ const ScheduleCard: React.FC<ScheduleCardProps> = ({
                                             </div>
                                         )}
                                         {slot.worldEvent && (
-                                            <p className="text-[10px] opacity-45 mt-1 leading-tight">家园：{slot.worldEvent}</p>
+                                            <p className="text-[10px] opacity-45 mt-1 leading-[1.4] break-words">家园：{slot.worldEvent}</p>
                                         )}
                                     </div>
 
                                     {/* 小剧场播放按钮：全程都在，已过去/正在进行的可点（▶ 生成 / ↻ 重看）；
                                         还没到的时段灰着，点了冒个「还没到这个时间哦」的小提示。 */}
                                     {!compact && onPlayTheater && (
-                                        <div className="relative flex-shrink-0 mt-0.5">
+                                        <div className="absolute right-2 top-2 flex-shrink-0">
                                             <button
                                                 className={`w-7 h-7 rounded-full flex items-center justify-center text-xs transition-all ${isFuture ? 'cursor-not-allowed' : 'active:scale-90'}`}
                                                 style={{
