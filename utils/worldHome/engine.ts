@@ -25,7 +25,8 @@ import { safeFetchJson } from '../safeApi';
 import { processNewMessagesWithAutoArchive } from '../memoryPalace/autoArchive';
 import { getDailyScheduleForChar } from '../dailySchedule';
 import { generateDailyScheduleForChar, isScheduleFeatureOn } from '../scheduleGenerator';
-import { ensureWorldLifePlan, syncScheduleToWorldLifePlan, syncWorldBeatToSchedule } from './lifeLink';
+import { ensureWorldLifePlan, syncCityLifeToLinkedWorldPlan, syncScheduleToWorldLifePlan, syncWorldBeatToSchedule } from './lifeLink';
+import { buildCityLifeContext } from '../cityLife';
 import {
     worldTimeLabel, buildWorldSystemAddendum, buildWorldCharTurn, buildNpcTurn,
     parseCharBeat, parseNpcScene, realObserveTarget, formatRealClock, migrateWorldDaySegs,
@@ -310,6 +311,13 @@ function buildWorldLifePlanBlock(world: WorldProfile, char: CharacterProfile, se
     return `\n\n## 本段家园生活计划（尚未发生，作为本段行动起点）\n共同背景：${segment.event}\n你的安排：${mine.activity}，地点：${mine.location}${mine.description ? `，${mine.description}` : ''}${mine.mood ? `；心情：${mine.mood}` : ''}\n请让这半天从这份安排自然展开；可以遇到合理的意外，但不能无故脱离。`;
 }
 
+/** 城市事件不能只停留在看板上；家园演绎必须把它当作当前生活事实。 */
+function buildActiveCityEventBlock(char: CharacterProfile, dayKey?: string): string {
+    const context = buildCityLifeContext(char, dayKey);
+    if (!context) return '';
+    return `\n\n## 当前城市事件（必须落实到这一拍）\n${context}\n进行中的每条事件都是当前生活事实。只按它写明的日程影响、家园影响、受影响地点和人物自然落实到剧情；不要把所有事件一概写成天气，也不得让相关角色和家园像事件不存在一样照常演绎。`;
+}
+
 /**
  * 把某一拍作为 world_card 注入这名角色的 1v1 聊天（进上下文与记忆）。
  * 自动演绎、单拍补发都走这里——保证格式一致，也方便 UI 做「手动发送保底」。
@@ -363,6 +371,8 @@ export async function runWorldEpisode(deps: WorldEpisodeDeps): Promise<WorldEpis
         const plan = await ensureWorldLifePlan(world, api);
         if (plan) world.lifePlan = plan;
         await ensureWorldDaySchedules(world, members, userProfile, api as APIConfig);
+        // 当天计划早于城市事件生成时，在演绎开始前补上最新的事件影响。
+        await Promise.all(members.map(member => syncCityLifeToLinkedWorldPlan(member)));
         // 日程生成会把地点/活动回写家园计划；本轮演绎必须读取回写后的版本。
         const persistedWorld = (await DB.getWorlds()).find(item => item.id === world.id);
         if (persistedWorld?.lifePlan) world.lifePlan = persistedWorld.lifePlan;
@@ -433,7 +443,8 @@ export async function runWorldEpisode(deps: WorldEpisodeDeps): Promise<WorldEpis
                 const systemPrompt = payload.systemPrompt
                     + buildWorldSystemAddendum(world, char, userProfile?.name || '')
                     + await buildFullDayScheduleBlock(world, worldChar)
-                    + buildWorldLifePlanBlock(world, char, realTarget?.seg);
+                    + buildWorldLifePlanBlock(world, char, realTarget?.seg)
+                    + buildActiveCityEventBlock(worldChar, realTarget?.dayKey || world.lifePlan?.dayKey);
                 const directive = (world.directives || []).find(d => d.charId === char.id);
                 // sim 模式：喂回这名角色自己的单视角总结 + 本卷氛围（绝不喂全知 synopsis）
                 const priorChapter = (world.timeMode === 'sim' && latestChapter)
@@ -702,7 +713,8 @@ export async function rerollWorldCharBeat(
         });
         const systemPrompt = payload.systemPrompt
             + buildWorldSystemAddendum(world, char, userProfile?.name || '')
-            + await buildFullDayScheduleBlock(world, worldChar);
+            + await buildFullDayScheduleBlock(world, worldChar)
+            + buildActiveCityEventBlock(worldChar, world.lifePlan?.dayKey);
         const latestChapter = (world.chapters || [])[(world.chapters?.length || 0) - 1];
         const priorChapter = (world.timeMode === 'sim' && latestChapter)
             ? { atmosphere: latestChapter.atmosphere, charPerspective: latestChapter.perspectives.find(p => p.charId === char.id)?.text }

@@ -316,16 +316,33 @@ export function buildCityLifeContext(char: CharacterProfile, date = characterCit
     return lines.join('\n');
 }
 
+function formatEventScheduleImpact(event: CityLifeEvent): string {
+    const details = [
+        `城市事件「${event.title}」正在影响今天的生活`,
+        event.dailyUpdate || event.scheduleImpact || event.description,
+        event.homeImpact ? `家园影响：${event.homeImpact}` : '',
+    ].filter(Boolean);
+    return details.join('；').slice(0, 220);
+}
+
 export function applyCityLifeToSchedule(char: CharacterProfile, schedule: DailySchedule): DailySchedule {
     const active = getActiveCityEvents(char, schedule.date);
     const goals = (char.cityLife?.goals || []).filter(g => g.status === 'active').sort((a, b) => a.horizon.localeCompare(b.horizon)).slice(0, 1);
     if (!active.length && !goals.length) return schedule;
+    const unmatchedEvents = active.filter(event =>
+        event.affectedLocationIds?.length
+        && !schedule.slots.some(slot => event.affectedLocationIds!.includes(slot.locationId || ''))
+    );
     const linkedSlots = schedule.slots.map(slot => {
         const affecting = active.filter(event => !event.affectedLocationIds?.length || event.affectedLocationIds.includes(slot.locationId || ''));
-        return affecting.length ? {
+        // 地点未被排进日程时，仍要留下一个明确的事件入口，不能让事件无故消失。
+        const visibleEvents = slot === schedule.slots[0]
+            ? [...affecting, ...unmatchedEvents]
+            : affecting;
+        return visibleEvents.length ? {
             ...slot,
-            cityEventIds: Array.from(new Set([...(slot.cityEventIds || []), ...affecting.map(event => event.id)])),
-            worldEvent: [slot.worldEvent, ...affecting.map(event => event.dailyUpdate || event.scheduleImpact || event.description)].filter(Boolean).join('；').slice(0, 180),
+            cityEventIds: Array.from(new Set([...(slot.cityEventIds || []), ...visibleEvents.map(event => event.id)])),
+            worldEvent: [slot.worldEvent, ...visibleEvents.map(formatEventScheduleImpact)].filter(Boolean).join('；').slice(0, 240),
         } : slot;
     });
     const goal = goals[0];
@@ -348,9 +365,13 @@ export function applyCityLifeToSchedule(char: CharacterProfile, schedule: DailyS
 async function syncCityLifeToTodaySchedule(char: CharacterProfile): Promise<void> {
     const today = characterCityDate(char);
     const schedule = await DB.getDailySchedule(char.id, today).catch(() => null);
-    if (!schedule) return;
-    const linked = applyCityLifeToSchedule(char, schedule);
-    if (JSON.stringify(linked) !== JSON.stringify(schedule)) await DB.saveDailySchedule(linked);
+    if (schedule) {
+        const linked = applyCityLifeToSchedule(char, schedule);
+        if (JSON.stringify(linked) !== JSON.stringify(schedule)) await DB.saveDailySchedule(linked);
+    }
+    // 家园计划可能已在当天较早时生成；城市事件更新后仍要立即反映到计划卡上。
+    const { syncCityLifeToLinkedWorldPlan } = await import('./worldHome/lifeLink');
+    await syncCityLifeToLinkedWorldPlan(char).catch(error => console.warn('[CityLife] home plan sync failed:', error));
 }
 
 export async function advanceGoal(char: CharacterProfile, goalId: string, amount = 15): Promise<CharacterProfile> {

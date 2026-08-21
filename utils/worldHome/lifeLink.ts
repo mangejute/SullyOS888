@@ -1,11 +1,11 @@
-import type { CharacterProfile, DailySchedule, ScheduleSlot, WorldCharBeat, WorldDaySegmentKey, WorldLifePlan, WorldProfile } from '../../types';
+import type { CharacterProfile, CityLifeEvent, DailySchedule, ScheduleSlot, WorldCharBeat, WorldDaySegmentKey, WorldLifePlan, WorldProfile } from '../../types';
 import { DB } from '../db';
 import { extractContent, extractJson, safeFetchJson } from '../safeApi';
 import { getLocalDateKey } from '../localDate';
 import { worldNow } from './prompts';
 import { getCharacterNpcs, locationById, locationByName } from '../characterWorld';
 import { formatRoutineContext } from '../characterRoutine';
-import { buildCityLifeContext } from '../cityLife';
+import { buildCityLifeContext, getActiveCityEvents } from '../cityLife';
 
 type ApiConfig = { baseUrl: string; apiKey: string; model: string };
 
@@ -257,6 +257,58 @@ export async function syncScheduleToWorldLifePlan(schedule: DailySchedule): Prom
         lifePlan: { ...world.lifePlan, generatedAt: Date.now(), segments: nextSegments },
         updatedAt: Date.now(),
     });
+}
+
+function formatCityLifePlanImpact(event: CityLifeEvent): string {
+    return [
+        `城市事件「${event.title}」正在发生`,
+        event.dailyUpdate || event.scheduleImpact || event.description,
+        event.homeImpact ? `家园需要：${event.homeImpact}` : '',
+    ].filter(Boolean).join('；');
+}
+
+function appendMissingCityImpacts(value: string | undefined, events: CityLifeEvent[]): string {
+    const current = value || '';
+    const missing = events.filter(event => !current.includes(`城市事件「${event.title}」`));
+    return missing.length ? [current, ...missing.map(formatCityLifePlanImpact)].filter(Boolean).join('；').slice(0, 360) : current;
+}
+
+/** 城市事件出现、结束或被选择分支后，立即刷新已生成的当日家园计划。 */
+export async function syncCityLifeToLinkedWorldPlan(char: CharacterProfile): Promise<void> {
+    const worlds = await DB.getWorlds();
+    const linkedWorlds = worlds.filter(world =>
+        world.lifeLinkEnabled === true
+        && (world.timeMode || 'real') === 'real'
+        && world.memberIds.includes(char.id)
+        && world.lifePlan?.dayKey === worldLifeDayKey(world)
+    );
+    for (const world of linkedWorlds) {
+        const activeEvents = getActiveCityEvents(char, world.lifePlan!.dayKey);
+        if (!activeEvents.length) continue;
+        const nextSegments = world.lifePlan!.segments.map(segment => ({
+            ...segment,
+            // 不带地点的事件是全城事实；有具体地点的事件只在相应生活段出现。
+            event: appendMissingCityImpacts(segment.event, activeEvents.filter(event =>
+                Boolean(event.homeImpact)
+                || !event.affectedLocationIds?.length
+                || segment.members.some(member => event.affectedLocationIds!.includes(member.locationId || ''))
+            )),
+            members: segment.members.map(member => member.charId === char.id ? {
+                ...member,
+                // 只有明确影响家园、命中居住段地点或全城事件才改变家园里的这位角色。
+                description: appendMissingCityImpacts(member.description, activeEvents.filter(event =>
+                    Boolean(event.homeImpact)
+                    || !event.affectedLocationIds?.length
+                    || event.affectedLocationIds!.includes(member.locationId || '')
+                )),
+            } : member),
+        }));
+        await DB.saveWorld({
+            ...world,
+            lifePlan: { ...world.lifePlan!, generatedAt: Date.now(), segments: nextSegments },
+            updatedAt: Date.now(),
+        });
+    }
 }
 
 /** Feed actual observed world facts into the linked schedule without replacing its detailed activities. */

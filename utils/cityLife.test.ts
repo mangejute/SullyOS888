@@ -6,6 +6,7 @@ vi.mock('./db', () => ({
         getDailySchedule: vi.fn(async () => null),
         saveCharacter: vi.fn(),
         saveDailySchedule: vi.fn(),
+        getWorlds: vi.fn(async () => []),
     },
 }));
 
@@ -21,7 +22,7 @@ const makeCharacter = (): CharacterProfile => ({
         cityName: '测试城',
         lastSettledDate: '2026-08-17',
         events: [
-            { id: 'active', title: '河岸暴雨', category: '天气', description: '河岸道路积水。', startDate: '2026-08-20', endDate: '2026-08-22', durationDays: 3, intensity: 4 },
+            { id: 'active', title: '河岸暴雨', category: '天气', description: '河岸道路积水。', startDate: '2026-08-20', endDate: '2026-08-22', durationDays: 3, intensity: 4, affectedLocationIds: ['apartment'], homeImpact: '关闭窗户并给设备除湿。' },
             { id: 'upcoming', title: '夜市开幕', category: '活动', description: '摊位正在搭建。', startDate: '2026-08-21', endDate: '2026-08-21', durationDays: 1, intensity: 2 },
             { id: 'aftermath', title: '街区停电', category: '公共服务', description: '商户正在复电。', startDate: '2026-08-17', endDate: '2026-08-19', durationDays: 3, intensity: 3 },
             { id: 'later', title: '远期展览', category: '活动', description: '不应提前占用今天的上下文。', startDate: '2026-08-30', endDate: '2026-08-30', durationDays: 1, intensity: 1 },
@@ -48,7 +49,7 @@ describe('城市事件分阶段联动', () => {
         expect(context).not.toContain('远期展览');
     });
 
-    it('把事件地点和目标行动一起写进当天日程', () => {
+    it('把城市事件和目标行动一起写进当天日程，即使地点尚未匹配也不能漏掉', () => {
         const char = makeCharacter();
         const schedule = applyCityLifeToSchedule(char, {
             id: 'city-life-test_2026-08-20', charId: char.id, date: '2026-08-20', generatedAt: 0,
@@ -57,6 +58,9 @@ describe('城市事件分阶段联动', () => {
                 { startTime: '20:00', activity: '休息' },
             ],
         });
+        expect(schedule.slots[0].worldEvent).toContain('河岸暴雨');
+        expect(schedule.slots[0].worldEvent).toContain('家园影响：关闭窗户并给设备除湿。');
+        expect(schedule.slots[1].worldEvent).toBeUndefined();
         expect(schedule.slots[0].cityEventIds).toContain('active');
         expect(schedule.slots[0].goalIds).toContain('goal');
         expect(schedule.slots[0].description).toContain('目标行动');
