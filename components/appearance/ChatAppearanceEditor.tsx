@@ -651,7 +651,7 @@ export const ChatAppearanceEditor: React.FC<Props> = ({ theme, updateTheme, onRe
                 {page === 0 && (<>
                     <p className="mb-3 text-[10px] text-slate-400">一键换整套聊天壳（含头像、气泡、间距与细节微调），切预设会先清掉微调残留。</p>
                     <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
-                        {presets.map((preset) => (
+                        {presets.slice(0, 1).map((preset) => (
                             <button
                                 key={preset.name}
                                 onClick={() => updateTheme({ ...FINE_TUNE_DEFAULTS, ...preset.config })}
@@ -777,16 +777,35 @@ export const ChatAppearanceEditor: React.FC<Props> = ({ theme, updateTheme, onRe
 
             <section className={groupClass}>
                 <div className="mb-3">
-                    <h2 className="text-sm font-bold uppercase tracking-widest text-slate-400">白框自定义 (CSS)</h2>
-                    <p className="mt-1 text-[10px] leading-relaxed text-slate-400">
-                        聊天白框美化现在按「单个角色」管理：进该角色聊天 →「＋」菜单 →「白框」里设置、预览、存预设。
-                        如果某个角色的 CSS 写坏了导致聊天界面异常、连设置都打不开，点下面一键还原全部即可恢复。
-                    </p>
+                    <h2 className="text-sm font-bold uppercase tracking-widest text-slate-400">自定义 CSS</h2>
+                    <p className="mt-1 text-[10px] leading-relaxed text-slate-400">界面和气泡分开编辑，保存后可以自由组合。留空表示使用上面的可视化设置。</p>
                 </div>
+                <details className="rounded-2xl border border-slate-200 bg-slate-50 p-3" open>
+                    <summary className="cursor-pointer text-[11px] font-bold text-slate-700">聊天界面 CSS</summary>
+                    <p className="mt-1 text-[10px] text-slate-400">控制头部、消息区、输入栏和聊天外框。</p>
+                    <textarea
+                        value={theme.chatChromeCustomCss || ''}
+                        onChange={(e) => updateTheme({ chatChromeCustomCss: e.target.value })}
+                        placeholder={'.sully-chat-header {\n  /* 在这里调整聊天界面 */\n}'}
+                        spellCheck={false}
+                        className="mt-2 min-h-[150px] w-full resize-y rounded-xl border border-slate-200 bg-white p-3 font-mono text-[11px] leading-relaxed text-slate-700 outline-none focus:border-primary"
+                    />
+                </details>
+                <details className="mt-3 rounded-2xl border border-slate-200 bg-slate-50 p-3" open>
+                    <summary className="cursor-pointer text-[11px] font-bold text-slate-700">气泡 CSS</summary>
+                    <p className="mt-1 text-[10px] text-slate-400">只控制用户气泡和角色气泡，可与上面的界面设置自由搭配。</p>
+                    <textarea
+                        value={theme.chatBubbleCustomCss || ''}
+                        onChange={(e) => updateTheme({ chatBubbleCustomCss: e.target.value })}
+                        placeholder={'.sully-bubble-user {\n  /* 用户气泡 */\n}\n.sully-bubble-ai {\n  /* 角色气泡 */\n}'}
+                        spellCheck={false}
+                        className="mt-2 min-h-[150px] w-full resize-y rounded-xl border border-slate-200 bg-white p-3 font-mono text-[11px] leading-relaxed text-slate-700 outline-none focus:border-primary"
+                    />
+                </details>
                 <button
-                    onClick={() => { if (window.confirm('确定还原全部聊天白框美化？将清空「全局」以及「每个角色」的自定义 CSS（其它聊天外观设置不受影响）。')) onResetAllChrome?.(); }}
-                    className="w-full rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-[12px] font-bold text-rose-600 transition-all hover:bg-rose-100 active:scale-[0.99]">
-                    一键还原全部聊天白框美化（救援）
+                    onClick={() => { if (window.confirm('确定还原全部聊天界面和气泡 CSS？将清空全局与角色白框 CSS。')) onResetAllChrome?.(); updateTheme({ chatChromeCustomCss: '', chatBubbleCustomCss: '' }); }}
+                    className="mt-3 w-full rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-[12px] font-bold text-rose-600 transition-all hover:bg-rose-100 active:scale-[0.99]">
+                    清空自定义 CSS
                 </button>
             </section>
 

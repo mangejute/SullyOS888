@@ -3109,6 +3109,7 @@ const Chat: React.FC = () => {
              )}
 
              {activeTheme.customCss && <style>{activeTheme.customCss}</style>}
+             {osTheme.chatBubbleCustomCss && <style>{osTheme.chatBubbleCustomCss}</style>}
 
              {/* 心象卡片自定义 CSS（per-character）：作用于 .sully-psyche-* 各零件，编辑入口在心象设置弹窗 */}
              {(char as any).thinkingChainCustomCss && <style>{(char as any).thinkingChainCustomCss}</style>}
@@ -3118,7 +3119,7 @@ const Chat: React.FC = () => {
                  pointer-events:none 时，用户会遇到「点输入框没反应、键盘唤不起来」或退不出聊天，
                  且重启、重新导入备份都无解。有了兜底，至少能退出去「外观→聊天界面→还原白框」清掉坏 CSS。
                  不锁位置与配色，正常美化不受影响。 */}
-             {(osTheme.chatChromeCustomCss || char.chromeCustomCss || activeTheme.customCss || (char as any).thinkingChainCustomCss) && (
+             {(osTheme.chatChromeCustomCss || osTheme.chatBubbleCustomCss || char.chromeCustomCss || activeTheme.customCss || (char as any).thinkingChainCustomCss) && (
                <style>{`
                  .sully-chat-back{visibility:visible!important;opacity:1!important;pointer-events:auto!important;}
                  .sully-chat-inputbar{visibility:visible!important;opacity:1!important;pointer-events:auto!important;}

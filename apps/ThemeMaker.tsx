@@ -999,22 +999,16 @@ const ThemeMaker: React.FC = () => {
                         <h1 className="text-xl font-medium text-slate-700">聊天界面美化</h1>
                         <div className="text-[10px] flex items-center gap-1.5 text-slate-500">
                             <span className={`inline-flex w-2 h-2 rounded-full ${isAppliedToPreview && !isDirty ? 'bg-emerald-500' : 'bg-amber-400'}`}></span>
-                            {isAppliedToPreview && !isDirty ? '已保存到气泡库' : '有未保存的改动'}
+                            {isAppliedToPreview && !isDirty ? '已应用到聊天界面' : '有未保存的改动'}
                         </div>
                     </div>
                 </div>
                 <div className="flex items-center gap-2">
-                    {beautySection === 'bubble' && <button onClick={() => saveTheme({ exitAfterSave: false })} className="px-4 py-1.5 bg-primary text-white rounded-full text-xs font-bold shadow-lg shadow-primary/30 active:scale-95 transition-all">保存气泡</button>}
                 </div>
             </div>
             </div>
 
-            <div className="flex border-b border-slate-200 bg-white shrink-0">
-                <button type="button" onClick={() => setBeautySection('chat')} className={`flex-1 py-3 text-sm font-bold transition-colors ${beautySection === 'chat' ? 'text-primary border-b-2 border-primary' : 'text-slate-400'}`}>聊天界面</button>
-                <button type="button" onClick={() => setBeautySection('bubble')} className={`flex-1 py-3 text-sm font-bold transition-colors ${beautySection === 'bubble' ? 'text-primary border-b-2 border-primary' : 'text-slate-400'}`}>气泡工坊</button>
-            </div>
-
-            {beautySection === 'chat' ? (
+            {true ? (
                 <div className="flex-1 overflow-y-auto no-scrollbar">
                     <ChatAppearanceEditor theme={theme} updateTheme={updateOSTheme} onResetAllChrome={resetAllChromeCss} />
                 </div>
