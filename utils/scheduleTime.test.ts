@@ -54,4 +54,15 @@ describe('character schedule clock', () => {
             ...slots,
         ], losAngelesChar, instant)).toBe(1);
     });
+
+    it('凌晨沿用前一晚最后的睡眠收尾', () => {
+        process.env.TZ = 'Asia/Shanghai';
+        const instant = new Date('2026-07-20T19:00:00.000Z'); // 手机 7/21 03:00
+        const sleepSlots: ScheduleSlot[] = [
+            { startTime: '08:00', activity: '工作' },
+            { startTime: '22:00', activity: '看剧' },
+            { startTime: '23:30', activity: '入睡' },
+        ];
+        expect(getCurrentScheduleSlotIndex(sleepSlots, { customTimezoneEnabled: false }, instant)).toBe(2);
+    });
 });

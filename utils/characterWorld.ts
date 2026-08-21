@@ -76,6 +76,11 @@ export function applyScheduleTravelModel(char: CharacterProfile, slots: Schedule
 
 export function currentScheduleSlot(schedule: DailySchedule | null, now = new Date()): ScheduleSlot | null {
     if (!schedule?.slots?.length) return null;
+    const last = schedule.slots[schedule.slots.length - 1];
+    if (now.getHours() < 6 && /入睡|睡前收尾|睡觉/.test(last.activity)) {
+        const [lastHour] = last.startTime.split(':').map(Number);
+        if (Number.isFinite(lastHour) && lastHour >= 18) return last;
+    }
     const minutes = now.getHours() * 60 + now.getMinutes();
     let current: ScheduleSlot | null = null;
     for (const slot of schedule.slots) {
@@ -139,6 +144,10 @@ export function buildCharacterWorldContext(char: CharacterProfile, schedule?: Da
                 .filter(Boolean)
                 .join('、');
             lines.push(`- ${slot.startTime} ${slot.activity}${slotLocation ? `｜地点：${slotLocation.name}` : slot.location ? `｜地点：${slot.location}` : ''}${slotNpcNames ? `｜同行：${slotNpcNames}` : ''}`);
+        }
+        const last = schedule.slots[schedule.slots.length - 1];
+        if (/入睡|睡前收尾|睡觉/.test(last.activity)) {
+            lines.push(`睡眠边界：${last.startTime} 的${last.activity}之后默认睡到次日起床；除非已有明确剧情、城市事件或家园事实打断，不得凭空安排凌晨活动。`);
         }
     }
     if (locations.length) {

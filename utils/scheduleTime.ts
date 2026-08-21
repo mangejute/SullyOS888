@@ -23,6 +23,13 @@ export const getCurrentScheduleSlotIndex = (
     base: Date = new Date(),
 ): number => {
     const now = getScheduleWallClock(char, base);
+    const last = slots[slots.length - 1];
+    // 00:00-05:59 是前一晚的延续；若最后一条是晚间睡眠收尾，凌晨应继续算在睡眠中，
+    // 不能因为简单比较 HH:MM 又回退到 22 点的活动。
+    if (now.getHours() < 6 && last && /入睡|睡前收尾|睡觉/.test(last.activity)) {
+        const [lastHour] = last.startTime.split(':').map(Number);
+        if (Number.isFinite(lastHour) && lastHour >= 18) return slots.length - 1;
+    }
     const currentMinutes = now.getHours() * 60 + now.getMinutes();
     for (let i = slots.length - 1; i >= 0; i--) {
         const [h, m] = slots[i].startTime.split(':').map(Number);

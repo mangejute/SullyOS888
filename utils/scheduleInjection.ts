@@ -37,6 +37,12 @@ export const resolveScheduleSlots = (
     now: Date,
 ): { current: ScheduleSlot | null; next: ScheduleSlot | null } => {
     if (!schedule?.slots?.length) return { current: null, next: null };
+    const last = schedule.slots[schedule.slots.length - 1];
+    // 凌晨属于前一晚；晚间最后一条若是睡眠收尾，应继续作为当前状态。
+    if (now.getHours() < PRE_DAWN_END_HOUR && /入睡|睡前收尾|睡觉/.test(last.activity)) {
+        const [lastHour] = last.startTime.split(':').map(Number);
+        if (Number.isFinite(lastHour) && lastHour >= 18) return { current: last, next: null };
+    }
     const currentMinutes = now.getHours() * 60 + now.getMinutes();
     for (let i = schedule.slots.length - 1; i >= 0; i--) {
         const [h, m] = schedule.slots[i].startTime.split(':').map(Number);
@@ -80,6 +86,9 @@ export const buildScheduleInjection = (
             slotHeader += `\n家园实况：${currentSlot.worldEvent}${currentSlot.worldMood ? `（你当时${currentSlot.worldMood}）` : ''}`;
         }
         if (nextSlot) slotHeader += `\n之后安排：${nextSlot.startTime} ${nextSlot.activity}`;
+        if (/入睡|睡前收尾|睡觉|休息/.test(currentSlot.activity)) {
+            slotHeader += '\n睡眠边界：从这条日程开始默认进入睡眠，不要凭空延长到凌晨三四点；只有已有明确剧情、城市事件或家园事实才能打断。';
+        }
         slotHeader += '\n';
     } else if (nextSlot) {
         slotHeader = isPreDawnCarryOver

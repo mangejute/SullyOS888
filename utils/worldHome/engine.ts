@@ -264,7 +264,7 @@ async function buildFullDayScheduleBlock(world: WorldProfile, char: CharacterPro
                 return `- ${x.startTime} ${x.activity}${x.location ? `（${x.location}）` : ''}${npcNames ? `｜同行：${npcNames}` : ''}`;
             })
             .join('\n');
-        return `\n\n## 你今天的日程表（既定安排）\n${lines}\n（演绎这半天时以此为参照，行为别和既定安排无故冲突；世界里的事件可以合理打断日程，但要有交代。）`;
+        return `\n\n## 你今天的日程表（既定安排）\n${lines}\n（演绎这半天时以此为参照，行为别和既定安排无故冲突；最后一条“入睡/睡前收尾”之后默认一直处于睡眠状态，不要凭空补出凌晨三四点的新活动；世界里的事件可以合理打断日程，但要有交代。）`;
     } catch {
         return '';
     }

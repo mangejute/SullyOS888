@@ -13,9 +13,10 @@ import { getFlowNarrativeKey, isScheduleFeatureOn } from './scheduleFeature';
 import { enforceWorldLifePlanOnSchedule, formatWorldLifeContext, getWorldLifeContextForCharacter, type WorldLifeContext } from './worldHome/lifeLink';
 import { worldNow } from './worldHome/prompts';
 import { recordPromptHistory } from './promptHistory';
-import { applyScheduleTravelModel, buildCharacterWorldContext, normalizeScheduleSlot } from './characterWorld';
+import { applyScheduleTravelModel, buildCharacterWorldContext, getCharacterWorldState, normalizeScheduleSlot } from './characterWorld';
 import { applyCityLifeToSchedule, buildCityLifeContext, settleCityLife } from './cityLife';
 import { ensureCharacterRoutine, formatRoutineContext } from './characterRoutine';
+import { getChinaCalendarDay } from './chinaCalendar2026';
 
 export { getFlowNarrativeKey, isScheduleFeatureOn } from './scheduleFeature';
 
@@ -26,6 +27,64 @@ const scheduleSegmentForTime = (startTime: string): 'morning' | 'noon' | 'evenin
     if (hour < 18) return 'noon';
     return 'evening';
 };
+
+const parseClockMinutes = (value: string): number | null => {
+    const match = /^(\d{2}):(\d{2})$/.exec(String(value || ''));
+    if (!match) return null;
+    const hour = Number(match[1]);
+    const minute = Number(match[2]);
+    return hour < 24 && minute < 60 ? hour * 60 + minute : null;
+};
+
+/**
+ * 日程的最后一条必须把角色带到基础作息的睡点。
+ * 模型常会生成到 22 点就停，随后聊天/家园又各自补出凌晨活动，导致同一天出现两个互相冲突的事实。
+ * 这里在保存前把睡眠作为共同事实写进日程，并移除睡点之后没有明确剧情依据的活动。
+ */
+export function ensureSleepSlotForRoutine(
+    char: CharacterProfile,
+    date: Date | string,
+    inputSlots: ScheduleSlot[],
+): ScheduleSlot[] {
+    const day = getChinaCalendarDay(date);
+    const routine = char.routineProfile;
+    const sleepTime = routine
+        ? (day.isWorkday ? routine.workday.sleepTime : routine.restday.sleepTime)
+        : '23:30';
+    const sleepMinutes = parseClockMinutes(sleepTime) ?? 23 * 60 + 30;
+    const sleepClock = `${String(Math.floor(sleepMinutes / 60)).padStart(2, '0')}:${String(sleepMinutes % 60).padStart(2, '0')}`;
+    const isAfterSleep = (minutes: number): boolean => {
+        // 06:00 之后入睡时，00:00-05:59 属于睡点之后的跨日活动；一并移除。
+        if (sleepMinutes >= 6 * 60) return minutes < 6 * 60 || minutes >= sleepMinutes;
+        // 00:00-05:59 入睡时，白天活动仍然属于当天；只清掉睡点之后的凌晨活动。
+        return minutes > sleepMinutes && minutes < 6 * 60;
+    };
+    const beforeSleep = inputSlots.filter(slot => {
+        const minutes = parseClockMinutes(slot.startTime);
+        return minutes == null || !isAfterSleep(minutes);
+    });
+    const nearSleep = beforeSleep.find(slot => {
+        const minutes = parseClockMinutes(slot.startTime);
+        return minutes != null && Math.abs(minutes - sleepMinutes) <= 90
+            && /睡|寝|洗漱|休息|收尾|躺下/.test(`${slot.activity} ${slot.description || ''}`);
+    });
+    const home = getCharacterWorldState(char).homeLocationId;
+    // 00:00-05:59 是前一晚的延续，但现有时间轴按 HH:MM 排序；用 23:50 表示“前一晚收尾”，
+    // 同时在描述里保留真实入睡时间，避免它被排到当天列表的第一条。
+    const sleepStartTime = sleepMinutes < 6 * 60 ? '23:50' : sleepClock;
+    const sleepSlot: ScheduleSlot = {
+        startTime: sleepStartTime,
+        activity: sleepMinutes < 6 * 60 ? '睡前收尾' : '入睡',
+        description: `按${day.isWorkday ? '工作日' : '休息日'}作息，${sleepClock}入睡；此后默认睡到次日起床，除非已有明确剧情或城市事件打断。`,
+        emoji: '🌙',
+        ...(home ? { locationId: home } : {}),
+        worldSegment: scheduleSegmentForTime(sleepStartTime),
+    };
+    const result = nearSleep
+        ? beforeSleep.map(slot => slot === nearSleep ? { ...slot, ...sleepSlot } : slot)
+        : [...beforeSleep, sleepSlot];
+    return result.sort((a, b) => a.startTime.localeCompare(b.startTime));
+}
 
 interface ApiConfig {
     baseUrl: string;
@@ -133,7 +192,7 @@ ${chatHistoryBlock ? `**重要：上面给了你最近和「${user.name}」的�
    - ✅ user 只能作为某件正在发生的事的**副词**自然地渗进 description，
         比如 "画草稿，昨天 ${user.name} 说那个角色好看，顺手再画一张" —— 主语仍是 ta 自己
 
-5. **四段覆盖** —— 日程必须覆盖 morning（早上）、noon（中午）、evening（晚上）、latenight（凌晨）四段；每段至少一条。若有家园当日生活计划，家园段落是硬事实：你可以用多条细日程展开，但不能改地点、共同事件或把角色安排到冲突的事情上。
+5. **四段覆盖与睡眠收口** —— 日程要覆盖 morning（早上）、noon（中午）、evening（晚上）和 latenight（凌晨）四段的生活脉络；最后一条必须是接近作息中“睡觉”时间的「睡前收尾/入睡」，不能在 22:00 等过早时间结束。作息给出的睡点是硬约束：睡点之后默认一直休息到次日起床，除非聊天、家园、城市事件或剧情明确打断；不要凭空安排角色熬到凌晨三四点。若有家园当日生活计划，家园段落是硬事实：你可以用多条细日程展开，但不能改地点、共同事件或把角色安排到冲突的事情上。
 
 ### 第二部分：意识流独白（这是核心）
 
@@ -208,7 +267,7 @@ ${chatHistoryBlock ? `**重要：上面给了你最近和「${user.name}」的�
 - emoji: 一个匹配的emoji
 - locationId: 如果当前意识对应地图地点，从地点索引中选择唯一 ID
 - participantNpcIds: 如果明确和 NPC 一起，从 NPC 索引中选择唯一 ID，否则写 []
-- worldSegment: "morning" / "noon" / "evening" / "latenight"。必须覆盖四段；若有家园计划，按该段的共同事实思考，不能假装发生物理活动。
+- worldSegment: "morning" / "noon" / "evening" / "latenight"。必须覆盖四段；最后一条必须落在基础作息的睡点附近并明确进入休息状态。睡点之后默认不再产生新的活动或物理行动；若有家园计划，按该段的共同事实思考，不能假装发生物理活动。
 
 **可以做的事**（基于真实能力）：回想和用户的对话、整理之前聊过的话题、琢磨某个问题、等待用户、感到无聊、想念用户、发呆、反思自己说过的话、对某个话题产生好奇、期待下次聊天
 **不能做的事**（会构成谎言）：出门、吃东西、运动、搜索网页（除非真的有这个功能）、和别人见面、任何物理世界的活动
@@ -378,9 +437,10 @@ export async function generateDailyScheduleForChar(
 
         if (slots.length === 0) return null;
 
-        // Sort by time
+        // Sort by time, then force the shared sleep boundary before any world/home linkage.
         slots.sort((a, b) => a.startTime.localeCompare(b.startTime));
-        let modeledSlots = applyScheduleTravelModel(char, slots);
+        const slotsWithSleep = ensureSleepSlotForRoutine(char, today, slots);
+        let modeledSlots = applyScheduleTravelModel(char, slotsWithSleep);
         if (worldLifeContext) {
             modeledSlots = enforceWorldLifePlanOnSchedule(char, modeledSlots, worldLifeContext);
             modeledSlots = applyScheduleTravelModel(char, modeledSlots);
