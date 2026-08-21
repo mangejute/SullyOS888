@@ -1,5 +1,5 @@
 import React, { useRef, useState } from 'react';
-import { AppID, OSTheme, ChatFineTuneFields } from '../../types';
+import { OSTheme, ChatFineTuneFields } from '../../types';
 import WhiteboxSoundEditor from '../chat/WhiteboxSoundEditor';
 import { WhiteboxSound } from '../../utils/whiteboxSound';
 import ChatFineTunePanel from '../chat/ChatFineTunePanel';
@@ -10,8 +10,6 @@ type Props = {
     updateTheme: (updates: Partial<OSTheme>) => void;
     /** 一键还原全部聊天白框 CSS（全局 + 每个角色），兼作坏 CSS 救援。 */
     onResetAllChrome?: () => void;
-    /** 「进阶装扮」区块的跳转（如一键去气泡工坊）。 */
-    onOpenApp?: (appId: AppID) => void;
 };
 
 // 聊天细节微调的默认值快照。切预设时先铺这层再叠预设配置：否则从「沉浸剧场」切回
@@ -393,7 +391,7 @@ const ChoiceGroup: React.FC<{
     </div>
 );
 
-export const ChatAppearanceEditor: React.FC<Props> = ({ theme, updateTheme, onResetAllChrome, onOpenApp }) => {
+export const ChatAppearanceEditor: React.FC<Props> = ({ theme, updateTheme, onResetAllChrome }) => {
     const avatarShape = theme.chatAvatarShape || defaults.chatAvatarShape;
     const avatarSize = theme.chatAvatarSize || defaults.chatAvatarSize;
     const avatarMode = theme.chatAvatarMode || defaults.chatAvatarMode;
@@ -411,7 +409,6 @@ export const ChatAppearanceEditor: React.FC<Props> = ({ theme, updateTheme, onRe
     const sendButtonStyle = theme.chatSendButtonStyle || defaults.chatSendButtonStyle;
     const pendingIndicator = theme.chatPendingIndicator !== false;
     const showHeaderBuffs = theme.chatHideHeaderBuffs !== true;
-    const [showStyleHelp, setShowStyleHelp] = useState(false);
 
     // 聊天壳设置面板悬浮化——同私聊「聊天装扮」的形态：面板浮在预览上方而不占文档流，
     // 预览不用瘦身也能和设置同屏；点圆气泡收起面板即可看全预览。
@@ -776,70 +773,6 @@ export const ChatAppearanceEditor: React.FC<Props> = ({ theme, updateTheme, onRe
                     onChangeSound={(s) => updateTheme({ chatSound: s || undefined })}
                     hint={<>🔔 <b>全局默认</b>：某角色未单独设提示音时，收到 ta 新发的最后一条消息就响这个。角色自己设的会盖过它。</>}
                 />
-            </section>
-
-            {/* 进阶装扮：把外观可视化设置 / 气泡工坊 / 白框 CSS 三个装扮入口串成一条有引导的路 */}
-            <section className={groupClass}>
-                <div className="mb-3 flex items-start justify-between gap-2">
-                    <div>
-                        <h2 className="text-sm font-bold uppercase tracking-widest text-slate-400">进阶装扮 · 去哪儿改什么</h2>
-                        <p className="mt-1 text-[10px] leading-relaxed text-slate-400">
-                            这一页管「整体壳子」和细节微调；气泡长相、深度魔改各有专门的地方。不知道谁生效？点右边「?」。
-                        </p>
-                    </div>
-                    <button
-                        onClick={() => setShowStyleHelp(v => !v)}
-                        className={`shrink-0 w-5 h-5 rounded-full text-[11px] font-bold leading-none flex items-center justify-center transition-colors ${showStyleHelp ? 'bg-primary text-white' : 'bg-slate-200 text-slate-500'}`}
-                        aria-label="装扮优先级说明"
-                    >
-                        ?
-                    </button>
-                </div>
-                {showStyleHelp && (
-                    <div className="mb-3 rounded-2xl bg-amber-50/70 border border-amber-200/60 px-4 py-3 text-[11px] text-slate-600 leading-relaxed space-y-2">
-                        <p className="font-bold text-amber-700">「我在三个地方都改了，到底谁生效？」</p>
-                        <p>三个装扮入口各管一摊，平时互不打架：</p>
-                        <p>
-                            <span className="font-semibold">🎛️ 这一页（可视化设置）</span>：聊天壳、头像、间距、细节微调。改整体布局用它，不用写一行代码。
-                        </p>
-                        <p>
-                            <span className="font-semibold">🎨 气泡工坊</span>：气泡本身的长相——颜色、圆角、贴图、装饰。做好的气泡按角色穿戴。
-                        </p>
-                        <p>
-                            <span className="font-semibold">✍️ 白框自定义 CSS</span>：手写代码深度魔改（头部、输入栏、任何零件）。入口在每个角色聊天的「＋」→「白框」。
-                        </p>
-                        <p className="font-semibold">改了同一个东西撞车时，谁说了算：</p>
-                        <p>
-                            <span className="font-semibold text-amber-600">可视化设置 &lt; 气泡主题 &lt; 自定义 CSS</span>。
-                            也就是：气泡工坊的主题能盖过这一页的设置；你手写的自定义 CSS 权力最大，两边都盖得过——
-                            所以老用户手里的美化代码永远不会被这页的开关弄坏。
-                        </p>
-                        <p>
-                            某个角色看起来「设置不生效」时，按这个顺序排查：先看 ta 有没有专属白框 CSS（聊天「＋」→「白框」），再看 ta 穿着哪套气泡（聊天顶栏会话面板 → 气泡样式），最后才是这一页。
-                        </p>
-                    </div>
-                )}
-                <div className="space-y-2">
-                    <div className="flex items-center justify-between rounded-2xl bg-slate-50 px-3 py-2.5">
-                        <div className="min-w-0 pr-3">
-                            <div className="text-[11px] font-bold text-slate-700">想改气泡的颜色 / 贴图 / 装饰</div>
-                            <div className="mt-0.5 text-[10px] text-slate-400">去气泡工坊捏一套，保存后可以直接给角色穿上。</div>
-                        </div>
-                        <button
-                            onClick={() => onOpenApp?.(AppID.ThemeMaker)}
-                            className="shrink-0 rounded-xl bg-primary/10 px-3 py-1.5 text-[11px] font-bold text-primary transition-all active:scale-95">
-                            去气泡工坊 →
-                        </button>
-                    </div>
-                    <div className="rounded-2xl bg-slate-50 px-3 py-2.5">
-                        <div className="text-[11px] font-bold text-slate-700">想给某个角色单独一套微调</div>
-                        <div className="mt-0.5 text-[10px] text-slate-400">进 ta 的聊天 → 「＋」菜单 → 「聊天装扮」，可以只覆盖字号、头像这些细节，其余跟随全局。</div>
-                    </div>
-                    <div className="rounded-2xl bg-slate-50 px-3 py-2.5">
-                        <div className="text-[11px] font-bold text-slate-700">想手写 CSS 深度魔改</div>
-                        <div className="mt-0.5 text-[10px] text-slate-400">进角色聊天 → 「＋」菜单 → 「白框」，那里能边写边预览、还能存预设分享。</div>
-                    </div>
-                </div>
             </section>
 
             <section className={groupClass}>

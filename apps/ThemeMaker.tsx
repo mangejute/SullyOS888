@@ -7,6 +7,7 @@ import { ChatTheme, BubbleStyle } from '../types';
 import { processImage } from '../utils/file';
 import { validateScopedCss, runCssRenderabilityCheck, CssValidationResult } from '../utils/scopedCss';
 import { trackEvent } from '../utils/analytics';
+import { ChatAppearanceEditor } from '../components/appearance/ChatAppearanceEditor';
 
 const cloneTheme = (theme: ChatTheme): ChatTheme => {
     if (typeof structuredClone === 'function') {
@@ -436,7 +437,7 @@ const PREVIEW_SCENES: PreviewScene[] = [
 ];
 
 const ThemeMaker: React.FC = () => {
-    const { closeApp, addCustomTheme, removeCustomTheme, addToast, characters, updateCharacter, customThemes } = useOS();
+    const { closeApp, addCustomTheme, removeCustomTheme, addToast, characters, updateCharacter, customThemes, theme, updateTheme: updateOSTheme } = useOS();
     const [initialThemeId] = useState(() => `theme-${Date.now()}`);
     const [editingTheme, setEditingTheme] = useState<ChatTheme>({ ...DEFAULT_THEME, id: initialThemeId });
     const [activeTab, setActiveTab] = useState<'user' | 'ai' | 'css'>('user');
@@ -465,6 +466,15 @@ const ThemeMaker: React.FC = () => {
     const [assetUrlDraft, setAssetUrlDraft] = useState<Record<'bg' | 'deco' | 'avatarDeco', string>>({ bg: '', deco: '', avatarDeco: '' });
     const [isThemeLibraryOpen, setIsThemeLibraryOpen] = useState(false);
     const [themeLibrarySearch, setThemeLibrarySearch] = useState('');
+    const [beautySection, setBeautySection] = useState<'chat' | 'bubble'>('chat');
+    const resetAllChromeCss = () => {
+        let count = 0;
+        if (theme.chatChromeCustomCss) { void updateOSTheme({ chatChromeCustomCss: '' }); count++; }
+        characters.forEach(c => {
+            if ((c as any).chromeCustomCss) { updateCharacter(c.id, { chromeCustomCss: '' } as any); count++; }
+        });
+        addToast(count ? `已还原 ${count} 处聊天白框美化` : '没有需要还原的白框美化', count ? 'success' : 'info');
+    };
     
     // Local state for sliders
     const [paddingVal, setPaddingVal] = useState(12);
@@ -986,7 +996,7 @@ const ThemeMaker: React.FC = () => {
                         </svg>
                     </button>
                     <div className="flex flex-col">
-                        <h1 className="text-xl font-medium text-slate-700">气泡工坊</h1>
+                        <h1 className="text-xl font-medium text-slate-700">聊天界面美化</h1>
                         <div className="text-[10px] flex items-center gap-1.5 text-slate-500">
                             <span className={`inline-flex w-2 h-2 rounded-full ${isAppliedToPreview && !isDirty ? 'bg-emerald-500' : 'bg-amber-400'}`}></span>
                             {isAppliedToPreview && !isDirty ? '已保存到气泡库' : '有未保存的改动'}
@@ -994,12 +1004,22 @@ const ThemeMaker: React.FC = () => {
                     </div>
                 </div>
                 <div className="flex items-center gap-2">
-                    <button onClick={() => saveTheme({ exitAfterSave: false })} className="px-4 py-1.5 bg-primary text-white rounded-full text-xs font-bold shadow-lg shadow-primary/30 active:scale-95 transition-all">
-                        保存
-                    </button>
+                    {beautySection === 'bubble' && <button onClick={() => saveTheme({ exitAfterSave: false })} className="px-4 py-1.5 bg-primary text-white rounded-full text-xs font-bold shadow-lg shadow-primary/30 active:scale-95 transition-all">保存气泡</button>}
                 </div>
             </div>
             </div>
+
+            <div className="flex border-b border-slate-200 bg-white shrink-0">
+                <button type="button" onClick={() => setBeautySection('chat')} className={`flex-1 py-3 text-sm font-bold transition-colors ${beautySection === 'chat' ? 'text-primary border-b-2 border-primary' : 'text-slate-400'}`}>聊天界面</button>
+                <button type="button" onClick={() => setBeautySection('bubble')} className={`flex-1 py-3 text-sm font-bold transition-colors ${beautySection === 'bubble' ? 'text-primary border-b-2 border-primary' : 'text-slate-400'}`}>气泡工坊</button>
+            </div>
+
+            {beautySection === 'chat' ? (
+                <div className="flex-1 overflow-y-auto no-scrollbar">
+                    <ChatAppearanceEditor theme={theme} updateTheme={updateOSTheme} onResetAllChrome={resetAllChromeCss} />
+                </div>
+            ) : (
+            <>
 
             {/* 用户作品区：保存后的气泡可回到工坊继续编辑，也可单独导出分享。 */}
             <section className="shrink-0 bg-white/80 border-b border-slate-100 px-4 py-3">
@@ -1295,8 +1315,7 @@ const ThemeMaker: React.FC = () => {
                                 </div>
                             </div>
 
-                            {activeTab !== 'css' && (
-                                <div className={`rounded-xl border p-3 ${showLowContrastWarning ? 'border-amber-200 bg-amber-50/80' : 'border-emerald-200 bg-emerald-50/70'}`}>
+                            <div className={`rounded-xl border p-3 ${showLowContrastWarning ? 'border-amber-200 bg-amber-50/80' : 'border-emerald-200 bg-emerald-50/70'}`}>
                                     <div className="flex flex-wrap items-center justify-between gap-2">
                                         <div>
                                             <div className="text-[11px] font-semibold text-slate-700">实时可读性评分：{activeContrastScore.grade}（{activeContrastScore.ratio.toFixed(2)}:1）</div>
@@ -1316,7 +1335,6 @@ const ThemeMaker: React.FC = () => {
                                         </div>
                                     )}
                                 </div>
-                            )}
 
                             {/* Colors & Opacity */}
                             <div className="grid grid-cols-2 gap-4">
@@ -1545,6 +1563,9 @@ const ThemeMaker: React.FC = () => {
 
                 </div>
             </div>
+            )}
+
+            </>
             )}
 
             {/* Discard unsaved changes confirm */}

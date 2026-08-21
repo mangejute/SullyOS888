@@ -5584,6 +5584,11 @@ function getFlowNarrativeKey(hour) {
 var PRE_DAWN_END_HOUR = 5;
 var resolveScheduleSlots = (schedule, now) => {
   if (!schedule?.slots?.length) return { current: null, next: null };
+  const last = schedule.slots[schedule.slots.length - 1];
+  if (now.getHours() < PRE_DAWN_END_HOUR && /入睡|睡前收尾|睡觉/.test(last.activity)) {
+    const [lastHour] = last.startTime.split(":").map(Number);
+    if (Number.isFinite(lastHour) && lastHour >= 18) return { current: last, next: null };
+  }
   const currentMinutes = now.getHours() * 60 + now.getMinutes();
   for (let i = schedule.slots.length - 1; i >= 0; i--) {
     const [h, m] = schedule.slots[i].startTime.split(":").map(Number);
@@ -5611,6 +5616,9 @@ var buildScheduleInjection = (schedule, evolvedNarrative, now = /* @__PURE__ */ 
     }
     if (nextSlot) slotHeader += `
 \u4E4B\u540E\u5B89\u6392\uFF1A${nextSlot.startTime} ${nextSlot.activity}`;
+    if (/入睡|睡前收尾|睡觉|休息/.test(currentSlot.activity)) {
+      slotHeader += "\n\u7761\u7720\u8FB9\u754C\uFF1A\u4ECE\u8FD9\u6761\u65E5\u7A0B\u5F00\u59CB\u9ED8\u8BA4\u8FDB\u5165\u7761\u7720\uFF0C\u4E0D\u8981\u51ED\u7A7A\u5EF6\u957F\u5230\u51CC\u6668\u4E09\u56DB\u70B9\uFF1B\u53EA\u6709\u5DF2\u6709\u660E\u786E\u5267\u60C5\u3001\u57CE\u5E02\u4E8B\u4EF6\u6216\u5BB6\u56ED\u4E8B\u5B9E\u624D\u80FD\u6253\u65AD\u3002";
+    }
     slotHeader += "\n";
   } else if (nextSlot) {
     slotHeader = isPreDawnCarryOver ? `\u591C\u6DF1\u4E86\uFF0C\u4ECA\u5929\u7684\u5B89\u6392\u8FD8\u6CA1\u5F00\u59CB\uFF0C\u6700\u65E9\u7684\u4E00\u4EF6\u662F${nextSlot.activity}\uFF08${nextSlot.startTime}\uFF09

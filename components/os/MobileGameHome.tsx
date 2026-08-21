@@ -543,7 +543,6 @@ const MobileGameHome: React.FC = () => {
                         </div>
                     </button>
                     <DockItem id={AppID.Social} cn="动态" onClick={() => openApp(AppID.Social)} />
-                    <DockItem id={AppID.ThemeMaker} cn="创作" onClick={() => openApp(AppID.ThemeMaker)} />
                 </div>
             </div>
 

@@ -1,7 +1,6 @@
 import React, { useRef, useState, useEffect } from 'react';
 import { ShareNetwork, Trash, Plus, Smiley, PaperPlaneTilt, Camera, Money, BookOpenText, Image, Lock, ArrowsClockwise, ChatCircleDots, CalendarBlank, ForkKnife, Coffee, Code, Brain, PencilSimple, BellSimpleRinging, Alarm, Sparkle, FadersHorizontal, LinkSimple, Wrench, X, House, MapTrifold, UsersThree, CalendarDots, Target } from '@phosphor-icons/react';
-import { CharacterProfile, ChatTheme, EmojiCategory, Emoji } from '../../types';
-import { PRESET_THEMES } from './ChatConstants';
+import { CharacterProfile, EmojiCategory, Emoji } from '../../types';
 import { AcnhActionTile } from '../os/acnhIcons';
 import { isIOSStandaloneWebApp } from '../../utils/iosStandalone';
 import { trackEvent } from '../../utils/analytics';
@@ -22,16 +21,12 @@ interface ChatInputAreaProps {
     onForwardSelected?: () => void;
     selectedCount: number;
     emojis: Emoji[];
-    /** 以下会话切换/主题 props 仅私聊使用；群聊等复用方不传（'chars' 面板不会被打开） */
+    /** 以下会话切换 props 仅私聊使用；群聊等复用方不传（'chars' 面板不会被打开） */
     characters?: CharacterProfile[];
     activeCharacterId?: string;
     onCharSelect?: (id: string) => void;
     /** 每个角色的未读消息数，用于在「切换会话」头像上显示红点 */
     unreadMessages?: Record<string, number>;
-    customThemes?: ChatTheme[];
-    onUpdateTheme?: (id: string) => void;
-    onRemoveTheme?: (id: string) => void;
-    activeThemeId?: string;
     /** 提供时整体替换内置 actions 双页网格——群聊传自己的功能格。不传 = 原行为 */
     actionsContent?: React.ReactNode;
     onPanelAction: (type: string, payload?: any) => void;
@@ -73,7 +68,6 @@ const ChatInputArea: React.FC<ChatInputAreaProps> = ({
     showPanel, setShowPanel, onSend, onKeyboardSend = onSend, onDeleteSelected, onForwardSelected, selectedCount,
     emojis, characters = [], activeCharacterId = '', onCharSelect = () => {},
     unreadMessages = {},
-    customThemes = [], onUpdateTheme = () => {}, onRemoveTheme = () => {}, activeThemeId = '',
     actionsContent,
     onPanelAction, onLinkShare, onImageSelect, isSummarizing,
     categories = [], activeCategory = 'default',
@@ -98,11 +92,6 @@ const ChatInputArea: React.FC<ChatInputAreaProps> = ({
     const [actionsPage, setActionsPage] = useState<0 | 1 | 2>(0);
     const [linkComposerOpen, setLinkComposerOpen] = useState(false);
     const [linkUrl, setLinkUrl] = useState('');
-    // 气泡样式面板：搜索 + 两步确认删除（防止 hover 小 × 误删）
-    const [bubbleSearch, setBubbleSearch] = useState('');
-    // 会话面板的主要用途仍是切换聊天；气泡选择作为次级工具默认收起。
-    const [isBubbleSectionOpen, setIsBubbleSectionOpen] = useState(false);
-    const [pendingDeleteThemeId, setPendingDeleteThemeId] = useState<string | null>(null);
     const [emojiSelectionMode, setEmojiSelectionMode] = useState(false);
     const [selectedEmojis, setSelectedEmojis] = useState<any[]>([]);
     // 手动分页避免旧版/第三方 WebView 不触发 IntersectionObserver，永远卡在「加载中」。
@@ -979,15 +968,15 @@ const ChatInputArea: React.FC<ChatInputAreaProps> = ({
                               <span className="text-xs font-bold">{showThinkingChain ? '思考已开' : '展示思考'}</span>
                             </button>
 
-                            {/* 聊天装扮：打开该角色专属的「聊天细节微调」弹窗（跟随全局 / 单独定制，不用写 CSS） */}
+                            {/* 统一聊天界面美化入口：气泡工坊与外观中的聊天界面已收拢到这里 */}
                             <button
-                              onClick={() => onPanelAction('fine-tune')}
+                              onClick={() => onPanelAction('chat-beauty')}
                               className={`flex flex-col items-center gap-2 active:scale-95 transition-transform ${acnh ? 'text-[#725d42]' : isDiscordStyle ? 'text-slate-200' : 'text-slate-600'}`}
                             >
                               <div className={`w-14 h-14 rounded-2xl flex items-center justify-center shadow-sm border ${acnh ? 'bg-white/70 border-[#e6dab4] text-[#5fae6e]' : isDiscordStyle ? 'bg-slate-800 text-teal-300 border-teal-400/20' : 'bg-teal-50 text-teal-500 border-teal-100'}`}>
                                   <FadersHorizontal className="w-6 h-6" weight="bold" />
                               </div>
-                              <span className="text-xs font-bold">聊天装扮</span>
+                              <span className="text-xs font-bold">聊天界面美化</span>
                             </button>
 
                             {/* 白框：打开该角色专属的「白框自定义 CSS」弹窗 */}
@@ -1052,91 +1041,7 @@ const ChatInputArea: React.FC<ChatInputAreaProps> = ({
                         </div>
                      )}
                      {showPanel === 'chars' && (
-                        <div className="p-5 space-y-6 overflow-y-auto no-scrollbar">
-                            <div>
-                                <button
-                                    type="button"
-                                    onClick={() => setIsBubbleSectionOpen(prev => !prev)}
-                                    aria-expanded={isBubbleSectionOpen}
-                                    className="w-full flex items-center justify-between gap-3 px-1 py-1 text-left"
-                                >
-                                    <span>
-                                        <span className="block text-xs font-bold text-slate-400 tracking-wider uppercase">气泡样式 · 当前角色</span>
-                                        <span className="block mt-1 text-[10px] text-slate-400">{isBubbleSectionOpen ? '选择或管理当前角色的气泡' : '已折叠 · 点此展开'}</span>
-                                    </span>
-                                    <span className={`text-slate-400 transition-transform ${isBubbleSectionOpen ? 'rotate-180' : ''}`} aria-hidden>⌄</span>
-                                </button>
-                                {isBubbleSectionOpen && <div className="mt-3">
-                                <div className="flex justify-end px-1 mb-2">
-                                    <span className="text-[10px] text-slate-400">新气泡去「气泡工坊」App 制作</span>
-                                </div>
-                                {customThemes.length > 6 && (
-                                    <input
-                                        value={bubbleSearch}
-                                        onChange={e => setBubbleSearch(e.target.value)}
-                                        placeholder="搜索我的气泡…"
-                                        className="w-full mb-2.5 px-3 py-2 rounded-xl bg-white/70 border border-slate-200 text-xs focus:outline-none focus:border-indigo-300"
-                                    />
-                                )}
-                                <div className="flex flex-wrap gap-2 px-1 max-h-48 overflow-y-auto no-scrollbar pb-1">
-                                    {(bubbleSearch.trim() ? [] : Object.values(PRESET_THEMES)).map(t => (
-                                        <button key={t.id} onClick={() => onUpdateTheme(t.id)} className={`flex items-center gap-1.5 px-3.5 py-2 rounded-2xl text-xs font-bold border transition-all ${activeThemeId === t.id ? 'bg-primary text-white border-primary shadow-md' : 'bg-white border-slate-200 text-slate-600'}`}>
-                                            <span className="flex -space-x-1">
-                                                <span className="w-3 h-3 rounded-full border border-white/80 shadow-sm" style={{ background: t.user?.backgroundColor || '#6366f1' }} />
-                                                <span className="w-3 h-3 rounded-full border border-white/80 shadow-sm" style={{ background: t.ai?.backgroundColor || '#ffffff' }} />
-                                            </span>
-                                            {t.name}
-                                            {activeThemeId === t.id && <span aria-hidden>✓</span>}
-                                        </button>
-                                    ))}
-                                    {customThemes
-                                        .filter(t => !bubbleSearch.trim() || (t.name || '').toLowerCase().includes(bubbleSearch.trim().toLowerCase()))
-                                        .map(t => {
-                                            const inUseCount = characters.filter(c => (c as any).bubbleStyle === t.id).length;
-                                            const pendingDelete = pendingDeleteThemeId === t.id;
-                                            return (
-                                                <div key={t.id} className={`flex items-center rounded-2xl border transition-all overflow-hidden ${activeThemeId === t.id ? 'bg-indigo-500 border-indigo-500 text-white shadow-md' : 'bg-indigo-50 border-indigo-100 text-indigo-600'}`}>
-                                                    <button onClick={() => onUpdateTheme(t.id)} className="flex items-center gap-1.5 pl-3.5 pr-1.5 py-2 text-xs font-bold active:scale-95 transition-transform">
-                                                        <span className="flex -space-x-1">
-                                                            <span className="w-3 h-3 rounded-full border border-white/80 shadow-sm" style={{ background: t.user?.backgroundColor || '#6366f1' }} />
-                                                            <span className="w-3 h-3 rounded-full border border-white/80 shadow-sm" style={{ background: t.ai?.backgroundColor || '#ffffff' }} />
-                                                        </span>
-                                                        {t.name}
-                                                        {activeThemeId === t.id && <span aria-hidden>✓</span>}
-                                                        {inUseCount > 0 && activeThemeId !== t.id && (
-                                                            <span className="text-[9px] font-normal opacity-70">{inUseCount}人在用</span>
-                                                        )}
-                                                    </button>
-                                                    {/* 删除两步确认：第一下变红色「确删」，3 秒不点自动还原 */}
-                                                    {pendingDelete ? (
-                                                        <button
-                                                            onClick={(e) => { e.stopPropagation(); setPendingDeleteThemeId(null); onRemoveTheme(t.id); }}
-                                                            className="px-2 py-2 text-[10px] font-bold bg-red-500 text-white self-stretch"
-                                                        >
-                                                            确删
-                                                        </button>
-                                                    ) : (
-                                                        <button
-                                                            onClick={(e) => {
-                                                                e.stopPropagation();
-                                                                setPendingDeleteThemeId(t.id);
-                                                                setTimeout(() => setPendingDeleteThemeId(cur => (cur === t.id ? null : cur)), 3000);
-                                                            }}
-                                                            aria-label={`删除气泡 ${t.name}`}
-                                                            className={`pr-2.5 pl-1 py-2 text-sm leading-none opacity-45 hover:opacity-100 transition-opacity ${activeThemeId === t.id ? 'text-white' : 'text-indigo-400'}`}
-                                                        >
-                                                            ×
-                                                        </button>
-                                                    )}
-                                                </div>
-                                            );
-                                        })}
-                                    {bubbleSearch.trim() && customThemes.every(t => !(t.name || '').toLowerCase().includes(bubbleSearch.trim().toLowerCase())) && (
-                                        <div className="text-[11px] text-slate-400 px-1 py-2">没有叫「{bubbleSearch.trim()}」的气泡～</div>
-                                    )}
-                                </div>
-                                </div>}
-                            </div>
+                         <div className="p-5 overflow-y-auto no-scrollbar">
                             <div>
                                 <h3 className="text-xs font-bold text-slate-400 px-1 tracking-wider uppercase mb-3">切换会话</h3>
                                 <div className="space-y-3">
