@@ -1842,6 +1842,7 @@ const Chat: React.FC = () => {
         const updated = { ...scheduleData, slots: newSlots };
         setScheduleData(updated);
         await DB.saveDailySchedule(updated);
+        await syncScheduleToWorldLifePlan(updated).catch(error => console.warn('[Schedule] linked home plan sync after edit failed:', error));
         markAmsgStateDirty({ char, userProfile, groups, realtimeConfig });
     };
 
@@ -1851,6 +1852,7 @@ const Chat: React.FC = () => {
         const updated = { ...scheduleData, slots: newSlots };
         setScheduleData(updated);
         await DB.saveDailySchedule(updated);
+        await syncScheduleToWorldLifePlan(updated).catch(error => console.warn('[Schedule] linked home plan sync after delete failed:', error));
         markAmsgStateDirty({ char, userProfile, groups, realtimeConfig });
     };
 

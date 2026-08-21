@@ -4,7 +4,7 @@ import { ContextBuilder } from './context';
 import { DB } from './db';
 import { safeResponseJson, extractContent, extractJson } from './safeApi';
 import { injectMemoryPalace } from './memoryPalace/pipeline';
-import { getDailyScheduleForChar } from './dailySchedule';
+import { getDailyScheduleForChar, hasLegacySleepFallback } from './dailySchedule';
 import { getScheduleDateKey, getScheduleWallClock } from './scheduleTime';
 import { loadCharacterContextRange } from './chatContextRange';
 import { ChatPrompts } from './chatPrompts';
@@ -37,9 +37,8 @@ const parseClockMinutes = (value: string): number | null => {
 };
 
 /**
- * 日程的最后一条必须把角色带到基础作息的睡点。
- * 模型常会生成到 22 点就停，随后聊天/家园又各自补出凌晨活动，导致同一天出现两个互相冲突的事实。
- * 这里在保存前把睡眠作为共同事实写进日程，并移除睡点之后没有明确剧情依据的活动。
+ * AI 必须把角色带到基础作息的睡点。跨午夜睡点属于当天开头，晚上睡点属于当天末尾。
+ * 这里在保存前只校准 AI 已生成的睡前活动时间，并移除睡点之后没有明确剧情依据的活动。
  */
 export function ensureSleepSlotForRoutine(
     char: CharacterProfile,
@@ -69,22 +68,30 @@ export function ensureSleepSlotForRoutine(
             && /睡|寝|洗漱|休息|收尾|躺下/.test(`${slot.activity} ${slot.description || ''}`);
     });
     const home = getCharacterWorldState(char).homeLocationId;
-    // 00:00-05:59 是前一晚的延续，但现有时间轴按 HH:MM 排序；用 23:50 表示“前一晚收尾”，
-    // 同时在描述里保留真实入睡时间，避免它被排到当天列表的第一条。
-    const sleepStartTime = sleepMinutes < 6 * 60 ? '23:50' : sleepClock;
-    const sleepSlot: ScheduleSlot = {
-        startTime: sleepStartTime,
-        activity: sleepMinutes < 6 * 60 ? '睡前收尾' : '入睡',
-        description: `按${day.isWorkday ? '工作日' : '休息日'}作息，${sleepClock}入睡；此后默认睡到次日起床，除非已有明确剧情或城市事件打断。`,
-        emoji: '🌙',
-        ...(home ? { locationId: home } : {}),
-        worldSegment: scheduleSegmentForTime(sleepStartTime),
-    };
+    // 保留 AI 生成的睡前活动和文案。跨午夜作息必须按真实日期显示在当天开头，
+    // 不能再把 00:30 改写成 23:50，也不能用固定兜底文案覆盖 AI 内容。
     const result = nearSleep
-        ? beforeSleep.map(slot => slot === nearSleep ? { ...slot, ...sleepSlot } : slot)
-        : [...beforeSleep, sleepSlot];
+        ? beforeSleep.map(slot => slot === nearSleep ? {
+            ...slot,
+            startTime: sleepClock,
+            ...(home ? { locationId: home } : {}),
+            worldSegment: scheduleSegmentForTime(sleepClock),
+        } : slot)
+        : beforeSleep;
     return result.sort((a, b) => a.startTime.localeCompare(b.startTime));
 }
+
+const isSleepActivity = (slot: ScheduleSlot) => /入睡|睡前|睡觉|洗漱|关灯|熄灯|躺下/.test(`${slot.activity} ${slot.description || ''}`);
+
+/** 模型可自由选择一天的密度，但日程 UI 与家园段落以 5-10 条为稳定边界。 */
+const limitDailyScheduleSlots = (slots: ScheduleSlot[]): ScheduleSlot[] => {
+    if (slots.length <= 10) return slots;
+    const sleepIndex = slots.findIndex(isSleepActivity);
+    const kept = sleepIndex < 0
+        ? slots.slice(0, 10)
+        : slots.filter((_, index) => index === sleepIndex || index < 9);
+    return kept.sort((a, b) => a.startTime.localeCompare(b.startTime));
+};
 
 interface ApiConfig {
     baseUrl: string;
@@ -159,7 +166,7 @@ ${chatHistoryBlock ? `**重要：上面给了你最近和「${user.name}」的�
 
 ### 第一部分：日程表（用于UI卡片展示）
 
-生成 5-7 个时间段，从早到晚。每个时段：
+生成 5-10 个时间段，从当天 00:00 到 23:59 按真实时间排列。每个时段：
 - startTime: "HH:MM"
 - activity: 活动名（2-6字）
 - description: 一句话描述（可以带动作质感、物件、感官细节）
@@ -192,7 +199,7 @@ ${chatHistoryBlock ? `**重要：上面给了你最近和「${user.name}」的�
    - ✅ user 只能作为某件正在发生的事的**副词**自然地渗进 description，
         比如 "画草稿，昨天 ${user.name} 说那个角色好看，顺手再画一张" —— 主语仍是 ta 自己
 
-5. **四段覆盖与睡眠收口** —— 日程要覆盖 morning（早上）、noon（中午）、evening（晚上）和 latenight（凌晨）四段的生活脉络；最后一条必须是接近作息中“睡觉”时间的「睡前收尾/入睡」，不能在 22:00 等过早时间结束。作息给出的睡点是硬约束：睡点之后默认一直休息到次日起床，除非聊天、家园、城市事件或剧情明确打断；不要凭空安排角色熬到凌晨三四点。若有家园当日生活计划，家园段落是硬事实：你可以用多条细日程展开，但不能改地点、共同事件或把角色安排到冲突的事情上。
+5. **四段覆盖与睡眠收口** —— 日程要覆盖 morning（早上）、noon（中午）、evening（晚上）和 latenight（凌晨）四段的生活脉络；必须生成一条接近基础作息睡点的 AI 睡前活动（如洗漱、收拾、关灯、睡前阅读、入睡），活动名和描述必须是角色化、具体的 AI 文案，不能写“睡前收尾”这种系统占位词，也不能在生成后依赖固定兜底文案。若睡点在 00:00-05:59，这条日程必须使用真实凌晨时间并排在当天时间轴开头；若睡点在晚上，则排在当天末尾。作息给出的睡点是硬约束：睡点之后默认一直休息到次日起床，除非聊天、家园、城市事件或剧情明确打断；不要凭空安排角色熬到凌晨三四点。若有家园当日生活计划，家园段落是硬事实：你可以用多条细日程展开，但不能改地点、共同事件或把角色安排到冲突的事情上。
 
 ### 第二部分：意识流独白（这是核心）
 
@@ -260,7 +267,7 @@ ${chatHistoryBlock ? `**重要：上面给了你最近和「${user.name}」的�
 
 ### 第一部分：思绪时间线（用于UI卡片展示）
 
-生成 5-7 个时间段，代表角色一天中不同时刻的内心状态。每个时段：
+生成 5-10 个时间段，代表角色一天中不同时刻的内心状态，并按真实时间从 00:00 到 23:59 排列。每个时段：
 - startTime: "HH:MM"
 - activity: 状态名（2-6字，如"回想昨天的对话""发呆""整理想法""想找你聊天"）
 - description: 一句话描述此刻在想什么
@@ -332,7 +339,7 @@ export async function generateDailyScheduleForChar(
     // Check if already exists
     if (!forceRegenerate) {
         const existing = await getDailyScheduleForChar(char, baseNow);
-        if (existing) return existing;
+        if (existing && !hasLegacySleepFallback(existing)) return existing;
     }
 
     // Preserve cover image from previous schedules
@@ -435,11 +442,14 @@ export async function generateDailyScheduleForChar(
                 : scheduleSegmentForTime(s.startTime || '00:00'),
         })).filter((s: ScheduleSlot) => s.activity).map((s: ScheduleSlot) => normalizeScheduleSlot(char, s));
 
-        if (slots.length === 0) return null;
+        if (slots.length < 5) {
+            console.error(`[Schedule] Generation returned only ${slots.length} slots; expected 5-10.`);
+            return null;
+        }
 
         // Sort by time, then force the shared sleep boundary before any world/home linkage.
         slots.sort((a, b) => a.startTime.localeCompare(b.startTime));
-        const slotsWithSleep = ensureSleepSlotForRoutine(char, today, slots);
+        const slotsWithSleep = limitDailyScheduleSlots(ensureSleepSlotForRoutine(char, today, slots));
         let modeledSlots = applyScheduleTravelModel(char, slotsWithSleep);
         if (worldLifeContext) {
             modeledSlots = enforceWorldLifePlanOnSchedule(char, modeledSlots, worldLifeContext);

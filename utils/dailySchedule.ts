@@ -4,6 +4,13 @@ import { getLocalDateKey } from './localDate';
 import { nowInTimeZone, resolveCharTimeZone } from './timezone';
 import { deriveCharacterWorldClock } from './characterWorld';
 
+const LEGACY_SLEEP_FALLBACK = /^按(?:工作日|休息日)作息，\d{2}:\d{2}入睡；此后默认睡到次日起床/;
+
+/** 识别旧版本写入的固定睡前占位条目，交给下一次 AI 日程生成替换。 */
+export function hasLegacySleepFallback(schedule: DailySchedule | null | undefined): boolean {
+    return Boolean(schedule?.slots?.some(slot => slot.activity === '睡前收尾' && LEGACY_SLEEP_FALLBACK.test(slot.description || '')));
+}
+
 /**
  * Load a schedule for the requested calendar timezone (device time by default).
  *
@@ -88,5 +95,6 @@ export async function getDailyScheduleForChar(
             console.warn('[CharacterWorld] clock sync failed:', error);
         }
     }
+    if (hasLegacySleepFallback(schedule)) return null;
     return schedule;
 }

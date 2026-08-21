@@ -990,7 +990,7 @@ const WorldEditor: React.FC<{
                             onChange={e => upd({ lifeLinkEnabled: e.target.checked })}
                             className="w-4 h-4 accent-amber-500" />
                     </label>
-                    <div className="text-[10px] text-stone-400 leading-snug">开启后每天先生成一份家园生活计划，再展开成角色的 5-7 条细日程；家园观测到的实际事件会影响后续日程和情绪。仅适用于真实时间。</div>
+                    <div className="text-[10px] text-stone-400 leading-snug">开启后每天先生成一份家园生活计划，再展开成角色的 5-10 条细日程；家园观测到的实际事件会影响后续日程和情绪。仅适用于真实时间。</div>
                 </div>
             )}
 

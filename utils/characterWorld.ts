@@ -145,9 +145,9 @@ export function buildCharacterWorldContext(char: CharacterProfile, schedule?: Da
                 .join('、');
             lines.push(`- ${slot.startTime} ${slot.activity}${slotLocation ? `｜地点：${slotLocation.name}` : slot.location ? `｜地点：${slot.location}` : ''}${slotNpcNames ? `｜同行：${slotNpcNames}` : ''}`);
         }
-        const last = schedule.slots[schedule.slots.length - 1];
-        if (/入睡|睡前收尾|睡觉/.test(last.activity)) {
-            lines.push(`睡眠边界：${last.startTime} 的${last.activity}之后默认睡到次日起床；除非已有明确剧情、城市事件或家园事实打断，不得凭空安排凌晨活动。`);
+        const sleepSlot = schedule.slots.find(slot => /入睡|睡前|睡觉|洗漱|关灯|熄灯|躺下/.test(`${slot.activity} ${slot.description || ''}`));
+        if (sleepSlot) {
+            lines.push(`睡眠边界：${sleepSlot.startTime} 的${sleepSlot.activity}之后默认睡到次日起床；除非已有明确剧情、城市事件或家园事实打断，不得凭空安排凌晨活动。`);
         }
     }
     if (locations.length) {

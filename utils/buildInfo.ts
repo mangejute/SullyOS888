@@ -20,7 +20,7 @@ export const BUILD_TIME_LABEL = __BUILD_TIME__;
  * 8月12日-7、8月12日-8。它不依赖构建机器时间，因此手机上看到的号码
  * 能直接和本次交付的版本对上。
  */
-export const APP_VERSION = '8月22日-1';
+export const APP_VERSION = '8月22日-2';
 
 /**
  * 统计给每条记录打的内部版本标签。页面发布版本使用上面的中文日期号；统计字段
