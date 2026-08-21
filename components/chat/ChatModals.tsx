@@ -1255,7 +1255,7 @@ const ChatModals: React.FC<ChatModalsProps> = ({
             <Modal
                 isOpen={modalType === 'schedule'} title={`${activeCharacter?.name || '角色'}の日程/情绪`} onClose={() => setModalType('none')}
             >
-                <div className="max-h-[70vh] overflow-y-auto -mx-2 px-2">
+                <div className="-mx-2 px-2">
                     {/* 未开启时保留总开关；开启后把计划表放在设置区上方。 */}
                     {onToggleScheduleFeature && !isScheduleFeatureEnabled && (
                         <div className="mb-4 bg-slate-50 border border-slate-200 rounded-2xl p-3">

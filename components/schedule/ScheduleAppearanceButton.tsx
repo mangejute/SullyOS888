@@ -352,8 +352,8 @@ const ScheduleAppearanceButton: React.FC<{ compact?: boolean }> = ({ compact = f
                     compact ? 'w-7 h-7' : 'w-8 h-8'
                 }`}
                 style={{
-                    color: 'var(--schedule-text)',
-                    background: 'color-mix(in srgb, var(--schedule-text) 10%, transparent)',
+                    color: 'var(--schedule-accent)',
+                    background: 'var(--schedule-accent-soft)',
                     borderColor: 'var(--schedule-line)',
                 }}
                 onPointerDown={event => {
