@@ -1,3 +1,20 @@
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
+
+@layer components {
+  /* 气泡默认值通过变量提供，用户 CSS 可以直接覆盖，不必与内联样式抢优先级。 */
+  .sully-bubble-ai,
+  .sully-bubble-user {
+    background-color: var(--sully-bubble-bg, transparent);
+    color: var(--sully-bubble-text, inherit);
+    opacity: var(--sully-bubble-opacity, 1);
+    border-radius: var(--sully-bubble-radius, 16px);
+  }
+
+  .sully-bubble-outline {
+    background-color: transparent;
+    border: 2px solid var(--sully-bubble-outline-color, currentColor);
+    box-shadow: none;
+  }
+}

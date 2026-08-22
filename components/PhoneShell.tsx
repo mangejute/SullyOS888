@@ -915,7 +915,11 @@ const PhoneShell: React.FC = () => {
         style={
           shellPadsSafeArea
             ? { bottom: 0, paddingTop: 'var(--safe-top)', paddingBottom: 'var(--safe-bottom)' }
-            : { bottom: 'var(--standalone-safe-area-bottom, 0px)' }
+            : {
+                // 聊天页的输入栏本身就是最底层控件，不能再把整个外壳抬高留下白色断层。
+                bottom: activeApp === AppID.Chat ? 0 : 'var(--standalone-safe-area-bottom, 0px)',
+                paddingBottom: activeApp === AppID.Chat ? 0 : undefined,
+            }
         }
       >
           {/* App Container */}

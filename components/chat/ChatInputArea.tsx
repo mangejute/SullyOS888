@@ -484,7 +484,7 @@ const ChatInputArea: React.FC<ChatInputAreaProps> = ({
         {emojiSelectionMode && (
             <div className={`fixed inset-0 z-[-1] ${isPixelStyle ? 'bg-[#eadfce]/70 backdrop-blur-[2px]' : isDiscordStyle ? 'bg-slate-950/70 backdrop-blur-[2px]' : 'bg-white/60 backdrop-blur-[2px]'}`} />
         )}
-        <div className={`sully-chat-inputbar ${shellClass} pb-safe shrink-0 z-40 relative`}>
+        <div className={`sully-chat-inputbar ${shellClass} shrink-0 z-40 relative`} style={{ paddingBottom: 0, marginBottom: 0 }}>
             {showPanel === 'actions' && !selectionMode && (
                 <div
                     className="fixed inset-0 z-0 bg-black/[0.08]"
@@ -515,10 +515,10 @@ const ChatInputArea: React.FC<ChatInputAreaProps> = ({
                 </div>
             ) : (
                 <div className="p-3 px-4 flex gap-3 items-end relative z-10">
-                    <button onClick={() => setShowPanel(showPanel === 'actions' ? 'none' : 'actions')} className={actionButtonClass}>
+                    <button onClick={() => setShowPanel(showPanel === 'actions' ? 'none' : 'actions')} className={`sully-chat-add-button ${actionButtonClass}`}>
                         <Plus className="w-6 h-6" weight="bold" />
                     </button>
-                    <div className={`flex-1 min-w-0 flex items-center px-1 transition-all ${useIOSStandaloneInputFix ? 'overflow-visible' : 'overflow-hidden'} ${inputWrapClass} ${isPixelStyle ? 'focus-within:bg-[#fff7ed]' : isDiscordStyle ? 'focus-within:bg-slate-800 focus-within:border-white/20' : 'border border-transparent focus-within:bg-white focus-within:border-primary/30'}`}>
+                    <div className={`sully-chat-input-wrap flex-1 min-w-0 flex items-center px-1 transition-all ${useIOSStandaloneInputFix ? 'overflow-visible' : 'overflow-hidden'} ${inputWrapClass} ${isPixelStyle ? 'focus-within:bg-[#fff7ed]' : isDiscordStyle ? 'focus-within:bg-slate-800 focus-within:border-white/20' : 'border border-transparent focus-within:bg-white focus-within:border-primary/30'}`}>
                         <textarea 
                             ref={textareaRef}
                             rows={1} 
@@ -530,18 +530,18 @@ const ChatInputArea: React.FC<ChatInputAreaProps> = ({
                             enterKeyHint="send"
                             autoCorrect="on"
                             autoCapitalize="sentences"
-                            className={`flex-1 min-w-0 bg-transparent px-4 py-3 ${useIOSStandaloneInputFix ? 'text-[16px]' : 'text-[15px]'} resize-none max-h-24 no-scrollbar ${isDiscordStyle ? 'text-white placeholder:text-slate-500' : isPixelStyle ? 'text-[#6a4c35] placeholder:text-[#9b8677]' : ''}`} 
+                            className={`sully-chat-textarea flex-1 min-w-0 bg-transparent px-4 py-3 ${useIOSStandaloneInputFix ? 'text-[16px]' : 'text-[15px]'} resize-none max-h-24 no-scrollbar ${isDiscordStyle ? 'text-white placeholder:text-slate-500' : isPixelStyle ? 'text-[#6a4c35] placeholder:text-[#9b8677]' : ''}`} 
                             placeholder="Message..." 
                             style={{ height: 'auto' }} 
                         />
-                        <button onClick={() => setShowPanel(showPanel === 'emojis' ? 'none' : 'emojis')} className={`p-2 shrink-0 ${isDiscordStyle ? 'text-slate-400 hover:text-sky-300' : isPixelStyle ? 'text-[#8f674a] hover:text-[#a16207]' : 'text-slate-400 hover:text-primary'}`}>
+                        <button onClick={() => setShowPanel(showPanel === 'emojis' ? 'none' : 'emojis')} className={`sully-chat-emoji-button p-2 shrink-0 ${isDiscordStyle ? 'text-slate-400 hover:text-sky-300' : isPixelStyle ? 'text-[#8f674a] hover:text-[#a16207]' : 'text-slate-400 hover:text-primary'}`}>
                             <Smiley className="w-6 h-6" weight="regular" />
                         </button>
                     </div>
                     <button
                         type="button"
                         onClick={handleSendButtonClick}
-                        className={sendButtonClass}
+                        className={`sully-chat-send-button ${sendButtonClass}`}
                     >
                         {sendButtonStyle === 'pill' ? <span>发送</span> : <PaperPlaneTilt className="w-5 h-5" weight="fill" />}
                     </button>
@@ -556,7 +556,7 @@ const ChatInputArea: React.FC<ChatInputAreaProps> = ({
             {!selectionMode && (
                 <div
                     ref={panelRef}
-                    className={`sully-chat-panel ${showPanel === 'actions' ? 'sully-action-popover !absolute bottom-full left-4 z-20 mb-3 w-[min(220px,42vw)] rounded-[22px] border border-white/80 bg-white/95 shadow-[0_16px_42px_rgba(15,23,42,0.20)] backdrop-blur-2xl' : panelClass} overflow-hidden relative flex flex-col will-change-[max-height] transition-[max-height] duration-200 ease-out`}
+                    className={`sully-chat-panel ${showPanel === 'none' ? 'sully-chat-panel-collapsed' : ''} ${showPanel === 'actions' ? 'sully-action-popover !absolute bottom-full left-4 z-20 mb-3 w-[min(220px,42vw)] rounded-[22px] border border-white/80 bg-white/95 shadow-[0_16px_42px_rgba(15,23,42,0.20)] backdrop-blur-2xl' : panelClass} overflow-hidden relative flex flex-col will-change-[max-height] transition-[max-height] duration-200 ease-out`}
                     style={{
                         height: showPanel === 'actions' ? 'min(28rem, calc(100dvh - 8rem))' : undefined,
                         maxHeight: showPanel === 'actions' ? 'min(28rem, calc(100dvh - 8rem))' : showPanel !== 'none' ? '18rem' : '0px',

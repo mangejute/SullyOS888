@@ -1,29 +1,14 @@
 import React, { useRef, useState } from 'react';
-import { OSTheme, ChatFineTuneFields } from '../../types';
+import { OSTheme } from '../../types';
 import WhiteboxSoundEditor from '../chat/WhiteboxSoundEditor';
 import { WhiteboxSound } from '../../utils/whiteboxSound';
-import ChatFineTunePanel from '../chat/ChatFineTunePanel';
-import { FadersHorizontal } from '@phosphor-icons/react';
+import ChromeCssEditor from '../chat/ChromeCssEditor';
 
 type Props = {
     theme: OSTheme;
     updateTheme: (updates: Partial<OSTheme>) => void;
     /** 一键还原全部聊天白框 CSS（全局 + 每个角色），兼作坏 CSS 救援。 */
     onResetAllChrome?: () => void;
-};
-
-// 聊天细节微调的默认值快照。切预设时先铺这层再叠预设配置：否则从「沉浸剧场」切回
-// 其他预设时，隐藏头像/贴边等残留字段不会被清掉（旧预设没写这些键）——不留残留的既有惯例。
-const FINE_TUNE_DEFAULTS: Required<ChatFineTuneFields> = {
-    chatAvatarVisibility: 'both',
-    chatAvatarPlacement: 'beside',
-    chatAvatarAlign: 'bottom',
-    chatAvatarOffsetY: 0,
-    chatBubbleFontSize: 0,
-    chatBubbleLineHeight: 0,
-    chatBubbleIndent: 0,
-    chatSnapToEdge: false,
-    chatModuleAlign: 'center',
 };
 
 const presets: Array<{ name: string; desc: string; config: Partial<OSTheme> }> = [
@@ -352,23 +337,23 @@ const backgroundStyleForPreview = (style: string, chrome: string): React.CSSProp
     return { backgroundColor: base };
 };
 
-const previewBubbleStyle = (bubble: string, isUser: boolean, theme: OSTheme): React.CSSProperties => {
+const previewBubbleStyle = (bubble: string, isUser: boolean, theme: OSTheme): React.CSSProperties & Record<string, string | number> => {
     const hue = theme.hue ?? 216;
     const saturation = theme.saturation ?? 88;
     const lightness = theme.lightness ?? 57;
     const primary = `hsl(${hue}, ${saturation}%, ${lightness}%)`;
-    const base: React.CSSProperties = {
-        background: isUser ? primary : '#ffffff',
-        color: isUser ? '#ffffff' : '#334155',
-        borderRadius: bubble === 'ios' ? 24 : bubble === 'wechat' ? 18 : 20,
+    const base = {
+        '--sully-bubble-bg': isUser ? primary : '#ffffff',
+        '--sully-bubble-text': isUser ? '#ffffff' : '#334155',
+        '--sully-bubble-radius': `${bubble === 'ios' ? 24 : bubble === 'wechat' ? 18 : 20}px`,
         padding: '10px 14px',
         maxWidth: '72%',
-    };
-    if (bubble === 'outline') return { ...base, background: 'transparent', color: isUser ? primary : '#475569', border: `2px solid ${isUser ? primary : '#cbd5e1'}` };
+    } as React.CSSProperties & Record<string, string | number>;
+    if (bubble === 'outline') return { ...base, '--sully-bubble-bg': 'transparent', '--sully-bubble-text': isUser ? primary : '#475569', border: `2px solid ${isUser ? primary : '#cbd5e1'}` };
     if (bubble === 'shadow') return { ...base, boxShadow: '0 10px 20px rgba(15,23,42,0.12)' };
     if (bubble === 'flat') return { ...base, boxShadow: 'none' };
-    if (bubble === 'wechat') return { ...base, background: isUser ? '#95ec69' : '#ffffff', color: '#0f172a', boxShadow: 'none', border: '1px solid rgba(15,23,42,0.05)' };
-    if (bubble === 'ios') return { ...base, background: isUser ? primary : 'rgba(255,255,255,0.86)', boxShadow: '0 8px 16px rgba(148,163,184,0.12)', border: '1px solid rgba(255,255,255,0.75)', backdropFilter: 'blur(12px)' };
+    if (bubble === 'wechat') return { ...base, '--sully-bubble-bg': isUser ? '#95ec69' : '#ffffff', '--sully-bubble-text': '#0f172a', boxShadow: 'none', border: '1px solid rgba(15,23,42,0.05)' };
+    if (bubble === 'ios') return { ...base, '--sully-bubble-bg': isUser ? primary : 'rgba(255,255,255,0.86)', boxShadow: '0 8px 16px rgba(148,163,184,0.12)', border: '1px solid rgba(255,255,255,0.75)', backdropFilter: 'blur(12px)' };
     return { ...base, boxShadow: '0 6px 14px rgba(148,163,184,0.12)', border: '1px solid rgba(148,163,184,0.12)' };
 };
 
@@ -412,51 +397,13 @@ export const ChatAppearanceEditor: React.FC<Props> = ({ theme, updateTheme, onRe
 
     // 聊天壳设置面板悬浮化——同私聊「聊天装扮」的形态：面板浮在预览上方而不占文档流，
     // 预览不用瘦身也能和设置同屏；点圆气泡收起面板即可看全预览。
-    const [panelOpen, setPanelOpen] = useState(true);
-    // 圆气泡可自由拖动（按住拖走，松手留在原地）；null = 默认位置（右缘、35vh 高度处）。
-    const [bubblePos, setBubblePos] = useState<{ x: number; y: number } | null>(null);
-    const bubbleDrag = useRef<{ startX: number; startY: number; originX: number; originY: number; moved: boolean } | null>(null);
-    const BUBBLE_SIZE = 48;
-    const clampBubble = (x: number, y: number) => ({
-        x: Math.max(8, Math.min(window.innerWidth - BUBBLE_SIZE - 8, x)),
-        y: Math.max(56, Math.min(window.innerHeight - BUBBLE_SIZE - 24, y)),
-    });
-    const onBubblePointerDown = (e: React.PointerEvent<HTMLButtonElement>) => {
-        const rect = e.currentTarget.getBoundingClientRect();
-        bubbleDrag.current = { startX: e.clientX, startY: e.clientY, originX: rect.left, originY: rect.top, moved: false };
-        e.currentTarget.setPointerCapture(e.pointerId);
-    };
-    const onBubblePointerMove = (e: React.PointerEvent<HTMLButtonElement>) => {
-        const drag = bubbleDrag.current;
-        if (!drag) return;
-        const dx = e.clientX - drag.startX;
-        const dy = e.clientY - drag.startY;
-        // 6px 内算点按不算拖动，避免手指微颤把点击吞掉
-        if (!drag.moved && Math.hypot(dx, dy) < 6) return;
-        drag.moved = true;
-        setBubblePos(clampBubble(drag.originX + dx, drag.originY + dy));
-    };
-    const onBubblePointerUp = () => {
-        const drag = bubbleDrag.current;
-        bubbleDrag.current = null;
-        if (drag && !drag.moved) setPanelOpen(v => !v);
-    };
+    // 聊天外观只通过下方完整 CSS 编辑器控制，避免可视化微调与 CSS 互相覆盖。
 
-    // 悬浮面板内左右翻页：一页一个主题，改哪项都能立刻在后面的预览里看到。
-    const PAGE_TITLES = ['快速预设', '聊天壳', '头部', '气泡与头像', '细节微调', '表情包与输入栏'];
-    const [page, setPage] = useState(0);
-    const swipeStartX = useRef<number | null>(null);
-    const goPage = (next: number) => setPage(Math.max(0, Math.min(PAGE_TITLES.length - 1, next)));
-
-    // 聊天细节微调 → 预览联动（近似演示：字号按比例缩小 3px 以配合迷你预览）
-    const fineVis = theme.chatAvatarVisibility || 'both';
-    const hidePreviewAiAvatar = fineVis === 'hide_ai' || fineVis === 'hide_both';
-    const hidePreviewUserAvatar = fineVis === 'hide_user' || fineVis === 'hide_both';
-    const previewRowAlign = (theme.chatAvatarAlign || 'bottom') === 'top' ? 'items-start' : theme.chatAvatarAlign === 'center' ? 'items-center' : 'items-end';
-    const previewFineTextStyle: React.CSSProperties = {
-        ...(theme.chatBubbleFontSize ? { fontSize: `${Math.max(9, theme.chatBubbleFontSize - 3)}px` } : {}),
-        ...(theme.chatBubbleLineHeight ? { lineHeight: theme.chatBubbleLineHeight } : {}),
-    };
+    // 预览保持与真实聊天相同的头像和气泡布局；具体视觉由完整 CSS 控制。
+    const hidePreviewAiAvatar = false;
+    const hidePreviewUserAvatar = false;
+    const previewRowAlign = 'items-end';
+    const previewFineTextStyle: React.CSSProperties = {};
 
     const headerClass =
         headerStyle === 'minimal'
@@ -494,7 +441,9 @@ export const ChatAppearanceEditor: React.FC<Props> = ({ theme, updateTheme, onRe
                 <div className={`sully-chat-root overflow-hidden rounded-[28px] ${shellClass(chromeStyle)}`} style={backgroundStyleForPreview(backgroundStyle, chromeStyle)}>
                     {/* 实时套用「白框自定义」CSS：预览各零件挂了同样的 .sully-chat-* 钩子，故能即时反映。
                         注意：预览外壳 overflow-hidden 会裁掉溢出效果（如波浪下沿），真聊天里完整可见。 */}
-                    {theme.chatChromeCustomCss && <style>{theme.chatChromeCustomCss}</style>}
+                    {[theme.chatChromeCustomCss, theme.chatBubbleCustomCss].filter(Boolean).join('\n') && (
+                        <style>{[theme.chatChromeCustomCss, theme.chatBubbleCustomCss].filter(Boolean).join('\n')}</style>
+                    )}
                     <div className={`sully-chat-header relative ${headerClass} ${previewPad}`}>
                         <div className={`flex items-center gap-3 ${headerAlign === 'center' ? 'justify-center text-center' : 'justify-between text-left'}`}>
                             <div className={`flex items-center gap-3 ${headerAlign === 'center' ? 'justify-center' : ''}`}>
@@ -547,7 +496,7 @@ export const ChatAppearanceEditor: React.FC<Props> = ({ theme, updateTheme, onRe
                             const avatarTone = isUser ? 'bg-primary/25' : 'bg-pink-200';
                             const avatarHidden = isUser ? hidePreviewUserAvatar : hidePreviewAiAvatar;
                             const bubbleNode = (
-                                <div style={{ ...previewBubbleStyle(bubbleStyle, isUser, theme), ...previewFineTextStyle }}>
+                                <div className={isUser ? 'sully-bubble-user' : 'sully-bubble-ai'} style={{ ...previewBubbleStyle(bubbleStyle, isUser, theme), ...previewFineTextStyle }}>
                                     {message.text}
                                     {showTimestamp === 'always' && nextRole !== message.role && (
                                         <div className={`mt-1 text-right text-[8px] ${isUser ? 'opacity-70' : 'opacity-55'}`}>{isUser ? '14:33' : '14:32'}</div>
@@ -573,192 +522,17 @@ export const ChatAppearanceEditor: React.FC<Props> = ({ theme, updateTheme, onRe
                     </div>
                     <div className={`sully-chat-inputbar border-t px-3 py-3 ${chromeStyle === 'pixel' ? 'border-[#8f674a] bg-[#eadfce]' : headerStyle === 'discord' ? 'border-white/10 bg-slate-900/90' : 'border-slate-100 bg-white/80'}`}>
                         <div className="flex items-end gap-2">
-                            <button className={`flex h-10 w-10 shrink-0 items-center justify-center ${chromeStyle === 'pixel' ? 'rounded-[4px] border-2 border-[#8f674a] bg-[#f8f0e0] text-[#8f674a]' : headerStyle === 'discord' ? 'rounded-full bg-slate-800 text-slate-200' : 'rounded-full bg-slate-100 text-slate-500'}`}>+</button>
-                            <div className={`flex min-h-10 flex-1 items-center px-4 text-[11px] ${inputStyle === 'flat' ? 'rounded-none border-b border-slate-200 bg-transparent' : inputStyle === 'wechat' ? 'rounded-full border border-slate-200 bg-white' : inputStyle === 'ios' ? 'rounded-[26px] border border-white/80 bg-white/80 shadow-inner' : inputStyle === 'telegram' ? 'rounded-2xl border border-sky-100 bg-white' : inputStyle === 'discord' ? 'rounded-2xl border border-white/10 bg-slate-800 text-white' : inputStyle === 'pixel' ? 'rounded-[4px] border-2 border-[#8f674a] bg-[#f8f0e0]' : inputStyle === 'rounded' ? 'rounded-full bg-slate-100' : 'rounded-[22px] bg-slate-100'}`}>
+                            <button className={`sully-chat-add-button flex h-10 w-10 shrink-0 items-center justify-center ${chromeStyle === 'pixel' ? 'rounded-[4px] border-2 border-[#8f674a] bg-[#f8f0e0] text-[#8f674a]' : headerStyle === 'discord' ? 'rounded-full bg-slate-800 text-slate-200' : 'rounded-full bg-slate-100 text-slate-500'}`}>+</button>
+                            <div className={`sully-chat-input-wrap flex min-h-10 flex-1 items-center px-4 text-[11px] ${inputStyle === 'flat' ? 'rounded-none border-b border-slate-200 bg-transparent' : inputStyle === 'wechat' ? 'rounded-full border border-slate-200 bg-white' : inputStyle === 'ios' ? 'rounded-[26px] border border-white/80 bg-white/80 shadow-inner' : inputStyle === 'telegram' ? 'rounded-2xl border border-sky-100 bg-white' : inputStyle === 'discord' ? 'rounded-2xl border border-white/10 bg-slate-800 text-white' : inputStyle === 'pixel' ? 'rounded-[4px] border-2 border-[#8f674a] bg-[#f8f0e0]' : inputStyle === 'rounded' ? 'rounded-full bg-slate-100' : 'rounded-[22px] bg-slate-100'}`}>
                                 输入消息...
                             </div>
-                            <button className={`shrink-0 ${sendButtonStyle === 'pill' ? (chromeStyle === 'pixel' ? 'h-10 min-w-[68px] rounded-[4px] border-2 border-[#8f674a] bg-[#c99872] px-4 text-[11px] font-bold text-[#fff7ed]' : 'h-10 min-w-[68px] rounded-full bg-primary px-4 text-[11px] font-bold text-white') : sendButtonStyle === 'minimal' ? (chromeStyle === 'pixel' ? 'flex h-10 w-10 items-center justify-center rounded-[4px] border-2 border-[#8f674a] bg-[#c99872] text-[#fff7ed]' : 'flex h-10 w-10 items-center justify-center rounded-full bg-transparent text-primary') : (chromeStyle === 'pixel' ? 'flex h-10 w-10 items-center justify-center rounded-[4px] border-2 border-[#8f674a] bg-[#c99872] text-[#fff7ed]' : 'flex h-10 w-10 items-center justify-center rounded-full bg-primary text-white shadow-lg')}`}>
+                            <button className={`sully-chat-send-button shrink-0 ${sendButtonStyle === 'pill' ? (chromeStyle === 'pixel' ? 'h-10 min-w-[68px] rounded-[4px] border-2 border-[#8f674a] bg-[#c99872] px-4 text-[11px] font-bold text-[#fff7ed]' : 'h-10 min-w-[68px] rounded-full bg-primary px-4 text-[11px] font-bold text-white') : sendButtonStyle === 'minimal' ? (chromeStyle === 'pixel' ? 'flex h-10 w-10 items-center justify-center rounded-[4px] border-2 border-[#8f674a] bg-[#c99872] text-[#fff7ed]' : 'flex h-10 w-10 items-center justify-center rounded-full bg-transparent text-primary') : (chromeStyle === 'pixel' ? 'flex h-10 w-10 items-center justify-center rounded-[4px] border-2 border-[#8f674a] bg-[#c99872] text-[#fff7ed]' : 'flex h-10 w-10 items-center justify-center rounded-full bg-primary text-white shadow-lg')}`}>
                                 {sendButtonStyle === 'pill' ? '发送' : '➤'}
                             </button>
                         </div>
                     </div>
                 </div>
             </section>
-
-            {/* 聊天壳设置：同私聊「聊天装扮」的悬浮形态——面板 fixed 贴底、无遮罩，不占文档流，
-                预览保持完整尺寸也能边看边调。圆气泡点按 = 收起/展开面板，按住可拖到不挡手的位置。 */}
-            <div className="rounded-2xl border border-dashed border-slate-200 bg-white/70 px-4 py-2.5 text-[10px] leading-relaxed text-slate-400">
-                聊天壳设置在悬浮小面板里 · 点右侧圆钮收起/展开，按住圆钮可拖到不挡预览的位置
-            </div>
-
-            <button
-                type="button"
-                onPointerDown={onBubblePointerDown}
-                onPointerMove={onBubblePointerMove}
-                onPointerUp={onBubblePointerUp}
-                onPointerCancel={() => { bubbleDrag.current = null; }}
-                className={`fixed z-[106] flex h-12 w-12 items-center justify-center rounded-full shadow-lg transition-colors active:scale-90 ${panelOpen ? 'bg-primary text-white ring-4 ring-primary/20' : 'bg-white/95 text-primary ring-1 ring-primary/30 backdrop-blur'}`}
-                style={bubblePos
-                    ? { left: bubblePos.x, top: bubblePos.y, touchAction: 'none' }
-                    : { right: 12, top: 'calc(var(--safe-top, 0px) + 35vh)', touchAction: 'none' }}
-                aria-label={panelOpen ? '收起聊天壳设置面板' : '展开聊天壳设置面板'}
-            >
-                <FadersHorizontal className="h-6 w-6" weight="bold" />
-            </button>
-
-            {panelOpen && (
-            <section
-                className="fixed left-1/2 z-[105] w-[94%] max-w-md -translate-x-1/2 overflow-y-auto rounded-3xl border border-white/60 bg-white/95 p-4 shadow-[0_12px_40px_rgba(15,23,42,0.22)] backdrop-blur-xl [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
-                style={{ bottom: 'calc(16px + var(--safe-bottom, 0px))', maxHeight: '46vh' }}
-            >
-                <div className="mb-4 flex items-center gap-1.5">
-                    <button
-                        onClick={() => goPage(page - 1)}
-                        disabled={page === 0}
-                        className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-slate-100 text-base text-slate-500 transition-all active:scale-90 disabled:opacity-30"
-                        aria-label="上一页"
-                    >‹</button>
-                    <div className="flex flex-1 gap-1.5 overflow-x-auto no-scrollbar">
-                        {PAGE_TITLES.map((title, i) => (
-                            <button
-                                key={title}
-                                onClick={() => setPage(i)}
-                                className={`shrink-0 rounded-full px-3 py-1.5 text-[11px] font-bold transition-all active:scale-95 ${i === page ? 'bg-primary text-white shadow-sm' : 'bg-slate-100 text-slate-500'}`}
-                            >{title}</button>
-                        ))}
-                    </div>
-                    <button
-                        onClick={() => goPage(page + 1)}
-                        disabled={page === PAGE_TITLES.length - 1}
-                        className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-slate-100 text-base text-slate-500 transition-all active:scale-90 disabled:opacity-30"
-                        aria-label="下一页"
-                    >›</button>
-                </div>
-                <div
-                    onTouchStart={(e) => {
-                        // 滑杆等横向控件里起手的触摸不算翻页手势（否则拖「垂直微调」滑杆会误翻页）
-                        swipeStartX.current = (e.target as HTMLElement).closest('input') ? null : (e.touches[0]?.clientX ?? null);
-                    }}
-                    onTouchEnd={(e) => {
-                        const startX = swipeStartX.current;
-                        swipeStartX.current = null;
-                        const endX = e.changedTouches[0]?.clientX;
-                        if (startX == null || endX == null) return;
-                        const dx = endX - startX;
-                        if (Math.abs(dx) > 48) goPage(page + (dx < 0 ? 1 : -1));
-                    }}
-                >
-                {page === 0 && (<>
-                    <p className="mb-3 text-[10px] text-slate-400">一键换整套聊天壳（含头像、气泡、间距与细节微调），切预设会先清掉微调残留。</p>
-                    <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
-                        {presets.slice(0, 1).map((preset) => (
-                            <button
-                                key={preset.name}
-                                onClick={() => updateTheme({ ...FINE_TUNE_DEFAULTS, ...preset.config })}
-                                className="rounded-2xl border border-slate-200 bg-slate-50 p-3 text-left transition-all hover:border-primary/30 hover:bg-white active:scale-[0.98]"
-                            >
-                                <div className="text-xs font-bold text-slate-700">{preset.name}</div>
-                                <div className="mt-1 text-[10px] text-slate-400">{preset.desc}</div>
-                            </button>
-                        ))}
-                    </div>
-                </>)}
-
-                {page === 1 && (<>
-                    <ChoiceGroup title="聊天壳" items={choices.chrome} value={chromeStyle} onPick={(value) => updateTheme({ chatChromeStyle: value as OSTheme['chatChromeStyle'] })} />
-                    <div className="mt-4">
-                        <ChoiceGroup title="消息区背景" items={choices.background} value={backgroundStyle} onPick={(value) => updateTheme({ chatBackgroundStyle: value as OSTheme['chatBackgroundStyle'] })} />
-                    </div>
-                </>)}
-
-                {page === 2 && (<>
-                <ChoiceGroup title="头部风格" items={choices.header} value={headerStyle} onPick={(value) => updateTheme({ chatHeaderStyle: value as OSTheme['chatHeaderStyle'] })} />
-                <div className="mt-4">
-                    <ChoiceGroup title="头部对齐" items={choices.align} value={headerAlign} onPick={(value) => updateTheme({ chatHeaderAlign: value as OSTheme['chatHeaderAlign'] })} />
-                </div>
-                <div className="mt-4">
-                    <ChoiceGroup title="头部密度" items={choices.density} value={headerDensity} onPick={(value) => updateTheme({ chatHeaderDensity: value as OSTheme['chatHeaderDensity'] })} />
-                </div>
-                <div className="mt-4">
-                    <ChoiceGroup title="在线状态样式" items={choices.status} value={statusStyle} onPick={(value) => updateTheme({ chatStatusStyle: value as OSTheme['chatStatusStyle'] })} />
-                </div>
-                <div className="mt-4 flex items-center justify-between rounded-2xl bg-slate-50 px-3 py-2.5">
-                    <div className="min-w-0 pr-3">
-                        <div className="text-[11px] font-bold text-slate-700">显示情绪栏</div>
-                        <div className="mt-0.5 text-[10px] text-slate-400">角色名下方的情绪 buff 胶囊；关掉后顶栏更干净（位置/样式也可在「白框自定义」里用 .sully-chat-buffs 调）。</div>
-                    </div>
-                    <button
-                        onClick={() => updateTheme({ chatHideHeaderBuffs: showHeaderBuffs })}
-                        className={`relative h-6 w-11 shrink-0 rounded-full transition-colors ${showHeaderBuffs ? 'bg-primary' : 'bg-slate-300'}`}
-                        aria-pressed={showHeaderBuffs}
-                    >
-                        <span className={`absolute top-0.5 h-5 w-5 rounded-full bg-white shadow transition-all ${showHeaderBuffs ? 'left-[22px]' : 'left-0.5'}`} />
-                    </button>
-                </div>
-                </>)}
-
-                {page === 3 && (<>
-                <ChoiceGroup title="消息气泡" items={choices.bubble} value={bubbleStyle} onPick={(value) => updateTheme({ chatBubbleStyle: value as OSTheme['chatBubbleStyle'] })} />
-                <div className="mt-4">
-                    <ChoiceGroup title="头像形状" items={choices.avatarShape} value={avatarShape} onPick={(value) => updateTheme({ chatAvatarShape: value as OSTheme['chatAvatarShape'] })} />
-                </div>
-                <div className="mt-4">
-                    <ChoiceGroup title="头像尺寸" items={choices.avatarSize} value={avatarSize} onPick={(value) => updateTheme({ chatAvatarSize: value as OSTheme['chatAvatarSize'] })} />
-                </div>
-                <div className="mt-4">
-                    <ChoiceGroup title="头像出现频率" items={choices.avatarMode} value={avatarMode} onPick={(value) => updateTheme({ chatAvatarMode: value as OSTheme['chatAvatarMode'] })} />
-                </div>
-                <div className="mt-4">
-                    <ChoiceGroup title="消息密度" items={choices.spacing} value={messageSpacing} onPick={(value) => updateTheme({ chatMessageSpacing: value as OSTheme['chatMessageSpacing'] })} />
-                </div>
-                <div className="mt-4">
-                    <ChoiceGroup title="时间戳" items={choices.timestamp} value={showTimestamp} onPick={(value) => updateTheme({ chatShowTimestamp: value as OSTheme['chatShowTimestamp'] })} />
-                </div>
-                <div className="mt-4 flex items-center justify-between rounded-2xl bg-slate-50 px-3 py-2.5">
-                    <div className="min-w-0 pr-3">
-                        <div className="text-[11px] font-bold text-slate-700">发送准备中圆点</div>
-                        <div className="mt-0.5 text-[10px] text-slate-400">Instant Push 期间，自己的气泡左侧显示三个跳动的小圆点。</div>
-                    </div>
-                    <button
-                        onClick={() => updateTheme({ chatPendingIndicator: !pendingIndicator })}
-                        className={`relative h-6 w-11 shrink-0 rounded-full transition-colors ${pendingIndicator ? 'bg-primary' : 'bg-slate-300'}`}
-                        aria-pressed={pendingIndicator}
-                    >
-                        <span className={`absolute top-0.5 h-5 w-5 rounded-full bg-white shadow transition-all ${pendingIndicator ? 'left-[22px]' : 'left-0.5'}`} />
-                    </button>
-                </div>
-                </>)}
-
-                {/* 聊天细节微调 —— 收编社区白框美化的可视化版（控件组件与聊天内「聊天装扮」弹窗共用） */}
-                {page === 4 && (<>
-                    <p className="mb-3 text-[10px] leading-relaxed text-slate-400">
-                        头像显隐/对齐、贴边、字号行距——不用再手写 CSS，改动实时反映在上方预览里。
-                        手写过美化代码的老用户不受影响：<b>你的自定义 CSS 优先级更高</b>，永远盖得过这里。
-                    </p>
-                    <ChatFineTunePanel value={theme} onChange={(patch) => updateTheme(patch)} />
-                    <button
-                        onClick={() => updateTheme({ ...FINE_TUNE_DEFAULTS })}
-                        className="mt-4 w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-2.5 text-[11px] font-bold text-slate-500 transition-all hover:bg-slate-100 active:scale-[0.99]">
-                        微调全部回默认（一键清残留）
-                    </button>
-                    <p className="mt-2 text-[10px] text-slate-400">
-                        这里设置的是全局打底。想给某个角色单独一套？进 ta 的聊天 → 「＋」菜单 → 「聊天装扮」。
-                    </p>
-                </>)}
-
-                {page === 5 && (<>
-                    <ChoiceGroup title="表情包大小" items={choices.emojiSize} value={theme.chatEmojiSize || 'small'} onPick={(value) => updateTheme({ chatEmojiSize: value as OSTheme['chatEmojiSize'] })} />
-                    <p className="mt-2 text-[10px] text-slate-400">聊天和群聊里发出的表情包图片尺寸。用自定义 CSS 调过尺寸的美化会继续覆盖这里的设置。（表情包尺寸预览里看不到，进聊天发一张试试。）</p>
-                    <div className="mt-4">
-                        <ChoiceGroup title="输入栏风格" items={choices.input} value={inputStyle} onPick={(value) => updateTheme({ chatInputStyle: value as OSTheme['chatInputStyle'] })} />
-                    </div>
-                    <div className="mt-4">
-                        <ChoiceGroup title="发送按钮" items={choices.send} value={sendButtonStyle} onPick={(value) => updateTheme({ chatSendButtonStyle: value as OSTheme['chatSendButtonStyle'] })} />
-                    </div>
-                </>)}
-                </div>
-            </section>
-            )}
 
             <section className={groupClass}>
                 <div className="mb-3">
@@ -777,31 +551,13 @@ export const ChatAppearanceEditor: React.FC<Props> = ({ theme, updateTheme, onRe
 
             <section className={groupClass}>
                 <div className="mb-3">
-                    <h2 className="text-sm font-bold uppercase tracking-widest text-slate-400">自定义 CSS</h2>
-                    <p className="mt-1 text-[10px] leading-relaxed text-slate-400">界面和气泡分开编辑，保存后可以自由组合。留空表示使用上面的可视化设置。</p>
+                    <h2 className="text-sm font-bold uppercase tracking-widest text-slate-400">聊天装扮 CSS</h2>
+                    <p className="mt-1 text-[10px] leading-relaxed text-slate-400">一段 CSS 同时控制聊天界面、顶栏、输入栏和气泡；保存预设后可直接整套套用。</p>
                 </div>
-                <details className="rounded-2xl border border-slate-200 bg-slate-50 p-3" open>
-                    <summary className="cursor-pointer text-[11px] font-bold text-slate-700">聊天界面 CSS</summary>
-                    <p className="mt-1 text-[10px] text-slate-400">控制头部、消息区、输入栏和聊天外框。</p>
-                    <textarea
-                        value={theme.chatChromeCustomCss || ''}
-                        onChange={(e) => updateTheme({ chatChromeCustomCss: e.target.value })}
-                        placeholder={'.sully-chat-header {\n  /* 在这里调整聊天界面 */\n}'}
-                        spellCheck={false}
-                        className="mt-2 min-h-[150px] w-full resize-y rounded-xl border border-slate-200 bg-white p-3 font-mono text-[11px] leading-relaxed text-slate-700 outline-none focus:border-primary"
-                    />
-                </details>
-                <details className="mt-3 rounded-2xl border border-slate-200 bg-slate-50 p-3" open>
-                    <summary className="cursor-pointer text-[11px] font-bold text-slate-700">气泡 CSS</summary>
-                    <p className="mt-1 text-[10px] text-slate-400">只控制用户气泡和角色气泡，可与上面的界面设置自由搭配。</p>
-                    <textarea
-                        value={theme.chatBubbleCustomCss || ''}
-                        onChange={(e) => updateTheme({ chatBubbleCustomCss: e.target.value })}
-                        placeholder={'.sully-bubble-user {\n  /* 用户气泡 */\n}\n.sully-bubble-ai {\n  /* 角色气泡 */\n}'}
-                        spellCheck={false}
-                        className="mt-2 min-h-[150px] w-full resize-y rounded-xl border border-slate-200 bg-white p-3 font-mono text-[11px] leading-relaxed text-slate-700 outline-none focus:border-primary"
-                    />
-                </details>
+                <ChromeCssEditor
+                    value={[theme.chatChromeCustomCss, theme.chatBubbleCustomCss].filter(Boolean).join('\n')}
+                    onChange={(css) => updateTheme({ chatChromeCustomCss: css, chatBubbleCustomCss: '' })}
+                />
                 <button
                     onClick={() => { if (window.confirm('确定还原全部聊天界面和气泡 CSS？将清空全局与角色白框 CSS。')) onResetAllChrome?.(); updateTheme({ chatChromeCustomCss: '', chatBubbleCustomCss: '' }); }}
                     className="mt-3 w-full rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-[12px] font-bold text-rose-600 transition-all hover:bg-rose-100 active:scale-[0.99]">

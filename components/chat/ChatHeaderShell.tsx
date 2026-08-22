@@ -366,8 +366,7 @@ const ChatHeaderShell: React.FC<ChatHeaderShellProps> = ({
 
     const renderCenteredInfo = () => (
         <div className="flex w-full min-w-0 max-w-full flex-col items-center text-center">
-            <img src={activeCharacter.avatar} className={`sully-chat-avatar w-10 h-10 object-cover shadow-sm ${avatarRadiusClass}`} alt="avatar" />
-            <div className={`sully-chat-name mt-1 font-bold ${primaryTextClass}`}>{activeCharacter.name}</div>
+            <div className={`sully-chat-name font-bold ${primaryTextClass}`}>{activeCharacter.name}</div>
             {buffs.length > 0 && (
                 <div className="mt-1 min-h-[18px] w-full">
                     {renderBuffRow(true)}
@@ -378,7 +377,6 @@ const ChatHeaderShell: React.FC<ChatHeaderShellProps> = ({
 
     const renderStandardInfo = () => (
         <>
-            <img src={activeCharacter.avatar} className={`sully-chat-avatar w-10 h-10 object-cover shadow-sm ${avatarRadiusClass}`} alt="avatar" />
             <div className="sully-chat-info flex-1 min-w-0 flex flex-col items-start text-left">
                 <div className={`sully-chat-name font-bold ${primaryTextClass}`}>{activeCharacter.name}</div>
                 <div className="sully-chat-status flex items-center gap-2 flex-wrap">
@@ -449,7 +447,7 @@ const ChatHeaderShell: React.FC<ChatHeaderShellProps> = ({
                     {topActions.length > 0 && (
                         <div className="absolute right-0 bottom-1 flex items-center gap-0.5">
                             {topActions.map(action => (
-                                <button key={action.label} onClick={action.onClick} className={`p-2 ${iconButtonClass}`} title={action.label} aria-label={action.label}>
+                                <button key={action.label} onClick={action.onClick} className={`sully-chat-top-action p-2 ${iconButtonClass}`} title={action.label} aria-label={action.label}>
                                     {action.icon}
                                 </button>
                             ))}
@@ -479,8 +477,8 @@ const ChatHeaderShell: React.FC<ChatHeaderShellProps> = ({
                     )}
                     {topActions.length > 0 && (
                         <div className="flex items-center gap-0.5 ml-auto">
-                            {topActions.map(action => (
-                                <button key={action.label} onClick={action.onClick} className={`p-2 ${iconButtonClass}`} title={action.label} aria-label={action.label}>
+                        {topActions.map(action => (
+                                <button key={action.label} onClick={action.onClick} className={`sully-chat-top-action p-2 ${iconButtonClass}`} title={action.label} aria-label={action.label}>
                                     {action.icon}
                                 </button>
                             ))}

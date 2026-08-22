@@ -35,7 +35,7 @@ const AI_PROMPT = `你是一个 CSS 设计师。我在用一个叫 SullyOS 的�
 - .sully-bubble-ai / .sully-bubble-user 角色 / 用户气泡
 
 【必须遵守的规范】
-1. 覆盖默认样式必须加 !important（尤其 .sully-chat-buffs button 带内联样式，不加 !important 盖不掉）。
+1. 头部 buff 等带内联样式的控件覆盖时加 !important；气泡的背景、文字颜色、透明度和圆角已经改成 CSS 变量，直接写普通 CSS 就能覆盖。
 2. 只允许使用上面的 .sully-chat-* 选择器及其后代/伪元素，禁止写 body、*、div、html 这类全局选择器（会污染其它界面）。
 3. 这是移动端窄屏（宽约 390px），尺寸请克制、用相对单位或小数值。
 4. 顶栏顶部已自动留出状态栏安全区。装饰若要贴最顶部，用 top: calc(var(--safe-top) + 数值)。
@@ -62,6 +62,14 @@ const AI_PROMPT = `你是一个 CSS 设计师。我在用一个叫 SullyOS 的�
 
 type Preset = { name: string; code: string; swatch?: string };
 
+type CssEditorProps = {
+    value: string;
+    onChange: (css: string) => void;
+    /** Optional second editor for bubble CSS. When omitted this remains an interface-only editor. */
+    bubbleValue?: string;
+    onChangeBubble?: (css: string) => void;
+};
+
 // 从一段 CSS 里尽力抠出 .sully-chat-header 的背景值，给「我的预设」生成缩略色块（抠不到则用中性灰）。
 const extractSwatch = (code: string): string => {
     const block = code.match(/\.sully-chat-header\s*\{([^}]*)\}/);
@@ -70,8 +78,15 @@ const extractSwatch = (code: string): string => {
     const val = m ? m[1].trim() : '';
     return val && !/url\(/i.test(val) ? val : '#e2e8f0';
 };
+const extractBubbleSwatch = (code: string): string => {
+    const block = code.match(/\.sully-bubble-user\s*\{([^}]*)\}/);
+    const body = block ? block[1] : code;
+    const m = body.match(/background(?:-color)?\s*:\s*([^;!]+)/i);
+    const val = m ? m[1].trim() : '';
+    return val && !/url\(/i.test(val) ? val : '#cbd5e1';
+};
 
-// 内置完整风格（点击=替换文本框、立刻生效）。
+// 内置完整风格（点击=替换文本框、立刻生效）。界面与气泡统一放在同一段 CSS 中。
 const PRESETS: Preset[] = [
     {
         name: '奶油少女',
@@ -247,8 +262,120 @@ const PRESETS: Preset[] = [
     },
 ];
 
+// 参考截图的移动聊天壳：深色头部、浅灰消息区、底部白色输入栏。
+PRESETS.push({
+    name: '复古微信',
+    swatch: 'linear-gradient(180deg,#333 0 30%,#e7e7e7 30%)',
+    code: `/* 复古微信：老版灰阶界面，按参考图还原 */
+.sully-chat-root{background:#e7e7e7!important;color:#161616!important;--sully-chat-bubble-mt:8px;}
+.sully-chat-header{background:linear-gradient(#414246,#292a2d)!important;color:#fff!important;border-top:1px solid #56575a!important;border-bottom:2px solid #17181a!important;box-shadow:inset 0 1px rgba(255,255,255,.12)!important;min-height:3.75rem!important;height:auto!important;padding-left:.7rem!important;padding-right:.7rem!important;}
+.sully-chat-back{color:#f3f3f3!important;background:transparent!important;border-radius:0!important;}
+.sully-chat-info{position:absolute!important;left:50%!important;transform:translateX(-50%)!important;width:max-content!important;max-width:55%!important;align-items:center!important;text-align:center!important;}
+.sully-chat-name{color:#f5f5f5!important;font-size:.98rem!important;font-weight:500!important;letter-spacing:0!important;white-space:nowrap!important;}
+.sully-chat-status{color:#62d495!important;font-size:.68rem!important;}
+.sully-chat-status{justify-content:center!important;}
+.sully-chat-buffs{margin-top:.15rem!important;}
+.sully-chat-buffs button{background:#55565a!important;color:#eee!important;border:1px solid #777!important;border-radius:2px!important;font-size:.65rem!important;padding:.18rem .45rem!important;}
+.sully-chat-token{background:#505155!important;color:#ddd!important;border:1px solid #777!important;border-radius:2px!important;}
+.sully-chat-trigger,.sully-chat-top-action{color:#f4f4f4!important;background:linear-gradient(#bfc1c4,#76787c)!important;border:1px solid #9b9da1!important;box-shadow:inset 0 1px rgba(255,255,255,.45),0 1px 1px rgba(0,0,0,.28)!important;border-radius:3px!important;}
+.sully-chat-top-action{width:2.55rem!important;height:1.8rem!important;padding:.22rem!important;margin-left:.42rem!important;display:flex!important;align-items:center!important;justify-content:center!important;}
+.sully-chat-top-action svg{width:1.1rem!important;height:1.1rem!important;margin:auto!important;}
+.sully-chat-message{margin-bottom:1.35rem!important;padding-left:.65rem!important;padding-right:.65rem!important;align-items:flex-end!important;}
+.sully-chat-message-content{width:fit-content!important;max-width:84%!important;min-width:0!important;}
+.sully-chat-message-long .sully-chat-message-content{width:fit-content!important;max-width:84%!important;}
+.sully-chat-message-avatar-slot{width:2rem!important;height:2rem!important;top:50%!important;bottom:auto!important;transform:translateY(-50%)!important;}
+/* 长消息：头像外框顶与气泡外框顶齐平。间距取自 --sully-chat-bubble-mt（= 气泡 margin-top），
+   与气泡共用同一个数，不写死 top，改气泡间距时头像自动跟随。 */
+.sully-chat-message-long .sully-chat-message-avatar-slot{top:var(--sully-chat-bubble-mt,8px)!important;bottom:auto!important;transform:none!important;}
+.sully-chat-message-avatar-slot,.sully-chat-message-avatar,.sully-chat-message-avatar-img{width:1.75rem!important;height:1.75rem!important;}
+.sully-chat-message-avatar,.sully-chat-message-avatar-img{border-radius:2px!important;border:1px solid #777!important;box-shadow:0 1px 1px rgba(0,0,0,.18)!important;object-fit:cover!important;}
+.sully-chat-message-ai .sully-chat-message-content{margin-left:2.55rem!important;}
+.sully-chat-message-user .sully-chat-message-content{margin-right:2.55rem!important;}
+.sully-chat-message-group-first{margin-top:.2rem!important;}
+.sully-chat-inputbar{background:linear-gradient(#37383c,#292a2e)!important;border-top:1px solid #151619!important;border-radius:0!important;box-shadow:inset 0 1px rgba(255,255,255,.1)!important;padding:.25rem .4rem!important;}
+.sully-chat-inputbar > div{gap:.25rem!important;padding:.35rem .4rem!important;}
+/* 上面这条会连收起的「＋」面板一起套上内距（border-box 下即使 max-height:0 也会撑出约 12px
+   浅色横条 = 输入栏下方的白边），所以收起态必须显式清零。 */
+.sully-chat-panel.sully-chat-panel-collapsed{padding:0!important;border-top-width:0!important;border-bottom-width:0!important;height:0!important;min-height:0!important;max-height:0!important;}
+.sully-chat-input-wrap{background:#dedede!important;border:1px solid #68696d!important;border-radius:5px!important;box-shadow:inset 0 1px #f8f8f8,0 1px 1px rgba(24,25,27,.55)!important;min-height:1.9rem!important;}
+.sully-chat-textarea{color:#181818!important;font-size:.82rem!important;padding:.35rem .55rem!important;}
+.sully-chat-textarea::placeholder{color:#777!important;}
+.sully-chat-add-button,.sully-chat-emoji-button,.sully-chat-send-button{color:#25262a!important;background:linear-gradient(#f4f4f4,#aeb0b4)!important;border:1px solid #717277!important;box-shadow:inset 0 1px #fff,0 1px 1px rgba(23,24,26,.6)!important;border-radius:50%!important;}
+.sully-chat-add-button,.sully-chat-send-button{width:1.95rem!important;min-width:1.95rem!important;height:1.95rem!important;}
+.sully-chat-emoji-button{width:1.75rem!important;height:1.75rem!important;padding:.25rem!important;}
+.sully-chat-add-button svg,.sully-chat-send-button svg{width:.95rem!important;height:.95rem!important;}
+.sully-chat-emoji-button svg{width:1rem!important;height:1rem!important;}
+.sully-chat-message-time{position:absolute!important;top:calc(100% + .08rem)!important;left:50%!important;right:auto!important;transform:translateX(-50%)!important;background:linear-gradient(#ededed,#cecece)!important;color:#4b4b4b!important;border:1px solid #858585!important;border-radius:4px!important;padding:1px 6px!important;line-height:1.1!important;box-shadow:inset 0 1px #fff,0 1px 1px rgba(0,0,0,.14)!important;z-index:3!important;}
+
+/* 老版微信灰色气泡：两侧同色，黑字，硬朗边框。尾巴由独立元素渲染。 */
+.sully-bubble-ai,.sully-bubble-user{--sully-bubble-bg:#b8b8b8;--sully-bubble-text:#171717;background:linear-gradient(#c9c9c9,#ababab)!important;color:#171717!important;border:1px solid #6d6d6d!important;border-radius:4px!important;box-shadow:inset 0 1px rgba(255,255,255,.65),0 1px 1px rgba(0,0,0,.16)!important;position:relative!important;padding:.28rem .72rem!important;min-height:1.75rem!important;display:flex!important;align-items:center!important;}
+.sully-bubble-ai::before,.sully-bubble-ai::after,.sully-bubble-user::before,.sully-bubble-user::after{content:none!important;display:none!important;}
+.sully-bubble-tail{position:absolute!important;top:50%!important;width:7px!important;height:7px!important;margin:0!important;padding:0!important;background:inherit!important;border:0!important;box-shadow:none!important;clip-path:polygon(100% 0,100% 100%,0 50%)!important;transform:translateY(-50%)!important;z-index:2!important;pointer-events:none!important;}
+.sully-bubble-tail-ai{left:-7px!important;}
+.sully-bubble-tail-user{right:-7px!important;transform:translateY(-50%) scaleX(-1)!important;}
+.sully-bubble-tail-long{top:1rem!important;transform:none!important;}
+.sully-bubble-tail-long.sully-bubble-tail-user{transform:scaleX(-1)!important;}
+.sully-chat-message-avatar-slot{z-index:4!important;}
+.sully-chat-inputbar{padding-bottom:0!important;}
+.sully-chat-message-short .sully-bubble-ai,.sully-chat-message-short .sully-bubble-user{height:1.5rem!important;min-height:1.5rem!important;max-height:1.5rem!important;padding-top:0!important;padding-bottom:0!important;box-sizing:border-box!important;}
+.sully-chat-message-short .sully-bubble-text{font-size:13px!important;line-height:1.2!important;color:#171717!important;}
+.sully-chat-message-long .sully-bubble-text{font-size:13px!important;line-height:1.42!important;color:#171717!important;}`,
+});
+
+// 旧版本仍保留这组数据结构用于读取历史预设，但新编辑器不再显示分离的气泡代码框。
+const BUBBLE_PRESETS: Preset[] = [
+    {
+        name: '复古微信',
+        swatch: 'linear-gradient(135deg,#fff,#e5e7eb)',
+        code: `/* 复古微信气泡 · 对照参考图 3/4/5 */
+.sully-bubble-ai{
+  --sully-bubble-bg:#fff;--sully-bubble-text:#111;
+  background:#fff!important;color:#111!important;border:1px solid #f1f1f1!important;
+  border-radius:5px!important;box-shadow:0 1px 2px rgba(15,23,42,.12)!important;position:relative!important;
+}
+.sully-bubble-user{
+  --sully-bubble-bg:#aaa;--sully-bubble-text:#fff;
+  background:#aaa!important;color:#fff!important;border:0!important;
+  border-radius:5px!important;box-shadow:none!important;position:relative!important;
+}
+.sully-bubble-ai::before,.sully-bubble-user::before{content:""!important;position:absolute!important;top:0!important;width:0!important;height:0!important;border-style:solid!important;}
+.sully-bubble-ai::before{left:-9px!important;border-width:0 9px 9px 0!important;border-color:transparent #fff transparent transparent!important;}
+.sully-bubble-user::before{right:-9px!important;border-width:0 0 9px 9px!important;border-color:transparent transparent #aaa transparent!important;}
+.sully-bubble-text{font-size:15px!important;line-height:1.55!important;}`,
+    },
+    {
+        name: '微信绿白',
+        swatch: 'linear-gradient(135deg,#fff 0 52%,#95ec69 52%)',
+        code: `/* 微信绿白 */
+.sully-bubble-ai{
+  background:#fff!important;color:#172033!important;border:1px solid rgba(15,23,42,.05)!important;
+  border-radius:4px!important;box-shadow:none!important;
+}
+.sully-bubble-user{
+  background:#95ec69!important;color:#172033!important;border:1px solid rgba(15,23,42,.04)!important;
+  border-radius:4px!important;box-shadow:none!important;
+}`,
+    },
+    {
+        name: '柔和 iOS',
+        swatch: 'linear-gradient(135deg,#dbeafe,#fce7f3)',
+        code: `/* 柔和 iOS */
+.sully-bubble-ai{
+  background:rgba(255,255,255,.86)!important;color:#334155!important;
+  border:1px solid rgba(255,255,255,.8)!important;border-radius:22px!important;
+  box-shadow:0 8px 18px rgba(148,163,184,.16)!important;backdrop-filter:blur(10px)!important;
+}
+.sully-bubble-user{
+  background:linear-gradient(135deg,#60a5fa,#818cf8)!important;color:#fff!important;
+  border:1px solid rgba(255,255,255,.3)!important;border-radius:22px!important;
+  box-shadow:0 8px 18px rgba(99,102,241,.2)!important;
+}`,
+    },
+];
+
 // 自定义预设存 IndexedDB（STORE_ASSETS，随 app 备份/导出一起走）；旧 localStorage 自动一次性迁移过来。
 const PRESET_ASSET_KEY = 'chrome_css_presets';
+const BUBBLE_PRESET_ASSET_KEY = 'chat_bubble_css_presets';
 
 const loadCustom = async (): Promise<Preset[]> => {
     try { const fromDb = await DB.getAssetRaw(PRESET_ASSET_KEY); if (Array.isArray(fromDb)) return fromDb; } catch { /* ignore */ }
@@ -261,6 +388,14 @@ const loadCustom = async (): Promise<Preset[]> => {
     return [];
 };
 const persistCustom = async (list: Preset[]) => { try { await DB.saveAssetRaw(PRESET_ASSET_KEY, list); } catch { /* ignore */ } };
+const loadBubbleCustom = async (): Promise<Preset[]> => {
+    try {
+        const fromDb = await DB.getAssetRaw(BUBBLE_PRESET_ASSET_KEY);
+        if (Array.isArray(fromDb)) return fromDb;
+    } catch { /* ignore */ }
+    return [];
+};
+const persistBubbleCustom = async (list: Preset[]) => { try { await DB.saveAssetRaw(BUBBLE_PRESET_ASSET_KEY, list); } catch { /* ignore */ } };
 
 // 导出码：SULLYCSS1: + base64(utf8(JSON))，方便整段复制分享/换机带走。
 const encodePresets = (list: Preset[]): string => 'SULLYCSS1:' + btoa(unescape(encodeURIComponent(JSON.stringify(list))));
@@ -281,29 +416,39 @@ const copyText = async (text: string): Promise<boolean> => {
     } catch { return false; }
 };
 
-const ChromeCssEditor: React.FC<{ value: string; onChange: (css: string) => void }> = ({ value, onChange }) => {
+const ChromeCssEditor: React.FC<CssEditorProps> = ({ value, onChange, bubbleValue = '', onChangeBubble }) => {
     const [copied, setCopied] = useState(false);
     const [custom, setCustom] = useState<Preset[]>([]);
+    const [bubbleCustom, setBubbleCustom] = useState<Preset[]>([]);
     const txtImportRef = useRef<HTMLInputElement>(null);
 
     useEffect(() => {
         let alive = true;
         loadCustom().then((list) => { if (alive) setCustom(list); });
+        loadBubbleCustom().then((list) => { if (alive) setBubbleCustom(list); });
         return () => { alive = false; };
     }, []);
 
     const commitCustom = (next: Preset[]) => { setCustom(next); persistCustom(next); };
+    const commitBubbleCustom = (next: Preset[]) => { setBubbleCustom(next); persistBubbleCustom(next); };
 
     const handleCopyPrompt = async () => {
         if (await copyText(AI_PROMPT)) { setCopied(true); window.setTimeout(() => setCopied(false), 1800); }
     };
     const handleSavePreset = () => {
         if (!value.trim() || typeof window === 'undefined') return;
-        const name = window.prompt('给这套白框预设起个名字（所有角色通用）：', '我的预设')?.trim();
+        const name = window.prompt('给这套聊天界面预设起个名字：', '我的界面')?.trim();
         if (!name) return;
         commitCustom([...custom.filter((p) => p.name !== name), { name, code: value }]);
     };
     const handleDeletePreset = (name: string) => commitCustom(custom.filter((p) => p.name !== name));
+    const handleSaveBubblePreset = () => {
+        if (!bubbleValue.trim() || !onChangeBubble || typeof window === 'undefined') return;
+        const name = window.prompt('给这套气泡预设起个名字：', '我的气泡')?.trim();
+        if (!name) return;
+        commitBubbleCustom([...bubbleCustom.filter((p) => p.name !== name), { name, code: bubbleValue }]);
+    };
+    const handleDeleteBubblePreset = (name: string) => commitBubbleCustom(bubbleCustom.filter((p) => p.name !== name));
 
     const handleTxtImport = async (event: React.ChangeEvent<HTMLInputElement>) => {
         const file = event.target.files?.[0];
@@ -395,7 +540,7 @@ const ChromeCssEditor: React.FC<{ value: string; onChange: (css: string) => void
             <div>
                 <div className="mb-2 text-[11px] font-bold text-slate-500">内置风格 <span className="font-normal text-slate-400">· 点一下套用</span></div>
                 <div className="flex flex-wrap gap-2">
-                    {PRESETS.map((p) => (
+                    {PRESETS.filter((p) => p.name === '极简白' || p.name === '复古微信').map((p) => (
                         <button key={p.name} onClick={() => onChange(p.code)} title={p.name} className={cardCls}>
                             <span className="absolute inset-0" style={{ background: p.swatch }} />
                             <span className={cardLabelCls} style={{ background: 'linear-gradient(to top, rgba(0,0,0,.5), transparent)' }}>{p.name}</span>
@@ -404,10 +549,10 @@ const ChromeCssEditor: React.FC<{ value: string; onChange: (css: string) => void
                 </div>
             </div>
 
-            {/* 我的预设：全角色通用，存 IndexedDB（随备份走），可导入导出 */}
+            {/* 聊天界面预设：全角色通用，存 IndexedDB（随备份走），可导入导出 */}
             <div>
                 <div className="mb-2 flex flex-wrap items-center justify-between gap-1.5">
-                    <span className="text-[11px] font-bold text-slate-500">我的预设 <span className="font-normal text-slate-400">· 全角色通用</span></span>
+                    <span className="text-[11px] font-bold text-slate-500">我的聊天主题预设 <span className="font-normal text-slate-400">· 界面与气泡整套保存</span></span>
                     <div className="flex items-center gap-1">
                         <button onClick={handleImport} className="rounded-md px-2 py-1 text-[10px] font-semibold text-slate-400 hover:bg-slate-100 hover:text-slate-600">导入</button>
                         <button onClick={handleExport} disabled={!custom.length} className={`rounded-md px-2 py-1 text-[10px] font-semibold ${custom.length ? 'text-slate-400 hover:bg-slate-100 hover:text-slate-600' : 'text-slate-300'}`}>导出</button>
@@ -432,10 +577,38 @@ const ChromeCssEditor: React.FC<{ value: string; onChange: (css: string) => void
                 </div>
             </div>
 
+            {onChangeBubble && (
+                <div className="border-t border-slate-100 pt-4">
+                    <div className="mb-2 text-[11px] font-bold text-slate-500">气泡预设 <span className="font-normal text-slate-400">· 与聊天界面自由组合</span></div>
+                    <div className="flex flex-wrap gap-2">
+                        {BUBBLE_PRESETS.map((p) => (
+                            <button key={p.name} onClick={() => onChangeBubble(p.code)} title={p.name} className={cardCls}>
+                                <span className="absolute inset-0" style={{ background: p.swatch }} />
+                                <span className={cardLabelCls} style={{ background: 'linear-gradient(to top, rgba(0,0,0,.5), transparent)' }}>{p.name}</span>
+                            </button>
+                        ))}
+                        {bubbleCustom.map((p) => (
+                            <div key={p.name} className={cardCls}>
+                                <button onClick={() => onChangeBubble(p.code)} title={p.name} className="absolute inset-0">
+                                    <span className="absolute inset-0" style={{ background: extractBubbleSwatch(p.code) }} />
+                                    <span className={cardLabelCls} style={{ background: 'linear-gradient(to top, rgba(0,0,0,.5), transparent)' }}>{p.name}</span>
+                                </button>
+                                <button onClick={() => handleDeleteBubblePreset(p.name)} title="删除"
+                                    className="absolute right-1 top-1 flex h-4 w-4 items-center justify-center rounded-full bg-black/45 text-[10px] leading-none text-white opacity-80 hover:bg-rose-500">×</button>
+                            </div>
+                        ))}
+                        <button onClick={handleSaveBubblePreset} disabled={!bubbleValue.trim()} title={bubbleValue.trim() ? '把当前气泡 CSS 存为预设' : '先写点气泡 CSS'}
+                            className={`flex h-14 w-[78px] shrink-0 flex-col items-center justify-center gap-0.5 rounded-xl border border-dashed text-[10px] font-bold transition-all active:scale-95 ${bubbleValue.trim() ? 'border-emerald-300 text-emerald-600 hover:bg-emerald-50' : 'border-slate-200 text-slate-300'}`}>
+                            <span className="text-lg leading-none">＋</span>存气泡
+                        </button>
+                    </div>
+                </div>
+            )}
+
             {/* CSS 代码区 */}
             <div>
                 <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
-                    <span className="text-[11px] font-bold text-slate-500">CSS 代码 <span className="font-normal text-slate-400">· 可手改 / 粘贴</span></span>
+                    <span className="text-[11px] font-bold text-slate-500">完整 CSS 代码 <span className="font-normal text-slate-400">· 同时控制聊天界面和气泡</span></span>
                     <div className="flex items-center gap-1">
                         <input ref={txtImportRef} type="file" accept=".txt,text/plain" className="hidden" onChange={handleTxtImport} />
                         <button onClick={() => txtImportRef.current?.click()} className="rounded-lg px-2 py-1 text-[10px] font-semibold text-indigo-500 hover:bg-indigo-50">导入 TXT</button>
@@ -446,15 +619,34 @@ const ChromeCssEditor: React.FC<{ value: string; onChange: (css: string) => void
                 <textarea
                     value={value}
                     onChange={(e) => onChange(e.target.value)}
-                    placeholder={'/* 点上面任一套，或在这里直接写 / 粘贴 CSS */\n.sully-chat-header{\n  background: linear-gradient(135deg,#ffe3ef,#f1e7ff) !important;\n  border-bottom: none !important;\n}'}
+                    placeholder={'/* 点上面任一套，或在这里直接写 / 粘贴 CSS */\n.sully-chat-root{\n  --my-chat-bg:#f0f0f0;\n  background:var(--my-chat-bg)!important;\n}\n.sully-chat-header{\n  background:#222!important;\n}'}
                     spellCheck={false}
                     rows={8}
                     className="w-full resize-y rounded-2xl border border-slate-700 bg-slate-900 p-4 font-mono text-xs leading-relaxed text-slate-200 outline-none focus:border-primary/50 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
                 />
                 <div className="mt-1.5 text-[10px] leading-relaxed text-slate-400">
-                    可用选择器：<code className="rounded bg-slate-100 px-1 text-slate-500">.sully-chat-header / -avatar / -name / -buffs / -token / -trigger / -back / -status / -inputbar / -panel / -root</code>
+                    可用选择器：<code className="rounded bg-slate-100 px-1 text-slate-500">.sully-chat-*</code>、<code className="rounded bg-slate-100 px-1 text-slate-500">.sully-bubble-ai</code>、<code className="rounded bg-slate-100 px-1 text-slate-500">.sully-bubble-user</code>
                 </div>
             </div>
+            {onChangeBubble && (
+                <div>
+                    <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+                        <span className="text-[11px] font-bold text-slate-500">气泡 CSS <span className="font-normal text-slate-400">· 用户和角色分开控制</span></span>
+                        {bubbleValue && <button onClick={() => onChangeBubble('')} className="rounded-lg px-2 py-1 text-[10px] font-semibold text-rose-400 hover:bg-rose-50 hover:text-rose-500">清空</button>}
+                    </div>
+                    <textarea
+                        value={bubbleValue}
+                        onChange={(e) => onChangeBubble(e.target.value)}
+                        placeholder={'/* 气泡 CSS：可与上面的聊天界面预设自由搭配 */\n.sully-bubble-ai {\n  background: #fff !important;\n}\n.sully-bubble-user {\n  background: #a7a7aa !important;\n}'}
+                        spellCheck={false}
+                        rows={7}
+                        className="w-full resize-y rounded-2xl border border-slate-700 bg-slate-900 p-4 font-mono text-xs leading-relaxed text-slate-200 outline-none focus:border-primary/50 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+                    />
+                    <div className="mt-1.5 text-[10px] leading-relaxed text-slate-400">
+                        可用选择器：<code className="rounded bg-slate-100 px-1 text-slate-500">.sully-bubble-ai</code> 和 <code className="rounded bg-slate-100 px-1 text-slate-500">.sully-bubble-user</code>，只影响气泡，不会改动聊天界面。
+                    </div>
+                </div>
+            )}
         </div>
     );
 };

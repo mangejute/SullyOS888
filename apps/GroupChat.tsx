@@ -1549,11 +1549,12 @@ ${memberTimeline || '(暂无互动记录)'}
     const acnh = osTheme.skin === 'animalcrossing' && osTheme.acnhChatSync !== false;
     return (
         <div className="sully-chat-root h-full w-full bg-[#f0f4f8] flex flex-col font-sans relative">
-            {/* 白框自定义 CSS：全局默认在前、群专属在后（后者叠加覆盖）。作用于 .sully-chat-* 各零件。 */}
-            {osTheme.chatChromeCustomCss && <style>{osTheme.chatChromeCustomCss}</style>}
-            {activeGroup?.chromeCustomCss && <style>{activeGroup.chromeCustomCss}</style>}
+            {/* 完整聊天主题统一注入，旧版拆分字段也合并，避免旧规则覆盖新复古微信主题。 */}
+            {[activeGroup?.chromeCustomCss, osTheme.chatChromeCustomCss, osTheme.chatBubbleCustomCss].filter(Boolean).join('\n') && (
+                <style>{[activeGroup?.chromeCustomCss, osTheme.chatChromeCustomCss, osTheme.chatBubbleCustomCss].filter(Boolean).join('\n')}</style>
+            )}
             {/* 守护样式（注在用户 CSS 之后）：保证返回键永远可见可点，坏 CSS 也能退出群聊 */}
-            {(osTheme.chatChromeCustomCss || activeGroup?.chromeCustomCss) && (
+            {(osTheme.chatChromeCustomCss || osTheme.chatBubbleCustomCss || activeGroup?.chromeCustomCss) && (
                 <style>{`.sully-chat-back{visibility:visible!important;opacity:1!important;pointer-events:auto!important;}`}</style>
             )}
             {/* 公共话题盒整理状态 — 不阻塞交互 */}

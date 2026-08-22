@@ -6,7 +6,6 @@ import { AppID, Message, MessageType, MemoryFragment, Emoji, EmojiCategory, Dail
 import { processImage } from '../utils/file';
 import { deleteBlobRef, putImageBlob } from '../utils/blobRef';
 import { safeResponseJson, extractContent } from '../utils/safeApi';
-import { buildChatFineTuneCss, mergeChatFineTune } from '../utils/chatFineTuneCss';
 import { Phone, GearSix } from '@phosphor-icons/react';
 import { generateDailyScheduleForChar, isScheduleFeatureOn } from '../utils/scheduleGenerator';
 import { getDailyScheduleForChar } from '../utils/dailySchedule';
@@ -1534,7 +1533,11 @@ const Chat: React.FC = () => {
             case 'settings': setModalType('chat-settings'); break;
             case 'chrome-css': setModalType('chrome-css'); break;
             case 'chrome-sound': setModalType('chrome-sound'); break;
-            case 'chat-beauty': setShowPanel('none'); openApp(AppID.ThemeMaker); break;
+            case 'chat-beauty':
+                setShowPanel('none');
+                sessionStorage.setItem('sully_return_to_chat', '1');
+                openApp(AppID.ThemeMaker);
+                break;
             case 'emoji-import': setModalType('emoji-import'); break;
             case 'send-emoji': if (payload) handleSendText(payload.url, 'emoji'); break;
             case 'delete-emoji-req': setSelectedEmoji(payload); setModalType('delete-emoji'); break;
@@ -2943,6 +2946,11 @@ const Chat: React.FC = () => {
     }, [messages, char?.id, char?.hideSystemLogs, visibleCount, windowedFocusMsgId]);
 
     const collapsedCount = Math.max(0, totalMsgCount - displayMessages.length);
+    // 过滤掉空壳/占位消息，时间标签只允许出现在最后一条实际可见消息之后。
+    const finalVisibleMessageIndex = displayMessages.reduce(
+        (last, item, index) => String(item.content || '').trim() ? index : last,
+        -1,
+    );
 
     // ── 新消息进入动画 ──────────────────────────────────────────────
     // 只让「刚追加的最新消息」（自己发的 / AI 回的）整条淡入一次。
@@ -3082,8 +3090,6 @@ const Chat: React.FC = () => {
     const finalRootStyle = acnh ? acnhRootStyle : chatRootStyle;
     // 聊天细节微调（外观 → 聊天细节，全局打底；角色开了「聊天装扮」时逐字段覆盖）：
     // CSS 全默认时为空串不注入；chatModuleAlign 不走 CSS，作为布局属性传给 MessageItem。
-    const mergedFineTune = useMemo(() => mergeChatFineTune(osTheme, char?.chatFineTune), [osTheme, char?.chatFineTune]);
-    const chatFineTuneCss = useMemo(() => buildChatFineTuneCss(mergedFineTune), [mergedFineTune]);
     const chatAvatarSizeClass = osTheme.chatAvatarSize === 'small' ? 'w-7 h-7' : osTheme.chatAvatarSize === 'large' ? 'w-12 h-12' : 'w-9 h-9';
     const chatAvatarRadiusClass = osTheme.chatAvatarShape === 'square' ? 'rounded-sm' : osTheme.chatAvatarShape === 'rounded' ? 'rounded-xl' : 'rounded-full';
     const chatPendingAvatarClass = `${chatAvatarSizeClass} ${chatAvatarRadiusClass} object-cover`;
@@ -3093,13 +3099,7 @@ const Chat: React.FC = () => {
             className={`sully-chat-root ${finalRootClass}`}
             style={finalRootStyle}
         >
-             {/* 聊天细节微调（外观 App 可视化设置生成）：排在用户自定义 CSS 之前——
-                 同为 !important 时后写的胜，手写美化代码永远可覆盖可视化设置。 */}
-             {chatFineTuneCss && <style>{chatFineTuneCss}</style>}
-             {/* 白框自定义 CSS：全局默认在前、角色专属在后（后者叠加覆盖）。作用于 .sully-chat-* 各零件。
-                 守护样式统一放在气泡主题 customCss 之后（见下），保证对所有用户 CSS 都能兜底。 */}
-             {osTheme.chatChromeCustomCss && <style>{osTheme.chatChromeCustomCss}</style>}
-             {char.chromeCustomCss && <style>{char.chromeCustomCss}</style>}
+             {/* 聊天外观不再注入可视化“细节微调”CSS，界面与气泡全部由完整主题 CSS 控制。 */}
              {/* 角色「登场」过场：切换/进入时以 ta 的头像氛围铺底登场，再推进穿过进入聊天。key 切换即重放。 */}
              {showEntry && char && (
                <CharacterEntryTransition
@@ -3110,8 +3110,11 @@ const Chat: React.FC = () => {
                />
              )}
 
+             {/* 旧角色规则先加载，当前全局完整主题随后加载，避免旧角色规则覆盖当前主题。 */}
+             {[char.chromeCustomCss, char.chatBubbleCustomCss, osTheme.chatChromeCustomCss, osTheme.chatBubbleCustomCss].filter(Boolean).join('\n') && (
+               <style>{[char.chromeCustomCss, char.chatBubbleCustomCss, osTheme.chatChromeCustomCss, osTheme.chatBubbleCustomCss].filter(Boolean).join('\n')}</style>
+             )}
              {activeTheme.customCss && <style>{activeTheme.customCss}</style>}
-             {osTheme.chatBubbleCustomCss && <style>{osTheme.chatBubbleCustomCss}</style>}
 
              {/* 心象卡片自定义 CSS（per-character）：作用于 .sully-psyche-* 各零件，编辑入口在心象设置弹窗 */}
              {(char as any).thinkingChainCustomCss && <style>{(char as any).thinkingChainCustomCss}</style>}
@@ -3121,11 +3124,47 @@ const Chat: React.FC = () => {
                  pointer-events:none 时，用户会遇到「点输入框没反应、键盘唤不起来」或退不出聊天，
                  且重启、重新导入备份都无解。有了兜底，至少能退出去「外观→聊天界面→还原白框」清掉坏 CSS。
                  不锁位置与配色，正常美化不受影响。 */}
-             {(osTheme.chatChromeCustomCss || osTheme.chatBubbleCustomCss || char.chromeCustomCss || activeTheme.customCss || (char as any).thinkingChainCustomCss) && (
+             {(osTheme.chatChromeCustomCss || osTheme.chatBubbleCustomCss || char.chromeCustomCss || char.chatBubbleCustomCss || activeTheme.customCss || (char as any).thinkingChainCustomCss) && (
                <style>{`
                  .sully-chat-back{visibility:visible!important;opacity:1!important;pointer-events:auto!important;}
                  .sully-chat-inputbar{visibility:visible!important;opacity:1!important;pointer-events:auto!important;}
                  .sully-chat-inputbar textarea,.sully-chat-inputbar button{pointer-events:auto!important;visibility:visible!important;}
+                 /* 清除历史主题遗留的大型气泡伪尾巴，尾巴由 MessageItem 的独立元素绘制。 */
+                 .sully-bubble-ai::before,.sully-bubble-ai::after,.sully-bubble-user::before,.sully-bubble-user::after{content:none!important;display:none!important;}
+                 .sully-bubble-tail{position:absolute!important;display:block!important;width:7px!important;height:7px!important;margin:0!important;padding:0!important;background:#b8b8b8!important;border:0!important;box-shadow:none!important;clip-path:polygon(100% 0,100% 100%,0 50%)!important;z-index:2!important;pointer-events:none!important;}
+                 .sully-chat-message-avatar-slot{z-index:4!important;}
+                 .sully-chat-inputbar{padding-bottom:0!important;}
+                 .sully-chat-root{padding-bottom:0!important;margin-bottom:0!important;}
+                 /* 收起状态的「＋」功能面板必须不占高度。主题里 .sully-chat-inputbar > div{padding:...}
+                    会连它一起套上内距，加上 border-box，即使 max-height:0 也会撑出约 12px 的浅色横条
+                    （实测 padding .35rem*2 + 上边框 ≈ 11.85px，背景 bg-slate-50），也就是输入栏下方那条白边。 */
+                 .sully-chat-panel.sully-chat-panel-collapsed{
+                   padding:0!important;border-top-width:0!important;border-bottom-width:0!important;
+                   height:0!important;min-height:0!important;max-height:0!important;
+                 }
+                 .sully-chat-message-content{width:fit-content!important;max-width:84%!important;min-width:0!important;}
+                 .sully-chat-message-long .sully-chat-message-content{width:fit-content!important;max-width:84%!important;}
+                 .sully-chat-message-avatar-slot,.sully-chat-message-avatar,.sully-chat-message-avatar-img{width:1.75rem!important;height:1.75rem!important;}
+                 .sully-bubble-ai,.sully-bubble-user{min-height:1.75rem!important;padding:.28rem .72rem!important;display:flex!important;align-items:center!important;}
+                 .sully-bubble-ai,.sully-bubble-user{border-radius:4px!important;}
+                 .sully-bubble-tail{background:inherit!important;}
+                 .sully-bubble-tail-ai{left:-7px!important;right:auto!important;top:50%!important;transform:translateY(-50%)!important;}
+                 .sully-bubble-tail-user{right:-7px!important;left:auto!important;top:50%!important;transform:translateY(-50%) scaleX(-1)!important;}
+                 .sully-bubble-tail-long{top:1rem!important;transform:none!important;}
+                 .sully-bubble-tail-long.sully-bubble-tail-user{transform:scaleX(-1)!important;}
+                 .sully-chat-message-short .sully-bubble-ai,.sully-chat-message-short .sully-bubble-user{height:1.75rem!important;min-height:1.75rem!important;max-height:1.75rem!important;padding-top:0!important;padding-bottom:0!important;box-sizing:border-box!important;}
+                 .sully-chat-message-short .sully-bubble-text{font-size:13px!important;line-height:1.2!important;}
+                 /* 头像与气泡的几何对齐（实测口径，不再猜 top 值）：
+                    消息行 .sully-chat-message 是定位父级，气泡顶 = 行顶 + 气泡自身的 margin-top。
+                    把这个间距抽成变量 --sully-chat-bubble-mt，头像槽和气泡共用同一个数，
+                    于是「头像外框顶 === 气泡外框顶」是恒等式，改气泡间距时两者自动同步。 */
+                 .sully-chat-root{--sully-chat-bubble-mt:8px;}
+                 .sully-bubble-ai,.sully-bubble-user{margin-top:var(--sully-chat-bubble-mt)!important;}
+                 /* 两行及以上：头像外框顶与气泡外框顶严格齐平。 */
+                 .sully-chat-message-long .sully-chat-message-avatar-slot{top:var(--sully-chat-bubble-mt)!important;bottom:auto!important;transform:none!important;}
+                 /* 一行：头像与气泡垂直居中（头像 1.75rem 略高于气泡 1.5rem）。 */
+                 .sully-chat-message-short .sully-chat-message-avatar-slot{top:50%!important;bottom:auto!important;transform:translateY(-50%)!important;}
+                 .sully-chat-message-short .sully-bubble-ai,.sully-chat-message-short .sully-bubble-user{height:1.5rem!important;min-height:1.5rem!important;max-height:1.5rem!important;padding-top:0!important;padding-bottom:0!important;box-sizing:border-box!important;}
                `}</style>
              )}
 
@@ -3665,11 +3704,12 @@ const Chat: React.FC = () => {
                             msg={m}
                             isFirstInGroup={breaksWithPrevious}
                             isLastInGroup={breaksWithNext}
+                            isFinalMessage={i === (finalVisibleMessageIndex >= 0 ? finalVisibleMessageIndex : displayMessages.length - 1)}
                             activeTheme={activeTheme}
                             charAvatar={char.avatar}
                             charName={char.name}
                             userAvatar={userProfile.perCharAvatars?.[char.id] || userProfile.avatar}
-                            moduleAlign={mergedFineTune.chatModuleAlign || 'center'}
+                            moduleAlign="center"
                             onLongPress={handleMessageLongPress}
                             onReply={handleQuickReply}
                             selectionMode={selectionMode}
@@ -3782,6 +3822,7 @@ const Chat: React.FC = () => {
                                     }}
                                     isFirstInGroup={i === 0}
                                     isLastInGroup={i === streamingBubbles.length - 1}
+                                    isFinalMessage={i === streamingBubbles.length - 1}
                                     activeTheme={activeTheme}
                                     charAvatar={char.avatar}
                                     charName={char.name}
@@ -4072,7 +4113,10 @@ const Chat: React.FC = () => {
                             </div>
                             <button onClick={() => setModalType('none')} className="px-2 text-xl leading-none text-slate-400 hover:text-slate-600">{'×'}</button>
                         </div>
-                        <ChromeCssEditor value={char.chromeCustomCss || ''} onChange={(css) => updateCharacter(char.id, { chromeCustomCss: css } as any)} />
+                        <ChromeCssEditor
+                            value={[char.chromeCustomCss, char.chatBubbleCustomCss].filter(Boolean).join('\n')}
+                            onChange={(css) => updateCharacter(char.id, { chromeCustomCss: css, chatBubbleCustomCss: '' } as any)}
+                        />
                     </div>
                     {/* 脱离 CSS 控制的救援键：只在「白框」自定义弹窗开着时出现（平时不显示，不丑）。portal 到 body
                         在聊天 DOM 之外 + id 守护(#sully-safe-reset 特异性高于 *)，连 *{display:none!important} 也盖不掉，
@@ -4082,7 +4126,7 @@ const Chat: React.FC = () => {
                             <style>{`#sully-safe-reset{position:fixed!important;top:calc(var(--safe-top) + 6px)!important;left:50%!important;transform:translateX(-50%)!important;visibility:visible!important;opacity:1!important;pointer-events:auto!important;display:flex!important;z-index:2147483647!important;}`}</style>
                             <button
                                 id="sully-safe-reset"
-                                onClick={() => { updateCharacter(char.id, { chromeCustomCss: '' } as any); addToast('已还原该角色白框', 'success'); }}
+                                onClick={() => { updateCharacter(char.id, { chromeCustomCss: '', chatBubbleCustomCss: '' } as any); addToast('已还原该角色聊天主题', 'success'); }}
                                 style={{
                                     position: 'fixed', top: 'calc(var(--safe-top) + 6px)', left: '50%', transform: 'translateX(-50%)',
                                     zIndex: 2147483647, display: 'flex', alignItems: 'center', gap: '4px',

@@ -3024,6 +3024,8 @@ export interface CharacterProfile {
   htmlModeCustomPrompt?: string;
   /** 该角色专属的聊天「白框」自定义 CSS（叠加在全局 osTheme.chatChromeCustomCss 之上）。 */
   chromeCustomCss?: string;
+  /** 该角色专属的气泡自定义 CSS（叠加在全局 osTheme.chatBubbleCustomCss 之上）。 */
+  chatBubbleCustomCss?: string;
   /** 白框「提示音」：仅当 ta 新发的消息成为会话最后一条时播放一次。src 可为内置音效 key / 音频直链 / 上传后内联的 data:audio。
    *  存储位置取决于 chatSoundBound：解绑（默认）时独立存于此字段、可单独分享；绑定时写进 chromeCustomCss 的
    *  `/* @sully-sound … *​/` 指令注释、跟白框一起分享。播放时两处择一（指令优先）。 */

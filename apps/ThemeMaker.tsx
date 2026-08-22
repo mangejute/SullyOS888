@@ -3,7 +3,7 @@
 
 import React, { useState, useRef, useEffect, useMemo } from 'react';
 import { useOS } from '../context/OSContext';
-import { ChatTheme, BubbleStyle } from '../types';
+import { AppID, ChatTheme, BubbleStyle } from '../types';
 import { processImage } from '../utils/file';
 import { validateScopedCss, runCssRenderabilityCheck, CssValidationResult } from '../utils/scopedCss';
 import { trackEvent } from '../utils/analytics';
@@ -437,7 +437,7 @@ const PREVIEW_SCENES: PreviewScene[] = [
 ];
 
 const ThemeMaker: React.FC = () => {
-    const { closeApp, addCustomTheme, removeCustomTheme, addToast, characters, updateCharacter, customThemes, theme, updateTheme: updateOSTheme } = useOS();
+    const { closeApp, openApp, addCustomTheme, removeCustomTheme, addToast, characters, updateCharacter, customThemes, theme, updateTheme: updateOSTheme } = useOS();
     const [initialThemeId] = useState(() => `theme-${Date.now()}`);
     const [editingTheme, setEditingTheme] = useState<ChatTheme>({ ...DEFAULT_THEME, id: initialThemeId });
     const [activeTab, setActiveTab] = useState<'user' | 'ai' | 'css'>('user');
@@ -469,9 +469,9 @@ const ThemeMaker: React.FC = () => {
     const [beautySection, setBeautySection] = useState<'chat' | 'bubble'>('chat');
     const resetAllChromeCss = () => {
         let count = 0;
-        if (theme.chatChromeCustomCss) { void updateOSTheme({ chatChromeCustomCss: '' }); count++; }
+        if (theme.chatChromeCustomCss || theme.chatBubbleCustomCss) { void updateOSTheme({ chatChromeCustomCss: '', chatBubbleCustomCss: '' }); count++; }
         characters.forEach(c => {
-            if ((c as any).chromeCustomCss) { updateCharacter(c.id, { chromeCustomCss: '' } as any); count++; }
+            if ((c as any).chromeCustomCss || (c as any).chatBubbleCustomCss) { updateCharacter(c.id, { chromeCustomCss: '', chatBubbleCustomCss: '' } as any); count++; }
         });
         addToast(count ? `已还原 ${count} 处聊天白框美化` : '没有需要还原的白框美化', count ? 'success' : 'info');
     };
@@ -535,7 +535,14 @@ const ThemeMaker: React.FC = () => {
         trackEvent('切换编辑工具分区', { section: target });
     };
 
-    const requestClose = () => withDiscardGuard(() => closeApp());
+    const requestClose = () => withDiscardGuard(() => {
+        if (sessionStorage.getItem('sully_return_to_chat') === '1') {
+            sessionStorage.removeItem('sully_return_to_chat');
+            openApp(AppID.Chat);
+        } else {
+            closeApp();
+        }
+    });
 
     const editSavedTheme = (theme: ChatTheme) => withDiscardGuard(() => {
         const copy = cloneTheme(theme);

@@ -429,7 +429,7 @@ export const ThinkingChainBlock: React.FC<{
     const copyTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
     const feedbackTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
     const pointerIdRef = useRef<number | null>(null);
-    const pointerTypeRef = useRef<React.PointerEvent<HTMLDivElement>['pointerType']>('');
+    const pointerTypeRef = useRef<React.PointerEvent<HTMLDivElement>['pointerType'] | ''>('');
     const pointerStartRef = useRef({ x: 0, y: 0 });
     const longPressReadyRef = useRef(false);
     const suppressNextClickRef = useRef(false);
@@ -1370,6 +1370,8 @@ interface MessageItemProps {
     msg: Message;
     isFirstInGroup: boolean;
     isLastInGroup: boolean;
+    /** 最后一条消息不显示底部时间，避免时间标签悬在输入框上方。 */
+    isFinalMessage?: boolean;
     activeTheme: ChatTheme;
     charAvatar: string;
     charName: string;
@@ -1432,6 +1434,7 @@ const MessageItem = React.memo(({
     msg: m,
     isFirstInGroup,
     isLastInGroup,
+    isFinalMessage = false,
     activeTheme,
     charAvatar,
     charName,
@@ -1952,6 +1955,10 @@ const MessageItem = React.memo(({
             </div>
         </div>
     ) : null;
+    // 头像对齐按消息高度分两档：短消息居中，超过两行的消息贴气泡顶部。
+    // 用正文长度和显式换行作稳定估算，避免依赖浏览器逐字测量造成布局抖动。
+    const alignmentText = String(m.content || '').replace(/<[^>]*>/g, '').trim();
+    const isLongMessage = alignmentText.split('\n').length > 2 || alignmentText.length > 28;
     const commonLayout = (content: React.ReactNode) => (
         <>
             {centerModules && thinkingChainNode && (
@@ -1966,6 +1973,7 @@ const MessageItem = React.memo(({
                 isLastInGroup ? 'sully-chat-message-group-last' : '',
                 isModuleCard ? 'sully-chat-message-module' : '',
                 `flex items-end ${marginBottom} px-3 group select-none relative transition-[padding] duration-300`,
+                isLongMessage ? 'sully-chat-message-long' : 'sully-chat-message-short',
                 selectionMode ? 'pl-12' : '',
             ].filter(Boolean).join(' ')}
             style={{ '--sully-chat-message-avatar-size': `${avatarSizePx}px` } as React.CSSProperties}>
@@ -1989,7 +1997,7 @@ const MessageItem = React.memo(({
 
                 {/* HTML / 音乐卡片是独立模块，不继承普通消息外壳的角色头像。卡片内部自己的头像不受影响。 */}
                 {!isUser && !isModuleCard && (
-                    <div className={`sully-chat-message-avatar-slot absolute bottom-0 z-0 ${selectionMode ? 'left-14' : 'left-3'} transition-[left] duration-300`}>
+                    <div className={`sully-chat-message-avatar-slot absolute top-[0.35rem] bottom-auto z-0 ${selectionMode ? 'left-14' : 'left-3'} transition-[left] duration-300`}>
                         {renderAvatar(charAvatar, { className: 'sully-chat-message-avatar' })}
                     </div>
                 )}
@@ -2041,15 +2049,18 @@ const MessageItem = React.memo(({
                     <div className={selectionMode ? 'pointer-events-none' : ''}>
                         {content}
                     </div>
-                    {isLastInGroup && showTimestamp !== 'never' && (
-                        <div className={`absolute top-full ${isUser ? 'right-0' : 'left-0'} mt-0.5 px-1 text-[9px] text-slate-400/80 font-medium whitespace-nowrap pointer-events-none ${showTimestamp === 'hover' ? 'opacity-0 group-hover:opacity-100 transition-opacity' : ''}`}>{formatTime(m.timestamp)}</div>
-                    )}
                     </div>
                 </div>
 
+                {isLastInGroup && !isFinalMessage && showTimestamp !== 'never' && (
+                    <div className={`sully-chat-message-time absolute top-full left-1/2 -translate-x-1/2 mt-1 px-1 text-[9px] text-slate-400/80 font-medium whitespace-nowrap pointer-events-none ${showTimestamp === 'hover' ? 'opacity-0 group-hover:opacity-100 transition-opacity' : ''}`}>
+                        {formatTime(m.timestamp)}
+                    </div>
+                )}
+
                 {/* 用户侧若存在导入/历史模块卡，也保持同一条“卡片不带消息外侧头像”规则。 */}
                 {isUser && !isModuleCard && (
-                    <div className={`sully-chat-message-avatar-slot absolute right-3 bottom-0 z-0 transition-[left] duration-300`}>
+                    <div className={`sully-chat-message-avatar-slot absolute top-[0.35rem] bottom-auto right-3 z-0 transition-[left] duration-300`}>
                         {renderAvatar(userAvatar, { className: 'sully-chat-message-avatar' })}
                     </div>
                 )}
@@ -3364,7 +3375,21 @@ const MessageItem = React.memo(({
     if (m.type === 'emoji') {
         return commonLayout(
             m.content ? (
-                <img src={m.content} className="sully-emoji-msg max-w-[var(--sully-emoji-size,96px)] max-h-[var(--sully-emoji-size,96px)] w-auto h-auto object-contain hover:scale-105 transition-transform drop-shadow-md active:scale-95" loading="lazy" decoding="async" />
+                <>
+                    <img
+                        src={m.content}
+                        className="sully-emoji-msg max-w-[var(--sully-emoji-size,96px)] max-h-[var(--sully-emoji-size,96px)] w-auto h-auto object-contain hover:scale-105 transition-transform drop-shadow-md active:scale-95"
+                        loading="lazy"
+                        decoding="async"
+                        alt="表情"
+                        onError={(e) => {
+                            e.currentTarget.style.display = 'none';
+                            const fallback = e.currentTarget.nextElementSibling as HTMLElement | null;
+                            if (fallback) fallback.style.display = 'inline';
+                        }}
+                    />
+                    <span className="px-3 py-2 rounded-md bg-slate-100 text-slate-400 text-xs italic" style={{ display: 'none' }}>[表情已丢失]</span>
+                </>
             ) : (
                 <div className="px-3 py-2 rounded-2xl bg-slate-100 text-slate-400 text-xs italic">[表情已丢失]</div>
             )
@@ -3451,19 +3476,21 @@ const MessageItem = React.memo(({
 
     // --- Dynamic Style Generation for Bubble ---
     const radius = styleConfig.borderRadius;
-    const borderObj: React.CSSProperties = { borderRadius: `${radius}px` };
+    const borderObj: React.CSSProperties = { '--sully-bubble-radius': `${radius}px` } as React.CSSProperties;
 
     // Container style (BackgroundColor + Opacity) with bubble variant
-    const containerStyle: React.CSSProperties = {
-        backgroundColor: bubbleVariant === 'outline' ? 'transparent' : styleConfig.backgroundColor,
-        opacity: styleConfig.opacity,
+    const containerStyle = {
+        '--sully-bubble-bg': bubbleVariant === 'outline' ? 'transparent' : styleConfig.backgroundColor,
+        '--sully-bubble-text': styleConfig.textColor,
+        '--sully-bubble-opacity': styleConfig.opacity,
+        '--sully-bubble-outline-color': styleConfig.backgroundColor,
         ...borderObj,
         ...(bubbleVariant === 'outline' ? { border: `2px solid ${styleConfig.backgroundColor}`, boxShadow: 'none' } : {}),
         ...(bubbleVariant === 'shadow' ? { boxShadow: '0 4px 12px rgba(0,0,0,0.12)' } : {}),
         ...(bubbleVariant === 'flat' ? { boxShadow: 'none' } : {}),
         ...(bubbleVariant === 'wechat' ? { boxShadow: 'none', border: '1px solid rgba(15,23,42,0.05)' } : {}),
         ...(bubbleVariant === 'ios' ? { boxShadow: '0 10px 24px rgba(148,163,184,0.16)', border: '1px solid rgba(255,255,255,0.75)', backdropFilter: 'blur(12px)' } : {}),
-    };
+    } as React.CSSProperties & Record<string, string | number>;
 
     // --- Inline formatting parser: code → bold → italic → plain ---
     const renderInline = (text: string): React.ReactNode[] => {
@@ -3634,8 +3661,16 @@ const MessageItem = React.memo(({
     return commonLayout(
         <div className={isVoiceOnlyMsg
             ? `relative ${suppressEntranceAnimation ? '' : 'animate-fade-in'}`
-            : `relative ${bubbleVariant === 'flat' || bubbleVariant === 'outline' || bubbleVariant === 'wechat' ? '' : 'shadow-sm '}px-5 py-3 ${suppressEntranceAnimation ? '' : 'animate-fade-in'} ${bubbleVariant === 'outline' ? '' : 'border border-black/5 '}active:scale-[0.98] transition-transform overflow-visible ${isUser ? 'sully-bubble-user' : 'sully-bubble-ai'}`}
+            : `relative ${bubbleVariant === 'flat' || bubbleVariant === 'outline' || bubbleVariant === 'wechat' ? '' : 'shadow-sm '}px-5 py-3 ${suppressEntranceAnimation ? '' : 'animate-fade-in'} ${bubbleVariant === 'outline' ? 'sully-bubble-outline' : 'border border-black/5 '}active:scale-[0.98] transition-transform overflow-visible ${isUser ? 'sully-bubble-user' : 'sully-bubble-ai'}`}
             style={isVoiceOnlyMsg ? undefined : containerStyle}>
+
+            {/* 尾巴使用独立元素，避免历史主题的 ::before/::after 规则把三角形放大。 */}
+            {!isVoiceOnlyMsg && !isModuleCard && (
+                <span
+                    aria-hidden="true"
+                    className={`sully-bubble-tail ${isUser ? 'sully-bubble-tail-user' : 'sully-bubble-tail-ai'} ${isLongMessage ? 'sully-bubble-tail-long' : ''}`}
+                />
+            )}
 
             {/* Layer 1: Background Image with Independent Opacity */}
             {styleConfig.backgroundImage && (
@@ -3674,7 +3709,7 @@ const MessageItem = React.memo(({
             {/* Layer 4: Text Content — shown when there's visible text after stripping voice tags */}
             {/* 外语语音消息把双语文字交给下方语音条渲染，顶部不再重复正文 */}
             {displayContent && !isForeignVoiceMsg && (
-            <div className="relative z-10 text-[15px] leading-relaxed whitespace-pre-wrap break-all select-text" style={{ color: styleConfig.textColor }}>
+            <div className="sully-bubble-text relative z-10 text-[15px] leading-relaxed whitespace-pre-wrap break-all select-text">
                 {renderContent(displayContent)}
             </div>
             )}
@@ -3687,8 +3722,7 @@ const MessageItem = React.memo(({
                 >
                     <button
                         onClick={(e) => { e.stopPropagation(); e.preventDefault(); onTranslateToggle?.(m.id); }}
-                        className="flex items-center gap-1 text-[10px] font-medium transition-opacity active:opacity-80 select-none"
-                        style={{ color: styleConfig.textColor, opacity: 0.45 }}
+                        className="sully-bubble-translation flex items-center gap-1 text-[10px] font-medium opacity-45 transition-opacity active:opacity-80 select-none"
                     >
                         {isShowingTarget ? (
                             <>
@@ -3899,6 +3933,7 @@ const MessageItem = React.memo(({
            prev.msg.metadata?.receipt === next.msg.metadata?.receipt &&
            prev.isFirstInGroup === next.isFirstInGroup &&
            prev.isLastInGroup === next.isLastInGroup &&
+           prev.isFinalMessage === next.isFinalMessage &&
            prev.activeTheme === next.activeTheme &&
            prev.charAvatar === next.charAvatar &&
            prev.charName === next.charName &&

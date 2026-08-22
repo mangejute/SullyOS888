@@ -28,6 +28,7 @@ export const CARD_STRIPPED_FIELDS = [
   'bubbleStyle',
   'chatFineTune',            // 聊天装扮（细节微调的角色级覆盖）：发卡人的界面偏好，接收方用自己的
   'chromeCustomCss',
+  'chatBubbleCustomCss',
   'chatSound',
   'chatSoundBound',
   'chatBackground',
