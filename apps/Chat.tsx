@@ -3133,7 +3133,9 @@ const Chat: React.FC = () => {
                  .sully-bubble-ai::before,.sully-bubble-ai::after,.sully-bubble-user::before,.sully-bubble-user::after{content:none!important;display:none!important;}
                  .sully-bubble-tail{position:absolute!important;display:block!important;width:7px!important;height:7px!important;margin:0!important;padding:0!important;background:#b8b8b8!important;border:0!important;box-shadow:none!important;clip-path:polygon(100% 0,100% 100%,0 50%)!important;z-index:2!important;pointer-events:none!important;}
                  .sully-chat-message-avatar-slot{z-index:4!important;}
-                 .sully-chat-inputbar{padding-bottom:0!important;}
+                 /* 输入栏底部留一点呼吸空间，别把控件贴死在屏幕最下沿。
+                    注意：白条来自收起态的功能面板（见下），不是这里的内距，所以可以安全地留白。 */
+                 .sully-chat-inputbar{padding-bottom:.5rem!important;}
                  .sully-chat-root{padding-bottom:0!important;margin-bottom:0!important;}
                  /* 收起状态的「＋」功能面板必须不占高度。主题里 .sully-chat-inputbar > div{padding:...}
                     会连它一起套上内距，加上 border-box，即使 max-height:0 也会撑出约 12px 的浅色横条
@@ -3144,27 +3146,27 @@ const Chat: React.FC = () => {
                  }
                  .sully-chat-message-content{width:fit-content!important;max-width:84%!important;min-width:0!important;}
                  .sully-chat-message-long .sully-chat-message-content{width:fit-content!important;max-width:84%!important;}
-                 .sully-chat-message-avatar-slot,.sully-chat-message-avatar,.sully-chat-message-avatar-img{width:1.75rem!important;height:1.75rem!important;}
-                 .sully-bubble-ai,.sully-bubble-user{min-height:1.75rem!important;padding:.28rem .72rem!important;display:flex!important;align-items:center!important;}
+                 .sully-chat-message-avatar-slot,.sully-chat-message-avatar,.sully-chat-message-avatar-img{width:var(--sully-chat-avatar-size)!important;height:var(--sully-chat-avatar-size)!important;}
+                 .sully-bubble-ai,.sully-bubble-user{min-height:var(--sully-chat-avatar-size)!important;padding:.28rem .72rem!important;display:flex!important;align-items:center!important;}
                  .sully-bubble-ai,.sully-bubble-user{border-radius:4px!important;}
                  .sully-bubble-tail{background:inherit!important;}
                  .sully-bubble-tail-ai{left:-7px!important;right:auto!important;top:50%!important;transform:translateY(-50%)!important;}
                  .sully-bubble-tail-user{right:-7px!important;left:auto!important;top:50%!important;transform:translateY(-50%) scaleX(-1)!important;}
                  .sully-bubble-tail-long{top:1rem!important;transform:none!important;}
                  .sully-bubble-tail-long.sully-bubble-tail-user{transform:scaleX(-1)!important;}
-                 .sully-chat-message-short .sully-bubble-ai,.sully-chat-message-short .sully-bubble-user{height:1.75rem!important;min-height:1.75rem!important;max-height:1.75rem!important;padding-top:0!important;padding-bottom:0!important;box-sizing:border-box!important;}
+                 /* 一行消息：气泡高度锁成和头像同一个变量，两者严格等高（真实微信观感）。 */
+                 .sully-chat-message-short .sully-bubble-ai,.sully-chat-message-short .sully-bubble-user{height:var(--sully-chat-avatar-size)!important;min-height:var(--sully-chat-avatar-size)!important;max-height:var(--sully-chat-avatar-size)!important;padding-top:0!important;padding-bottom:0!important;box-sizing:border-box!important;}
                  .sully-chat-message-short .sully-bubble-text{font-size:13px!important;line-height:1.2!important;}
                  /* 头像与气泡的几何对齐（实测口径，不再猜 top 值）：
                     消息行 .sully-chat-message 是定位父级，气泡顶 = 行顶 + 气泡自身的 margin-top。
                     把这个间距抽成变量 --sully-chat-bubble-mt，头像槽和气泡共用同一个数，
                     于是「头像外框顶 === 气泡外框顶」是恒等式，改气泡间距时两者自动同步。 */
-                 .sully-chat-root{--sully-chat-bubble-mt:8px;}
+                 .sully-chat-root{--sully-chat-bubble-mt:8px;--sully-chat-avatar-size:1.75rem;}
                  .sully-bubble-ai,.sully-bubble-user{margin-top:var(--sully-chat-bubble-mt)!important;}
                  /* 两行及以上：头像外框顶与气泡外框顶严格齐平。 */
                  .sully-chat-message-long .sully-chat-message-avatar-slot{top:var(--sully-chat-bubble-mt)!important;bottom:auto!important;transform:none!important;}
-                 /* 一行：头像与气泡垂直居中（头像 1.75rem 略高于气泡 1.5rem）。 */
+                 /* 一行：气泡与头像等高（真实微信观感），两者垂直居中自然对齐。 */
                  .sully-chat-message-short .sully-chat-message-avatar-slot{top:50%!important;bottom:auto!important;transform:translateY(-50%)!important;}
-                 .sully-chat-message-short .sully-bubble-ai,.sully-chat-message-short .sully-bubble-user{height:1.5rem!important;min-height:1.5rem!important;max-height:1.5rem!important;padding-top:0!important;padding-bottom:0!important;box-sizing:border-box!important;}
                `}</style>
              )}
 

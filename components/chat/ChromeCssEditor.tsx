@@ -267,7 +267,7 @@ PRESETS.push({
     name: '复古微信',
     swatch: 'linear-gradient(180deg,#333 0 30%,#e7e7e7 30%)',
     code: `/* 复古微信：老版灰阶界面，按参考图还原 */
-.sully-chat-root{background:#e7e7e7!important;color:#161616!important;--sully-chat-bubble-mt:8px;}
+.sully-chat-root{background:#e7e7e7!important;color:#161616!important;--sully-chat-bubble-mt:8px;--sully-chat-avatar-size:1.75rem;}
 .sully-chat-header{background:linear-gradient(#414246,#292a2d)!important;color:#fff!important;border-top:1px solid #56575a!important;border-bottom:2px solid #17181a!important;box-shadow:inset 0 1px rgba(255,255,255,.12)!important;min-height:3.75rem!important;height:auto!important;padding-left:.7rem!important;padding-right:.7rem!important;}
 .sully-chat-back{color:#f3f3f3!important;background:transparent!important;border-radius:0!important;}
 .sully-chat-info{position:absolute!important;left:50%!important;transform:translateX(-50%)!important;width:max-content!important;max-width:55%!important;align-items:center!important;text-align:center!important;}
@@ -287,7 +287,7 @@ PRESETS.push({
 /* 长消息：头像外框顶与气泡外框顶齐平。间距取自 --sully-chat-bubble-mt（= 气泡 margin-top），
    与气泡共用同一个数，不写死 top，改气泡间距时头像自动跟随。 */
 .sully-chat-message-long .sully-chat-message-avatar-slot{top:var(--sully-chat-bubble-mt,8px)!important;bottom:auto!important;transform:none!important;}
-.sully-chat-message-avatar-slot,.sully-chat-message-avatar,.sully-chat-message-avatar-img{width:1.75rem!important;height:1.75rem!important;}
+.sully-chat-message-avatar-slot,.sully-chat-message-avatar,.sully-chat-message-avatar-img{width:var(--sully-chat-avatar-size,1.75rem)!important;height:var(--sully-chat-avatar-size,1.75rem)!important;}
 .sully-chat-message-avatar,.sully-chat-message-avatar-img{border-radius:2px!important;border:1px solid #777!important;box-shadow:0 1px 1px rgba(0,0,0,.18)!important;object-fit:cover!important;}
 .sully-chat-message-ai .sully-chat-message-content{margin-left:2.55rem!important;}
 .sully-chat-message-user .sully-chat-message-content{margin-right:2.55rem!important;}
@@ -316,8 +316,9 @@ PRESETS.push({
 .sully-bubble-tail-long{top:1rem!important;transform:none!important;}
 .sully-bubble-tail-long.sully-bubble-tail-user{transform:scaleX(-1)!important;}
 .sully-chat-message-avatar-slot{z-index:4!important;}
-.sully-chat-inputbar{padding-bottom:0!important;}
-.sully-chat-message-short .sully-bubble-ai,.sully-chat-message-short .sully-bubble-user{height:1.5rem!important;min-height:1.5rem!important;max-height:1.5rem!important;padding-top:0!important;padding-bottom:0!important;box-sizing:border-box!important;}
+.sully-chat-inputbar{padding-bottom:.5rem!important;}
+/* 一行消息：气泡高度锁成和头像同一个变量，两者严格等高（真实微信观感）。 */
+.sully-chat-message-short .sully-bubble-ai,.sully-chat-message-short .sully-bubble-user{height:var(--sully-chat-avatar-size,1.75rem)!important;min-height:var(--sully-chat-avatar-size,1.75rem)!important;max-height:var(--sully-chat-avatar-size,1.75rem)!important;padding-top:0!important;padding-bottom:0!important;box-sizing:border-box!important;}
 .sully-chat-message-short .sully-bubble-text{font-size:13px!important;line-height:1.2!important;color:#171717!important;}
 .sully-chat-message-long .sully-bubble-text{font-size:13px!important;line-height:1.42!important;color:#171717!important;}`,
 });
