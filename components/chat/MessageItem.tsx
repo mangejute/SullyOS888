@@ -1397,6 +1397,8 @@ interface MessageItemProps {
     avatarShape?: 'circle' | 'rounded' | 'square';
     avatarSize?: 'small' | 'medium' | 'large';
     avatarMode?: 'grouped' | 'every_message';
+    /** 复古微信主题要求每条普通消息都展示头像。 */
+    forceEveryAvatar?: boolean;
     bubbleVariant?: 'modern' | 'flat' | 'outline' | 'shadow' | 'wechat' | 'ios';
     messageSpacing?: 'compact' | 'default' | 'spacious';
     showTimestamp?: 'always' | 'hover' | 'never';
@@ -1456,6 +1458,7 @@ const MessageItem = React.memo(({
     avatarShape = 'circle',
     avatarSize = 'medium',
     avatarMode = 'grouped',
+    forceEveryAvatar = false,
     bubbleVariant = 'modern',
     messageSpacing = 'default',
     showTimestamp = 'always',
@@ -1480,7 +1483,7 @@ const MessageItem = React.memo(({
     const avatarSizeClass = avatarSize === 'small' ? 'w-7 h-7' : avatarSize === 'large' ? 'w-12 h-12' : 'w-9 h-9';
     const avatarRadiusClass = avatarShape === 'square' ? 'rounded-sm' : avatarShape === 'rounded' ? 'rounded-xl' : 'rounded-full';
     const avatarSizePx = avatarSize === 'small' ? 28 : avatarSize === 'large' ? 48 : 36;
-    const shouldShowAvatar = avatarMode === 'every_message' || isLastInGroup;
+    const shouldShowAvatar = forceEveryAvatar || avatarMode === 'every_message' || isLastInGroup;
     // 头像绝对定位在气泡底部尖角处，bottom 恒为 0。
     // 时间戳改用绝对定位浮层（见下方渲染处），不再占据行内高度，
     // 于是气泡列底恒等于气泡尖角——头像贴 bottom-0 就始终对齐：
@@ -1651,12 +1654,14 @@ const MessageItem = React.memo(({
         options?: { visible?: boolean; className?: string },
     ) => {
         const visible = options?.visible ?? shouldShowAvatar;
+        // 每条消息都保留头像位；资源缺失时用应用图标兜底，避免只剩空边框。
+        if (!visible) return null;
+        const avatarSrc = src?.trim() || './icons/icon-192.png';
         return (
             <div className={`relative ${avatarSizeClass} z-0 ${options?.className || ''}`}>
-                {visible && (
-                    <>
+                <>
                         <img
-                            src={src}
+                            src={avatarSrc}
                             className={`sully-chat-message-avatar-img w-full h-full ${avatarRadiusClass} object-cover shadow-sm ring-1 ring-black/5 relative z-0`}
                             alt="avatar"
                             loading="lazy"
@@ -1675,8 +1680,7 @@ const MessageItem = React.memo(({
                                 }}
                             />
                         )}
-                    </>
-                )}
+                </>
             </div>
         );
     };
@@ -1996,7 +2000,7 @@ const MessageItem = React.memo(({
                 )}
 
                 {/* HTML / 音乐卡片是独立模块，不继承普通消息外壳的角色头像。卡片内部自己的头像不受影响。 */}
-                {!isUser && !isModuleCard && (
+                {!isUser && !isModuleCard && shouldShowAvatar && (
                     <div className={`sully-chat-message-avatar-slot absolute top-[0.35rem] bottom-auto z-0 ${selectionMode ? 'left-14' : 'left-3'} transition-[left] duration-300`}>
                         {renderAvatar(charAvatar, { className: 'sully-chat-message-avatar' })}
                     </div>
@@ -2059,7 +2063,7 @@ const MessageItem = React.memo(({
                 )}
 
                 {/* 用户侧若存在导入/历史模块卡，也保持同一条“卡片不带消息外侧头像”规则。 */}
-                {isUser && !isModuleCard && (
+                {isUser && !isModuleCard && shouldShowAvatar && (
                     <div className={`sully-chat-message-avatar-slot absolute top-[0.35rem] bottom-auto right-3 z-0 transition-[left] duration-300`}>
                         {renderAvatar(userAvatar, { className: 'sully-chat-message-avatar' })}
                     </div>
@@ -3661,7 +3665,7 @@ const MessageItem = React.memo(({
     return commonLayout(
         <div className={isVoiceOnlyMsg
             ? `relative ${suppressEntranceAnimation ? '' : 'animate-fade-in'}`
-            : `relative ${bubbleVariant === 'flat' || bubbleVariant === 'outline' || bubbleVariant === 'wechat' ? '' : 'shadow-sm '}px-5 py-3 ${suppressEntranceAnimation ? '' : 'animate-fade-in'} ${bubbleVariant === 'outline' ? 'sully-bubble-outline' : 'border border-black/5 '}active:scale-[0.98] transition-transform overflow-visible ${isUser ? 'sully-bubble-user' : 'sully-bubble-ai'}`}
+            : `relative ${bubbleVariant === 'flat' || bubbleVariant === 'outline' || bubbleVariant === 'wechat' ? '' : 'shadow-sm '}px-5 py-3 ${suppressEntranceAnimation ? '' : 'animate-fade-in'} ${bubbleVariant === 'outline' ? 'sully-bubble-outline' : 'border border-black/5 '}active:scale-[0.98] transition-transform overflow-visible ${m.replyTo ? 'sully-bubble-with-reply' : ''} ${isUser ? 'sully-bubble-user' : 'sully-bubble-ai'}`}
             style={isVoiceOnlyMsg ? undefined : containerStyle}>
 
             {/* 尾巴使用独立元素，避免历史主题的 ::before/::after 规则把三角形放大。 */}
@@ -3700,7 +3704,7 @@ const MessageItem = React.memo(({
 
             {/* Layer 3: Reply/Quote Block */}
             {m.replyTo && (
-                <div className="relative z-10 mb-1 text-[10px] bg-black/5 p-1.5 rounded-md border-l-2 border-current opacity-60 flex flex-col gap-0.5 max-w-full overflow-hidden">
+                <div className="sully-reply-quote relative z-10 mb-1 text-[10px] bg-black/5 p-1.5 rounded-md border-l-2 border-current opacity-60 flex flex-col gap-0.5 max-w-full overflow-hidden">
                     <span className="font-bold opacity-90 truncate">{m.replyTo.name}</span>
                     <span className="truncate italic">"{replyPreview.length > 10 ? replyPreview.slice(0, 10) + '...' : replyPreview}"</span>
                 </div>
@@ -3945,6 +3949,7 @@ const MessageItem = React.memo(({
            prev.avatarShape === next.avatarShape &&
            prev.avatarSize === next.avatarSize &&
            prev.avatarMode === next.avatarMode &&
+           prev.forceEveryAvatar === next.forceEveryAvatar &&
            prev.bubbleVariant === next.bubbleVariant &&
            prev.messageSpacing === next.messageSpacing &&
            prev.showTimestamp === next.showTimestamp &&

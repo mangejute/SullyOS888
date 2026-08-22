@@ -299,6 +299,12 @@ const Chat: React.FC = () => {
         () => resolveChatTheme(currentThemeId, customThemes, PRESET_THEMES),
         [currentThemeId, customThemes],
     );
+    // 复古微信可能来自旧的角色/全局自定义 CSS；用样式特征识别它，给旧保存版本补上同样的顶栏规则。
+    const retroChatCssActive = /复古微信|#414246|#292a2d/i.test(
+        [activeTheme.customCss, char?.chromeCustomCss, char?.chatBubbleCustomCss, osTheme.chatChromeCustomCss, osTheme.chatBubbleCustomCss]
+            .filter(Boolean)
+            .join('\n'),
+    );
     const draftKey = `chat_draft_${activeCharacterId}`;
 
     // Filter categories and emojis by active character's visibility (used for both AI prompt and UI)
@@ -3087,7 +3093,11 @@ const Chat: React.FC = () => {
     const finalRootClass = acnh ? acnhRootClass : chatRootClass;
     // 动森下强制覆盖角色自定义聊天背景，保证整机一致的彩蛋观感
     // 进入/切换的过场由 CharacterEntryTransition 覆盖层负责，根容器不再自己做淡入。
-    const finalRootStyle = acnh ? acnhRootStyle : chatRootStyle;
+    const chatAvatarSizePx = osTheme.chatAvatarSize === 'small' ? 28 : osTheme.chatAvatarSize === 'large' ? 48 : 36;
+    const finalRootStyle = {
+        ...(acnh ? acnhRootStyle : chatRootStyle),
+        '--sully-chat-avatar-size': `${chatAvatarSizePx}px`,
+    } as React.CSSProperties;
     // 聊天细节微调（外观 → 聊天细节，全局打底；角色开了「聊天装扮」时逐字段覆盖）：
     // CSS 全默认时为空串不注入；chatModuleAlign 不走 CSS，作为布局属性传给 MessageItem。
     const chatAvatarSizeClass = osTheme.chatAvatarSize === 'small' ? 'w-7 h-7' : osTheme.chatAvatarSize === 'large' ? 'w-12 h-12' : 'w-9 h-9';
@@ -3144,18 +3154,30 @@ const Chat: React.FC = () => {
                    padding:0!important;border-top-width:0!important;border-bottom-width:0!important;
                    height:0!important;min-height:0!important;max-height:0!important;
                  }
-                 .sully-chat-message-content{width:fit-content!important;max-width:84%!important;min-width:0!important;}
-                 .sully-chat-message-long .sully-chat-message-content{width:fit-content!important;max-width:84%!important;}
+                  .sully-chat-message-content{width:fit-content!important;max-width:84%!important;min-width:0!important;}
+                  .sully-chat-message-long .sully-chat-message-content{width:fit-content!important;max-width:84%!important;}
+                  ${retroChatCssActive ? `
+                  .sully-chat-header{min-height:4.5rem!important;height:auto!important;background:linear-gradient(#414246,#292a2d)!important;color:#fff!important;padding-bottom:.55rem!important;}
+                  .sully-chat-buffs{background:#292a2d!important;}
+                  ` : ''}
+                  /* 复古微信顶栏的标题组稳定垂直居中，名字与 Online 保持可读间距。 */
+                 .sully-chat-info{top:calc(50% + .18rem)!important;transform:translate(-50%,-50%)!important;}
+                 .sully-chat-info .sully-chat-status{margin-top:.18rem!important;}
                  .sully-chat-message-avatar-slot,.sully-chat-message-avatar,.sully-chat-message-avatar-img{width:var(--sully-chat-avatar-size)!important;height:var(--sully-chat-avatar-size)!important;}
                  .sully-bubble-ai,.sully-bubble-user{min-height:var(--sully-chat-avatar-size)!important;padding:.28rem .72rem!important;display:flex!important;align-items:center!important;}
                  .sully-bubble-ai,.sully-bubble-user{border-radius:4px!important;}
+                 /* 微信引用消息：引用内容独占一行，正文排在下面，避免与当前消息横向挤压。 */
+                  .sully-bubble-with-reply{display:flex!important;flex-direction:column!important;align-items:stretch!important;height:auto!important;min-height:var(--sully-chat-avatar-size)!important;max-height:none!important;}
+                  .sully-bubble-with-reply .sully-reply-quote{width:100%!important;flex:0 0 auto!important;box-sizing:border-box!important;margin:0 0 .35rem!important;padding:.3rem .45rem!important;background:rgba(0,0,0,.055)!important;border-left:2px solid rgba(80,80,80,.45)!important;border-radius:2px!important;opacity:1!important;overflow:hidden!important;}
+                  .sully-bubble-with-reply .sully-bubble-text{width:100%!important;}
                  .sully-bubble-tail{background:inherit!important;}
                  .sully-bubble-tail-ai{left:-7px!important;right:auto!important;top:50%!important;transform:translateY(-50%)!important;}
                  .sully-bubble-tail-user{right:-7px!important;left:auto!important;top:50%!important;transform:translateY(-50%) scaleX(-1)!important;}
                  .sully-bubble-tail-long{top:1rem!important;transform:none!important;}
                  .sully-bubble-tail-long.sully-bubble-tail-user{transform:scaleX(-1)!important;}
                  /* 一行消息：气泡高度锁成和头像同一个变量，两者严格等高（真实微信观感）。 */
-                 .sully-chat-message-short .sully-bubble-ai,.sully-chat-message-short .sully-bubble-user{height:var(--sully-chat-avatar-size)!important;min-height:var(--sully-chat-avatar-size)!important;max-height:var(--sully-chat-avatar-size)!important;padding-top:0!important;padding-bottom:0!important;box-sizing:border-box!important;}
+                  .sully-chat-message-short .sully-bubble-ai,.sully-chat-message-short .sully-bubble-user{height:var(--sully-chat-avatar-size)!important;min-height:var(--sully-chat-avatar-size)!important;max-height:var(--sully-chat-avatar-size)!important;padding-top:0!important;padding-bottom:0!important;box-sizing:border-box!important;}
+                  .sully-chat-message-short .sully-bubble-with-reply{height:auto!important;max-height:none!important;min-height:var(--sully-chat-avatar-size)!important;}
                  .sully-chat-message-short .sully-bubble-text{font-size:13px!important;line-height:1.2!important;}
                  /* 头像与气泡的几何对齐（实测口径，不再猜 top 值）：
                     消息行 .sully-chat-message 是定位父级，气泡顶 = 行顶 + 气泡自身的 margin-top。
@@ -3165,8 +3187,8 @@ const Chat: React.FC = () => {
                  .sully-bubble-ai,.sully-bubble-user{margin-top:var(--sully-chat-bubble-mt)!important;}
                  /* 两行及以上：头像外框顶与气泡外框顶严格齐平。 */
                  .sully-chat-message-long .sully-chat-message-avatar-slot{top:var(--sully-chat-bubble-mt)!important;bottom:auto!important;transform:none!important;}
-                 /* 一行：气泡与头像等高（真实微信观感），两者垂直居中自然对齐。 */
-                 .sully-chat-message-short .sully-chat-message-avatar-slot{top:50%!important;bottom:auto!important;transform:translateY(-50%)!important;}
+                  /* 一行和多行都从同一个顶部间距开始；短消息因气泡锁高而与头像严格同高。 */
+                  .sully-chat-message-short .sully-chat-message-avatar-slot{top:var(--sully-chat-bubble-mt)!important;bottom:auto!important;transform:none!important;}
                `}</style>
              )}
 
@@ -3729,6 +3751,7 @@ const Chat: React.FC = () => {
                             avatarShape={osTheme.chatAvatarShape}
                             avatarSize={osTheme.chatAvatarSize}
                             avatarMode={osTheme.chatAvatarMode}
+                            forceEveryAvatar={retroChatCssActive}
                             bubbleVariant={osTheme.chatBubbleStyle}
                             messageSpacing={osTheme.chatMessageSpacing}
                             showTimestamp={osTheme.chatShowTimestamp}
@@ -3837,6 +3860,7 @@ const Chat: React.FC = () => {
                                     avatarShape={osTheme.chatAvatarShape}
                                     avatarSize={osTheme.chatAvatarSize}
                                     avatarMode={osTheme.chatAvatarMode}
+                                    forceEveryAvatar={retroChatCssActive}
                                     bubbleVariant={osTheme.chatBubbleStyle}
                                     messageSpacing={osTheme.chatMessageSpacing}
                                     showTimestamp={osTheme.chatShowTimestamp}
