@@ -268,13 +268,15 @@ PRESETS.push({
     swatch: 'linear-gradient(180deg,#333 0 30%,#e7e7e7 30%)',
     code: `/* 复古微信：老版灰阶界面，按参考图还原 */
 .sully-chat-root{background:#e7e7e7!important;color:#161616!important;--sully-chat-bubble-mt:8px;--sully-chat-avatar-size:1.75rem;}
-.sully-chat-header{background:linear-gradient(#414246,#292a2d)!important;color:#fff!important;border-top:1px solid #56575a!important;border-bottom:2px solid #17181a!important;box-shadow:inset 0 1px rgba(255,255,255,.12)!important;min-height:4.5rem!important;height:auto!important;padding-left:.7rem!important;padding-right:.7rem!important;padding-bottom:.55rem!important;}
+.sully-chat-header{background:linear-gradient(#414246,#292a2d)!important;color:#fff!important;border-top:1px solid #56575a!important;border-bottom:2px solid #17181a!important;box-shadow:inset 0 1px rgba(255,255,255,.12)!important;min-height:6rem!important;height:auto!important;padding-left:.7rem!important;padding-right:.7rem!important;padding-bottom:.85rem!important;overflow:visible!important;}
 .sully-chat-back{color:#f3f3f3!important;background:transparent!important;border-radius:0!important;}
-.sully-chat-info{position:absolute!important;left:50%!important;top:calc(50% + .18rem)!important;transform:translate(-50%,-50%)!important;width:max-content!important;max-width:55%!important;align-items:center!important;text-align:center!important;}
+.sully-chat-info{position:absolute!important;left:50%!important;top:calc(50% + .35rem)!important;transform:translate(-50%,-50%)!important;width:max-content!important;max-width:72%!important;align-items:center!important;text-align:center!important;}
 .sully-chat-name{color:#f5f5f5!important;font-size:.98rem!important;font-weight:500!important;letter-spacing:0!important;white-space:nowrap!important;}
 .sully-chat-status{color:#62d495!important;font-size:.68rem!important;margin-top:.18rem!important;}
 .sully-chat-status{justify-content:center!important;}
-.sully-chat-buffs{margin-top:.15rem!important;}
+.sully-chat-buffs{margin-top:.15rem!important;width:100%!important;max-width:none!important;overflow:visible!important;}
+.sully-chat-buffs > div:first-child{width:100%!important;max-width:none!important;overflow:visible!important;flex-wrap:wrap!important;justify-content:center!important;white-space:normal!important;row-gap:.15rem!important;}
+.sully-chat-buffs button{max-width:none!important;overflow:visible!important;text-overflow:clip!important;white-space:nowrap!important;}
 .sully-chat-buffs button{background:#55565a!important;color:#eee!important;border:1px solid #777!important;border-radius:2px!important;font-size:.65rem!important;padding:.18rem .45rem!important;}
 .sully-chat-token{background:#505155!important;color:#ddd!important;border:1px solid #777!important;border-radius:2px!important;}
 .sully-chat-trigger,.sully-chat-top-action{color:#f4f4f4!important;background:linear-gradient(#bfc1c4,#76787c)!important;border:1px solid #9b9da1!important;box-shadow:inset 0 1px rgba(255,255,255,.45),0 1px 1px rgba(0,0,0,.28)!important;border-radius:3px!important;}
@@ -287,7 +289,7 @@ PRESETS.push({
 /* 长消息：头像外框顶与气泡外框顶齐平。间距取自 --sully-chat-bubble-mt（= 气泡 margin-top），
    与气泡共用同一个数，不写死 top，改气泡间距时头像自动跟随。 */
 .sully-chat-message-long .sully-chat-message-avatar-slot{top:var(--sully-chat-bubble-mt,8px)!important;bottom:auto!important;transform:none!important;}
-.sully-chat-message-avatar-slot,.sully-chat-message-avatar,.sully-chat-message-avatar-img{width:var(--sully-chat-avatar-size,1.75rem)!important;height:var(--sully-chat-avatar-size,1.75rem)!important;}
+.sully-chat-message-avatar-slot,.sully-chat-message-avatar,.sully-chat-message-avatar-img{width:var(--sully-chat-avatar-size,1.75rem)!important;height:var(--sully-chat-avatar-size,1.75rem)!important;box-sizing:border-box!important;}
 .sully-chat-message-avatar,.sully-chat-message-avatar-img{border-radius:2px!important;border:1px solid #777!important;box-shadow:0 1px 1px rgba(0,0,0,.18)!important;object-fit:cover!important;}
 .sully-chat-message-ai .sully-chat-message-content{margin-left:2.55rem!important;}
 .sully-chat-message-user .sully-chat-message-content{margin-right:2.55rem!important;}

@@ -25,6 +25,8 @@ interface ChatHeaderShellProps {
     statusText?: string;
     /** 可选的附加操作，群聊用来放置“记忆规则”帮助入口。 */
     extraAction?: { label: string; icon: React.ReactNode; onClick: () => void };
+    /** 私聊可隐藏 Online；群聊仍可保留成员数状态。 */
+    showOnlineStatus?: boolean;
     /** 触发按钮图标：生成中想显示"停止"时传 'stop'。不传 = 原行为（闪电） */
     triggerIcon?: 'lightning' | 'stop';
     /** 私聊可隐藏顶栏触发按钮，改由输入栏的发送按钮触发 AI。 */
@@ -86,6 +88,7 @@ const ChatHeaderShell: React.FC<ChatHeaderShellProps> = ({
     onDeleteBuff,
     statusText,
     extraAction,
+    showOnlineStatus = true,
     triggerIcon = 'lightning',
     showTrigger = true,
     hideBuffs = false,
@@ -264,7 +267,7 @@ const ChatHeaderShell: React.FC<ChatHeaderShellProps> = ({
             ? (extraAction ? 'w-[calc(100%-11rem)]' : 'w-[calc(100%-7rem)]')
             : (extraAction ? 'w-[calc(100%-7rem)]' : 'w-[calc(100%-3.5rem)]');
 
-    const onlineStatusNode = headerStyle === 'telegram'
+    const onlineStatusNode = !showOnlineStatus || headerStyle === 'telegram'
         ? null
         : statusStyle === 'pill' ? (
             <div className={`text-[9px] px-1.5 py-0.5 rounded-full font-semibold border ${isDarkHeader ? 'bg-emerald-500/20 text-emerald-200 border-emerald-400/20' : isPixelHeader ? 'bg-[#fff7ed] text-[#8f674a] border-[#8f674a]/25' : 'bg-emerald-50 text-emerald-500 border-emerald-100'}`}>

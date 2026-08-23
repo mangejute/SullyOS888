@@ -3157,13 +3157,16 @@ const Chat: React.FC = () => {
                   .sully-chat-message-content{width:fit-content!important;max-width:84%!important;min-width:0!important;}
                   .sully-chat-message-long .sully-chat-message-content{width:fit-content!important;max-width:84%!important;}
                   ${retroChatCssActive ? `
-                  .sully-chat-header{min-height:4.5rem!important;height:auto!important;background:linear-gradient(#414246,#292a2d)!important;color:#fff!important;padding-bottom:.55rem!important;}
-                  .sully-chat-buffs{background:#292a2d!important;}
+                   .sully-chat-header{min-height:6rem!important;height:auto!important;background:linear-gradient(#414246,#292a2d)!important;color:#fff!important;padding-bottom:.85rem!important;overflow:visible!important;}
+                   .sully-chat-info{max-width:72%!important;top:calc(50% + .35rem)!important;}
+                   .sully-chat-buffs{background:#292a2d!important;margin-top:.15rem!important;width:100%!important;max-width:none!important;overflow:visible!important;}
+                   .sully-chat-buffs > div:first-child{width:100%!important;max-width:none!important;overflow:visible!important;flex-wrap:wrap!important;justify-content:center!important;white-space:normal!important;row-gap:.15rem!important;}
+                   .sully-chat-buffs button{max-width:none!important;overflow:visible!important;text-overflow:clip!important;white-space:nowrap!important;}
                   ` : ''}
                   /* 复古微信顶栏的标题组稳定垂直居中，名字与 Online 保持可读间距。 */
                  .sully-chat-info{top:calc(50% + .18rem)!important;transform:translate(-50%,-50%)!important;}
                  .sully-chat-info .sully-chat-status{margin-top:.18rem!important;}
-                 .sully-chat-message-avatar-slot,.sully-chat-message-avatar,.sully-chat-message-avatar-img{width:var(--sully-chat-avatar-size)!important;height:var(--sully-chat-avatar-size)!important;}
+                  .sully-chat-message-avatar-slot,.sully-chat-message-avatar,.sully-chat-message-avatar-img{width:var(--sully-chat-avatar-size)!important;height:var(--sully-chat-avatar-size)!important;box-sizing:border-box!important;}
                  .sully-bubble-ai,.sully-bubble-user{min-height:var(--sully-chat-avatar-size)!important;padding:.28rem .72rem!important;display:flex!important;align-items:center!important;}
                  .sully-bubble-ai,.sully-bubble-user{border-radius:4px!important;}
                  /* 微信引用消息：引用内容独占一行，正文排在下面，避免与当前消息横向挤压。 */
@@ -3513,7 +3516,8 @@ const Chat: React.FC = () => {
                 onClose={closeApp}
                  onTriggerAI={handleManualTrigger}
                  showTrigger={false}
-                onShowCharsPanel={() => setShowPanel('chars')}
+                 showOnlineStatus={false}
+                 onShowCharsPanel={() => setShowPanel('chars')}
                 topActions={[
                     { label: '视频通话', icon: <Phone className="w-5 h-5" weight="regular" />, onClick: () => {
                         try { localStorage.setItem('sully-call-direct-video-intent-v1', JSON.stringify({ charId: char.id, at: Date.now(), returnTo: 'chat' })); } catch { /* private WebView */ }
