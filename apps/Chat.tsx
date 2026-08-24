@@ -3156,14 +3156,16 @@ const Chat: React.FC = () => {
                  }
                   .sully-chat-message-content{width:fit-content!important;max-width:84%!important;min-width:0!important;}
                   .sully-chat-message-long .sully-chat-message-content{width:fit-content!important;max-width:84%!important;}
+                  .sully-chat-message-user .sully-chat-message-content{max-width:80%!important;}
                   ${retroChatCssActive ? `
                    .sully-chat-header{min-height:4.75rem!important;height:auto!important;background:linear-gradient(#414246,#292a2d)!important;color:#fff!important;padding-bottom:.55rem!important;overflow:visible!important;}
                    .sully-chat-info{max-width:72%!important;top:50%!important;transform:translate(-50%,-50%)!important;}
                    .sully-chat-info .sully-chat-status{display:none!important;}
-                   .sully-chat-buffs{background:#292a2d!important;margin-top:.28rem!important;width:100%!important;max-width:none!important;overflow:visible!important;}
+                   .sully-chat-buffs{background:#292a2d!important;margin-top:.42rem!important;transform:translateY(.18rem)!important;width:100%!important;max-width:none!important;overflow:visible!important;}
                    .sully-chat-buffs > div:first-child{width:100%!important;max-width:none!important;overflow:visible!important;flex-wrap:wrap!important;justify-content:center!important;white-space:normal!important;row-gap:.15rem!important;}
                    .sully-chat-buffs button{max-width:none!important;overflow:visible!important;text-overflow:clip!important;white-space:nowrap!important;}
-                   .sully-chat-buffs button,.sully-chat-buffs .sully-chat-token{display:inline-flex!important;align-items:center!important;justify-content:center!important;min-height:1.45rem!important;background:linear-gradient(#bfc1c4,#76787c)!important;color:#fff!important;border:1px solid #9b9da1!important;border-radius:3px!important;box-shadow:inset 0 1px rgba(255,255,255,.72),0 1px 1px rgba(0,0,0,.45)!important;font-size:.65rem!important;line-height:1!important;padding:.18rem .45rem!important;}
+                   .sully-chat-buffs button,.sully-chat-buffs .sully-chat-token{display:inline-flex!important;align-items:center!important;justify-content:center!important;min-height:1.25rem!important;background:linear-gradient(#bfc1c4,#76787c)!important;color:#fff!important;border:1px solid #9b9da1!important;border-radius:3px!important;box-shadow:inset 0 1px rgba(255,255,255,.72),0 1px 1px rgba(0,0,0,.45)!important;font-size:.58rem!important;line-height:1!important;padding:.12rem .35rem!important;}
+                   .sully-chat-top-action{transform:translateY(-.65rem)!important;}
                    ` : ''}
                   .sully-chat-message-avatar-slot,.sully-chat-message-avatar,.sully-chat-message-avatar-img{width:var(--sully-chat-avatar-size)!important;height:var(--sully-chat-avatar-size)!important;box-sizing:border-box!important;}
                   .sully-chat-message-avatar-slot,.sully-chat-message-avatar{line-height:0!important;}
@@ -3172,10 +3174,11 @@ const Chat: React.FC = () => {
                  .sully-bubble-ai,.sully-bubble-user{border-radius:4px!important;}
                  ${retroChatCssActive ? `
                   /* 微信引用消息：当前回复保留主气泡，原消息显示为其下方紧凑的灰色引用条。 */
-                  .sully-bubble-with-reply{display:flex!important;flex-direction:column!important;align-items:stretch!important;width:max-content!important;max-width:100%!important;height:auto!important;min-height:var(--sully-chat-avatar-size)!important;max-height:none!important;background:transparent!important;border:0!important;box-shadow:none!important;padding:0!important;gap:.25rem!important;}
+                  .sully-bubble-with-reply{display:flex!important;flex-direction:column!important;align-items:stretch!important;width:max-content!important;max-width:100%!important;height:auto!important;min-height:var(--sully-chat-avatar-size)!important;max-height:none!important;background:transparent!important;border:0!important;box-shadow:none!important;padding:0!important;gap:0!important;}
                   .sully-bubble-with-reply > .sully-bubble-reply-main{display:block!important;order:1!important;align-self:flex-end!important;width:fit-content!important;min-width:0!important;box-sizing:border-box!important;max-width:100%!important;margin-top:0!important;}
                   /* 引用条随摘要收缩，主消息与引用的右边缘保持一致；长摘要才使用最大宽度并省略。 */
                   .sully-bubble-with-reply > .sully-reply-quote{display:block!important;order:2!important;align-self:flex-end!important;width:fit-content!important;max-width:min(12rem,76vw)!important;min-width:0!important;flex:0 0 auto!important;box-sizing:border-box!important;margin:0!important;padding:.22rem .45rem!important;background:#d3d3d3!important;color:#777!important;border:0!important;border-radius:2px!important;opacity:1!important;overflow:hidden!important;white-space:nowrap!important;text-overflow:ellipsis!important;line-height:1.25!important;}
+                  .sully-chat-message-time-before{position:relative!important;top:auto!important;left:auto!important;right:auto!important;transform:none!important;display:table!important;margin:0 auto .45rem!important;background:linear-gradient(#ededed,#cecece)!important;color:#4b4b4b!important;border:1px solid #858585!important;border-radius:4px!important;padding:1px 6px!important;line-height:1.1!important;box-shadow:inset 0 1px #fff,0 1px 1px rgba(0,0,0,.14)!important;z-index:3!important;}
                   .sully-chat-message-ai .sully-bubble-with-reply > .sully-bubble-reply-main,.sully-chat-message-ai .sully-bubble-with-reply > .sully-reply-quote{align-self:flex-start!important;}
                   .sully-bubble-with-reply > .sully-bubble-tail{background:var(--sully-bubble-bg,#b8b8b8)!important;top:calc(var(--sully-chat-avatar-size) / 2)!important;}
                   .sully-bubble-with-reply .sully-reply-quote-sender,.sully-bubble-with-reply .sully-reply-quote-preview{display:inline!important;max-width:none!important;font-size:.66rem!important;font-style:normal!important;font-weight:400!important;opacity:1!important;color:#777!important;}
@@ -3747,6 +3750,7 @@ const Chat: React.FC = () => {
                             msg={m}
                             isFirstInGroup={breaksWithPrevious}
                             isLastInGroup={breaksWithNext}
+                            showGroupTimestamp={retroChatCssActive && breaksWithPrevious}
                             isFinalMessage={i === (finalVisibleMessageIndex >= 0 ? finalVisibleMessageIndex : displayMessages.length - 1)}
                             activeTheme={activeTheme}
                             charAvatar={char.avatar}

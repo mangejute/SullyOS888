@@ -1370,6 +1370,8 @@ interface MessageItemProps {
     msg: Message;
     isFirstInGroup: boolean;
     isLastInGroup: boolean;
+    /** 新一组消息开始前显示该组自己的时间分隔。 */
+    showGroupTimestamp?: boolean;
     /** 流式临时消息不显示底部时间，避免时间标签在生成期间反复变化。 */
     isFinalMessage?: boolean;
     activeTheme: ChatTheme;
@@ -1436,6 +1438,7 @@ const MessageItem = React.memo(({
     msg: m,
     isFirstInGroup,
     isLastInGroup,
+    showGroupTimestamp = false,
     isFinalMessage = false,
     activeTheme,
     charAvatar,
@@ -1989,6 +1992,11 @@ const MessageItem = React.memo(({
     const isLongMessage = measuredMultiline || alignmentText.split('\n').length >= 2;
     const commonLayout = (content: React.ReactNode) => (
         <>
+            {showGroupTimestamp && m.id > 0 && showTimestamp !== 'never' && (
+                <div className={`sully-chat-message-time sully-chat-message-time-before px-1 text-[9px] text-slate-400/80 font-medium whitespace-nowrap pointer-events-none ${showTimestamp === 'hover' ? 'opacity-0 transition-opacity' : ''}`}>
+                    {formatTime(m.timestamp)}
+                </div>
+            )}
             {centerModules && thinkingChainNode && (
                 <div className="px-3 flex justify-center">
                     <div className="w-[72%] max-w-[72%]">{thinkingChainNode}</div>
@@ -2080,8 +2088,8 @@ const MessageItem = React.memo(({
                     </div>
                 </div>
 
-                {/* 已保存的最后一条也显示自己的时间；负 id 只用于流式临时预览。 */}
-                {isLastInGroup && m.id > 0 && showTimestamp !== 'never' && (
+                {/* 非复古主题保留原有组末时间；复古主题改为在下一组前显示，避免聊天底部悬空时间。 */}
+                {!showGroupTimestamp && isLastInGroup && m.id > 0 && showTimestamp !== 'never' && (
                     <div className={`sully-chat-message-time absolute top-full left-1/2 -translate-x-1/2 mt-1 px-1 text-[9px] text-slate-400/80 font-medium whitespace-nowrap pointer-events-none ${showTimestamp === 'hover' ? 'opacity-0 group-hover:opacity-100 transition-opacity' : ''}`}>
                         {formatTime(m.timestamp)}
                     </div>
@@ -3970,6 +3978,7 @@ const MessageItem = React.memo(({
            prev.msg.metadata?.receipt === next.msg.metadata?.receipt &&
            prev.isFirstInGroup === next.isFirstInGroup &&
            prev.isLastInGroup === next.isLastInGroup &&
+           prev.showGroupTimestamp === next.showGroupTimestamp &&
            prev.isFinalMessage === next.isFinalMessage &&
            prev.activeTheme === next.activeTheme &&
            prev.charAvatar === next.charAvatar &&

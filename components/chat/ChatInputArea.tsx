@@ -547,7 +547,7 @@ const ChatInputArea: React.FC<ChatInputAreaProps> = ({
                         <button
                             type="button"
                             onClick={() => setShowPanel(showPanel === 'emojis' ? 'none' : 'emojis')}
-                            className={`sully-chat-emoji-button ${actionButtonClass}`}
+                            className={`sully-chat-emoji-button ${retroInputLayout ? sendButtonClass : actionButtonClass}`}
                             aria-label="表情"
                         >
                             <Smiley className="w-6 h-6" weight="regular" />
