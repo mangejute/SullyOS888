@@ -94,6 +94,64 @@ describe('renderAndPersist 引用解析', () => {
         expect(texts[0].replyTo?.id).toBe(101);
         expect(texts[1].replyTo).toBeFalsy();
     }, 20000);
+
+    it('角色可以引用刚收到的用户消息，并保存用户姓名和完整引用原文', async () => {
+        const charId = `c-quote-current-user-${Date.now()}`;
+        const previousAssistant = {
+            id: 201, charId, role: 'assistant' as const, type: 'text' as const,
+            content: '我刚看过医生，结果已经出来了。', timestamp: Date.now() - 2000,
+        };
+        const currentUser = {
+            id: 202, charId, role: 'user' as const, type: 'text' as const,
+            content: '医生怎么说？我有点担心。', timestamp: Date.now() - 1000,
+        };
+
+        await applyAssistantPostProcessing('[[QUOTE: 医生怎么说]]\n检查结果没事，你别担心。', makeCtx(charId, [previousAssistant, currentUser]));
+
+        const reply = (await DB.getRecentMessagesByCharId(charId, 50)).find(m => m.role === 'assistant' && m.type === 'text');
+        expect(reply?.replyTo).toEqual({ id: 202, name: '我', content: '医生怎么说？我有点担心。' });
+        expect(reply?.content).toBe('检查结果没事，你别担心。');
+    }, 20000);
+
+    it('角色可以引用紧邻上一轮自己最后发出的文字消息', async () => {
+        const charId = `c-quote-previous-assistant-${Date.now()}`;
+        const previousAssistant = {
+            id: 211, charId, role: 'assistant' as const, type: 'text' as const,
+            content: '我刚看过医生，结果已经出来了。', timestamp: Date.now() - 2000,
+        };
+        const currentUser = {
+            id: 212, charId, role: 'user' as const, type: 'text' as const,
+            content: '那就好。', timestamp: Date.now() - 1000,
+        };
+
+        await applyAssistantPostProcessing('[[QUOTE: 我刚看过医生]]\n别担心，真的没事。', makeCtx(charId, [previousAssistant, currentUser]));
+
+        const reply = (await DB.getRecentMessagesByCharId(charId, 50)).find(m => m.role === 'assistant' && m.type === 'text');
+        expect(reply?.replyTo).toEqual({ id: 211, name: '测试角色', content: '我刚看过医生，结果已经出来了。' });
+        expect(reply?.content).toBe('别担心，真的没事。');
+    }, 20000);
+
+    it('不会把引用绑定到上一轮之外的旧消息', async () => {
+        const charId = `c-quote-window-${Date.now()}`;
+        const oldUser = {
+            id: 221, charId, role: 'user' as const, type: 'text' as const,
+            content: '这是更早之前的那句话。', timestamp: Date.now() - 4000,
+        };
+        const previousAssistant = {
+            id: 222, charId, role: 'assistant' as const, type: 'text' as const,
+            content: '上一轮角色说的话。', timestamp: Date.now() - 3000,
+        };
+        const currentUser = {
+            id: 223, charId, role: 'user' as const, type: 'text' as const,
+            content: '这是用户刚刚说的话。', timestamp: Date.now() - 1000,
+        };
+
+        await applyAssistantPostProcessing('[[QUOTE: 更早之前的那句话]]\n我接着回答现在这句。', makeCtx(charId, [oldUser, previousAssistant, currentUser]));
+
+        const reply = (await DB.getRecentMessagesByCharId(charId, 50)).find(m => m.role === 'assistant' && m.type === 'text');
+        expect(reply?.replyTo?.id).toBe(223);
+        expect(reply?.replyTo?.id).not.toBe(221);
+    }, 20000);
 });
 
 // 历史里引用消息被 buildMessageHistory 渲染成 [xx引用了xx说的「…」，并回复了 ↓]，

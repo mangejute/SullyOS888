@@ -587,11 +587,9 @@ export async function applyAssistantPostProcessing(
             setMessages(await DB.getRecentMessagesByCharId(char.id, 200));
         };
 
-        // 把 [[QUOTE: ...]] / [回复 "..."] 的引用文本解析成"被回复的那条用户消息"。
-        // 开了翻译的外语/粤语角色，引用文本往往是外语、或被 <原文>/<译文> 翻译标签包裹，
-        // 跟库里中文用户消息逐字 includes 匹配会失败 → 之前表现为丢引用 / 空引用气泡。
-        // 这里先剥掉翻译标签再逐字/前缀精确定位；匹配不到就兜底到「最近一条用户文字消息」
-        // （[[QUOTE]] 基本放在回复开头、指代最近一句话，兜底足够稳），杜绝外语角色空引用。
+        // 把 [[QUOTE: ...]] / [回复 "..."] 的引用文本解析成上一轮的可引用消息。
+        // 只开放两个目标：用户刚发的文字，或紧挨在它之前角色最后发出的文字。
+        // 这样角色既能引用用户，也能引用自己上一轮，同时不会误引用更早历史。
         const resolveQuoteTarget = (quotedTextRaw: string): { id: number, content: string, name: string } | undefined => {
             const raw = (quotedTextRaw || '').trim();
             // 引用文本可能被翻译标签包裹：<原文>(外语) 与 <译文>(本地语) 都可能命中库里的中文用户消息。
@@ -603,19 +601,50 @@ export async function applyAssistantPostProcessing(
             pushCand(raw.match(/<原文>([\s\S]*?)<\/原文>/)?.[1]);
             pushCand(raw.match(/<译文>([\s\S]*?)<\/译文>/)?.[1]);
             pushCand(raw.replace(/<\/?翻译>|<\/?原文>|<\/?译文>/g, '').replace(/%%BILINGUAL%%/gi, ''));
-            const users = contextMsgs.filter((m: Message) => m.role === 'user' && typeof m.content === 'string' && !!m.content.trim());
-            const reversedUsers = users.slice().reverse();
+
+            const isTextMessage = (m: Message | undefined): m is Message => !!m
+                && (m.type === 'text' || !m.type)
+                && typeof m.content === 'string'
+                && !!m.content.trim();
+            const latestUserIndex = contextMsgs.map((m, index) => ({ m, index }))
+                .reverse()
+                .find(({ m }) => m.role === 'user' && isTextMessage(m))?.index;
+            const latestUser = latestUserIndex === undefined ? undefined : contextMsgs[latestUserIndex];
+            const previousAssistant = latestUserIndex === undefined
+                ? undefined
+                : contextMsgs.slice(0, latestUserIndex).reverse()
+                    .find((m: Message) => m.role === 'assistant' && isTextMessage(m));
+            const allowedTargets = [latestUser, previousAssistant].filter(isTextMessage);
+
+            const contentVariants = (content: string): string[] => {
+                const normalized = content.trim();
+                const variants = normalized.split(/%%BILINGUAL%%/i).map(s => s.trim()).filter(Boolean);
+                if (normalized && !variants.includes(normalized)) variants.push(normalized);
+                return variants.map(s => s.replace(/<\/?翻译>|<\/?原文>|<\/?译文>/g, '').trim()).filter(Boolean);
+            };
+            const quoteMatches = (message: Message, quote: string): boolean => {
+                const normalizedQuote = quote.replace(/\s+/g, ' ').trim();
+                if (!normalizedQuote) return false;
+                return contentVariants(message.content).some(content => {
+                    const normalizedContent = content.replace(/\s+/g, ' ').trim();
+                    return normalizedContent === normalizedQuote
+                        || normalizedContent.includes(normalizedQuote)
+                        || (normalizedQuote.length > 10 && normalizedQuote.includes(normalizedContent));
+                });
+            };
             let targetMsg: Message | undefined;
             for (const q of candidates) {
-                targetMsg = reversedUsers.find((m: Message) => m.content.includes(q))
-                    || (q.length > 10 ? reversedUsers.find((m: Message) => m.content.includes(q.slice(0, 10))) : undefined);
+                targetMsg = allowedTargets.find((m: Message) => quoteMatches(m, q));
                 if (targetMsg) break;
             }
-            // 兜底：精确匹配失败但角色明确想引用 → 取最近一条用户文字消息，避免空引用
-            if (!targetMsg) targetMsg = users.filter((m: Message) => m.type === 'text' || !m.type).slice(-1)[0] || users.slice(-1)[0];
+            // 兜底也只取当前用户这条，保证模型写错片段时不会把引用绑到任意旧历史。
+            if (!targetMsg) targetMsg = latestUser;
             if (!targetMsg) return undefined;
-            const truncated = targetMsg.content.length > 10 ? targetMsg.content.slice(0, 10) + '...' : targetMsg.content;
-            return { id: targetMsg.id, content: truncated, name: userProfile.name };
+            return {
+                id: targetMsg.id,
+                content: targetMsg.content,
+                name: targetMsg.role === 'user' ? userProfile.name : char.name,
+            };
         };
 
         // Quote/Reply 目标 (双语路径用)
