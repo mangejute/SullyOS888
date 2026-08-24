@@ -3174,7 +3174,7 @@ const Chat: React.FC = () => {
                  .sully-bubble-ai,.sully-bubble-user{border-radius:4px!important;}
                  ${retroChatCssActive ? `
                   /* 复古微信正文气泡：角色浅灰、用户深灰；引用只附加摘要，不改变正文气泡。 */
-                  .sully-bubble-ai{--sully-bubble-tail-bg:#dedede!important;--sully-bubble-tail-border:#b8b8b8!important;background:linear-gradient(#f7f7f7,#d8d8d8)!important;color:#222!important;border:1px solid #b8b8b8!important;box-shadow:inset 0 1px #fff,0 1px 2px rgba(0,0,0,.18)!important;}
+                  .sully-bubble-ai{--sully-bubble-tail-bg:#dedede!important;--sully-bubble-tail-border:#555!important;background:linear-gradient(#f7f7f7,#d8d8d8)!important;color:#222!important;border:1px solid #b8b8b8!important;box-shadow:inset 0 1px #fff,0 1px 2px rgba(0,0,0,.18)!important;}
                   .sully-bubble-user{--sully-bubble-tail-bg:#343434!important;--sully-bubble-tail-border:#1d1d1d!important;background:linear-gradient(#4a4a4a,#282828)!important;color:#fff!important;border:1px solid #1d1d1d!important;box-shadow:inset 0 1px rgba(255,255,255,.16),0 1px 2px rgba(0,0,0,.35)!important;}
                   /* 微信引用消息：当前回复保留主气泡，原消息显示为其下方紧凑的灰色引用条。 */
                   .sully-bubble-with-reply{display:flex!important;flex-direction:column!important;align-items:stretch!important;width:max-content!important;max-width:100%!important;height:auto!important;min-height:var(--sully-chat-avatar-size)!important;max-height:none!important;background:transparent!important;border:0!important;box-shadow:none!important;padding:0!important;gap:0!important;}
