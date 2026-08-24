@@ -104,6 +104,9 @@ describe('MessageItem module layout', () => {
         });
 
         expect(markup).toContain('sully-bubble-with-reply');
+        // 外层只是引用布局壳，角色/用户气泡类必须只落在正文内层，
+        // 否则外层的高度和背景会把尾巴的 50% 参照物带偏。
+        expect(markup).not.toMatch(/class="[^"]*sully-bubble-with-reply[^"]*sully-bubble-(?:ai|user)/);
         expect(markup).toContain('sully-bubble-text');
         expect(markup).toContain('sully-bubble-reply-main sully-bubble-user');
         expect(markup).toContain('sully-reply-quote');

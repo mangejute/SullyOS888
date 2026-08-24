@@ -3518,6 +3518,8 @@ const MessageItem = React.memo(({
     // Container style (BackgroundColor + Opacity) with bubble variant
     const containerStyle = {
         '--sully-bubble-bg': bubbleVariant === 'outline' ? 'transparent' : styleConfig.backgroundColor,
+        // 尾巴是独立节点，明确把气泡填充传给它，避免尾巴退回旧主题的纯色。
+        '--sully-bubble-tail-fill': bubbleVariant === 'outline' ? 'transparent' : styleConfig.backgroundColor,
         '--sully-bubble-text': styleConfig.textColor,
         '--sully-bubble-opacity': styleConfig.opacity,
         '--sully-bubble-outline-color': styleConfig.backgroundColor,
@@ -3698,7 +3700,7 @@ const MessageItem = React.memo(({
     return commonLayout(
         <div className={isVoiceOnlyMsg
             ? `relative ${suppressEntranceAnimation ? '' : 'animate-fade-in'}`
-            : `relative ${bubbleVariant === 'flat' || bubbleVariant === 'outline' || bubbleVariant === 'wechat' ? '' : 'shadow-sm '}px-5 py-3 ${suppressEntranceAnimation ? '' : 'animate-fade-in'} ${bubbleVariant === 'outline' ? 'sully-bubble-outline' : 'border border-black/5 '}active:scale-[0.98] transition-transform overflow-visible ${m.replyTo ? 'sully-bubble-with-reply' : ''} ${isUser ? 'sully-bubble-user' : 'sully-bubble-ai'}`}
+            : `relative ${bubbleVariant === 'flat' || bubbleVariant === 'outline' || bubbleVariant === 'wechat' ? '' : 'shadow-sm '}px-5 py-3 ${suppressEntranceAnimation ? '' : 'animate-fade-in'} ${bubbleVariant === 'outline' ? 'sully-bubble-outline' : 'border border-black/5 '}active:scale-[0.98] transition-transform overflow-visible ${m.replyTo ? 'sully-bubble-with-reply' : (isUser ? 'sully-bubble-user' : 'sully-bubble-ai')}`}
             style={isVoiceOnlyMsg ? undefined : containerStyle}>
 
             {/* 尾巴使用独立元素，避免历史主题的 ::before/::after 规则把三角形放大。 */}
