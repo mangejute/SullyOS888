@@ -304,7 +304,7 @@ PRESETS.push({
 .sully-chat-input-wrap{background:#dedede!important;border:1px solid #68696d!important;border-radius:5px!important;box-shadow:inset 0 1px #f8f8f8,0 1px 1px rgba(24,25,27,.55)!important;min-height:1.9rem!important;}
 .sully-chat-textarea{color:#181818!important;font-size:.82rem!important;padding:.35rem .55rem!important;}
 .sully-chat-textarea::placeholder{color:#777!important;}
-.sully-chat-add-button,.sully-chat-emoji-button,.sully-chat-send-button{width:1.95rem!important;min-width:1.95rem!important;height:1.95rem!important;flex:0 0 1.95rem!important;padding:.25rem!important;color:#25262a!important;background:linear-gradient(#f4f4f4,#aeb0b4)!important;border:1px solid #717277!important;box-shadow:inset 0 1px #fff,0 1px 1px rgba(23,24,26,.6)!important;border-radius:50%!important;}
+.sully-chat-add-button,.sully-chat-emoji-button,.sully-chat-send-button{width:1.95rem!important;min-width:1.95rem!important;max-width:1.95rem!important;height:1.95rem!important;min-height:1.95rem!important;max-height:1.95rem!important;flex:0 0 1.95rem!important;box-sizing:border-box!important;padding:.25rem!important;color:#25262a!important;background:linear-gradient(#f4f4f4,#aeb0b4)!important;border:1px solid #717277!important;box-shadow:inset 0 1px #fff,0 1px 1px rgba(23,24,26,.6)!important;border-radius:50%!important;}
 .sully-chat-add-button svg,.sully-chat-emoji-button svg,.sully-chat-send-button svg{width:.95rem!important;height:.95rem!important;}
 .sully-chat-message-time{position:absolute!important;top:calc(100% + .08rem)!important;left:50%!important;right:auto!important;transform:translateX(-50%)!important;background:linear-gradient(#ededed,#cecece)!important;color:#4b4b4b!important;border:1px solid #858585!important;border-radius:4px!important;padding:1px 6px!important;line-height:1.1!important;box-shadow:inset 0 1px #fff,0 1px 1px rgba(0,0,0,.14)!important;z-index:3!important;}
 
@@ -335,8 +335,8 @@ PRESETS.push({
 .sully-chat-message-short .sully-bubble-with-reply,.sully-chat-message-short .sully-bubble-reply-main{height:auto!important;max-height:none!important;min-height:var(--sully-chat-avatar-size,1.75rem)!important;}
 .sully-chat-message-short .sully-bubble-text{font-size:13px!important;line-height:1.2!important;color:#171717!important;}
 .sully-chat-message-long .sully-bubble-text{font-size:13px!important;line-height:1.25!important;color:#171717!important;}
-.sully-chat-message-user .sully-bubble-text{color:#fff!important;}
-.sully-chat-message-ai .sully-bubble-text{color:#222!important;}`,
+.sully-chat-message-user .sully-bubble-text,.sully-chat-message-user .sully-bubble-text *{color:#fff!important;}
+.sully-chat-message-ai .sully-bubble-text,.sully-chat-message-ai .sully-bubble-text *{color:#222!important;}`,
 });
 
 // 旧版本仍保留这组数据结构用于读取历史预设，但新编辑器不再显示分离的气泡代码框。
