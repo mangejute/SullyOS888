@@ -3157,15 +3157,14 @@ const Chat: React.FC = () => {
                   .sully-chat-message-content{width:fit-content!important;max-width:84%!important;min-width:0!important;}
                   .sully-chat-message-long .sully-chat-message-content{width:fit-content!important;max-width:84%!important;}
                   ${retroChatCssActive ? `
-                   .sully-chat-header{min-height:6rem!important;height:auto!important;background:linear-gradient(#414246,#292a2d)!important;color:#fff!important;padding-bottom:.85rem!important;overflow:visible!important;}
-                   .sully-chat-info{max-width:72%!important;top:calc(50% + .35rem)!important;}
-                   .sully-chat-buffs{background:#292a2d!important;margin-top:.15rem!important;width:100%!important;max-width:none!important;overflow:visible!important;}
+                   .sully-chat-header{min-height:4.75rem!important;height:auto!important;background:linear-gradient(#414246,#292a2d)!important;color:#fff!important;padding-bottom:.55rem!important;overflow:visible!important;}
+                   .sully-chat-info{max-width:72%!important;top:50%!important;transform:translate(-50%,-50%)!important;}
+                   .sully-chat-info .sully-chat-status{display:none!important;}
+                   .sully-chat-buffs{background:#292a2d!important;margin-top:.28rem!important;width:100%!important;max-width:none!important;overflow:visible!important;}
                    .sully-chat-buffs > div:first-child{width:100%!important;max-width:none!important;overflow:visible!important;flex-wrap:wrap!important;justify-content:center!important;white-space:normal!important;row-gap:.15rem!important;}
                    .sully-chat-buffs button{max-width:none!important;overflow:visible!important;text-overflow:clip!important;white-space:nowrap!important;}
-                  ` : ''}
-                  /* 复古微信顶栏的标题组稳定垂直居中，名字与 Online 保持可读间距。 */
-                 .sully-chat-info{top:calc(50% + .18rem)!important;transform:translate(-50%,-50%)!important;}
-                 .sully-chat-info .sully-chat-status{margin-top:.18rem!important;}
+                   .sully-chat-buffs button,.sully-chat-buffs .sully-chat-token{display:inline-flex!important;align-items:center!important;justify-content:center!important;min-height:1.45rem!important;background:linear-gradient(#bfc1c4,#76787c)!important;color:#fff!important;border:1px solid #9b9da1!important;border-radius:3px!important;box-shadow:inset 0 1px rgba(255,255,255,.72),0 1px 1px rgba(0,0,0,.45)!important;font-size:.65rem!important;line-height:1!important;padding:.18rem .45rem!important;}
+                   ` : ''}
                   .sully-chat-message-avatar-slot,.sully-chat-message-avatar,.sully-chat-message-avatar-img{width:var(--sully-chat-avatar-size)!important;height:var(--sully-chat-avatar-size)!important;box-sizing:border-box!important;}
                   .sully-chat-message-avatar-slot,.sully-chat-message-avatar{line-height:0!important;}
                   .sully-chat-message-avatar-img{display:block!important;vertical-align:top!important;}
@@ -3174,11 +3173,11 @@ const Chat: React.FC = () => {
                  ${retroChatCssActive ? `
                   /* 微信引用消息：当前回复保留主气泡，原消息显示为其下方紧凑的灰色引用条。 */
                   .sully-bubble-with-reply{display:flex!important;flex-direction:column!important;align-items:stretch!important;width:max-content!important;max-width:100%!important;height:auto!important;min-height:var(--sully-chat-avatar-size)!important;max-height:none!important;background:transparent!important;border:0!important;box-shadow:none!important;padding:0!important;gap:.25rem!important;}
-                  .sully-bubble-with-reply > .sully-bubble-text{display:block!important;order:1!important;align-self:flex-end!important;width:fit-content!important;min-width:0!important;box-sizing:border-box!important;max-width:100%!important;background:linear-gradient(#c9c9c9,#ababab)!important;color:#171717!important;border:1px solid #6d6d6d!important;border-radius:4px!important;box-shadow:inset 0 1px rgba(255,255,255,.65),0 1px 1px rgba(0,0,0,.16)!important;padding:.28rem .72rem!important;min-height:var(--sully-chat-avatar-size)!important;}
+                  .sully-bubble-with-reply > .sully-bubble-reply-main{display:block!important;order:1!important;align-self:flex-end!important;width:fit-content!important;min-width:0!important;box-sizing:border-box!important;max-width:100%!important;margin-top:0!important;}
                   /* 引用条随摘要收缩，主消息与引用的右边缘保持一致；长摘要才使用最大宽度并省略。 */
                   .sully-bubble-with-reply > .sully-reply-quote{display:block!important;order:2!important;align-self:flex-end!important;width:fit-content!important;max-width:min(12rem,76vw)!important;min-width:0!important;flex:0 0 auto!important;box-sizing:border-box!important;margin:0!important;padding:.22rem .45rem!important;background:#d3d3d3!important;color:#777!important;border:0!important;border-radius:2px!important;opacity:1!important;overflow:hidden!important;white-space:nowrap!important;text-overflow:ellipsis!important;line-height:1.25!important;}
-                  .sully-chat-message-ai .sully-bubble-with-reply > .sully-bubble-text,.sully-chat-message-ai .sully-bubble-with-reply > .sully-reply-quote{align-self:flex-start!important;}
-                  .sully-bubble-with-reply > .sully-bubble-tail{background:linear-gradient(#c9c9c9,#ababab)!important;top:calc(var(--sully-chat-avatar-size) / 2)!important;}
+                  .sully-chat-message-ai .sully-bubble-with-reply > .sully-bubble-reply-main,.sully-chat-message-ai .sully-bubble-with-reply > .sully-reply-quote{align-self:flex-start!important;}
+                  .sully-bubble-with-reply > .sully-bubble-tail{background:var(--sully-bubble-bg,#b8b8b8)!important;top:calc(var(--sully-chat-avatar-size) / 2)!important;}
                   .sully-bubble-with-reply .sully-reply-quote-sender,.sully-bubble-with-reply .sully-reply-quote-preview{display:inline!important;max-width:none!important;font-size:.66rem!important;font-style:normal!important;font-weight:400!important;opacity:1!important;color:#777!important;}
                   .sully-bubble-with-reply .sully-reply-quote-sender{font-weight:500!important;color:#686868!important;}
                   .sully-bubble-with-reply .sully-reply-quote-sender::after{content:" ";}
@@ -3194,8 +3193,9 @@ const Chat: React.FC = () => {
                  .sully-bubble-tail-long.sully-bubble-tail-user{transform:scaleX(-1)!important;}
                  /* 一行消息：气泡高度锁成和头像同一个变量，两者严格等高（真实微信观感）。 */
                   .sully-chat-message-short .sully-bubble-ai,.sully-chat-message-short .sully-bubble-user{height:var(--sully-chat-avatar-size)!important;min-height:var(--sully-chat-avatar-size)!important;max-height:var(--sully-chat-avatar-size)!important;padding-top:0!important;padding-bottom:0!important;box-sizing:border-box!important;}
-                  .sully-chat-message-short .sully-bubble-with-reply{height:auto!important;max-height:none!important;min-height:var(--sully-chat-avatar-size)!important;}
+                  .sully-chat-message-short .sully-bubble-with-reply,.sully-chat-message-short .sully-bubble-reply-main{height:auto!important;max-height:none!important;min-height:var(--sully-chat-avatar-size)!important;}
                  .sully-chat-message-short .sully-bubble-text{font-size:13px!important;line-height:1.2!important;}
+                 .sully-chat-message-long .sully-bubble-text{font-size:13px!important;line-height:1.25!important;}
                  /* 头像与气泡的几何对齐（实测口径，不再猜 top 值）：
                     消息行 .sully-chat-message 是定位父级，气泡顶 = 行顶 + 气泡自身的 margin-top。
                     把这个间距抽成变量 --sully-chat-bubble-mt，头像槽和气泡共用同一个数，
@@ -3539,13 +3539,14 @@ const Chat: React.FC = () => {
                     } },
                     { label: '聊天设置', icon: <GearSix className="w-5 h-5" weight="regular" />, onClick: () => setModalType('chat-settings') },
                 ]}
-                onDeleteBuff={(buffId) => {
+                 onDeleteBuff={(buffId) => {
                     const currentBuffs = char.activeBuffs || [];
                     const newBuffs = currentBuffs.filter(b => b.id !== buffId);
                     const newInjection = '';
                     updateCharacter(char.id, { activeBuffs: newBuffs, buffInjection: newInjection });
                     addToast('已删除该情绪状态', 'info');
-                }}
+                 }}
+                compactStatusInBuffRow={retroChatCssActive}
                 headerStyle={osTheme.chatHeaderStyle}
                 avatarShape={osTheme.chatAvatarShape}
                 headerAlign={osTheme.chatHeaderAlign}
@@ -4003,9 +4004,10 @@ const Chat: React.FC = () => {
                     showThinkingChain={!!(char as any).showThinkingChain}
                     inputStyle={osTheme.chatInputStyle}
                     sendButtonStyle={osTheme.chatSendButtonStyle}
-                    chromeStyle={osTheme.chatChromeStyle}
-                    acnh={acnh}
-                    devDebugAvailable={isDevDebugAvailable()}
+                   chromeStyle={osTheme.chatChromeStyle}
+                   acnh={acnh}
+                   devDebugAvailable={isDevDebugAvailable()}
+                   retroInputLayout={retroChatCssActive}
                 />
             </div>
 

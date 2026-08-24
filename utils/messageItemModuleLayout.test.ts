@@ -105,12 +105,27 @@ describe('MessageItem module layout', () => {
 
         expect(markup).toContain('sully-bubble-with-reply');
         expect(markup).toContain('sully-bubble-text');
+        expect(markup).toContain('sully-bubble-reply-main sully-bubble-user');
         expect(markup).toContain('sully-reply-quote');
         expect(markup).toContain('sully-reply-quote-sender');
         expect(markup).toContain('sully-reply-quote-preview');
         expect(markup).toContain('引用 角色：我今天已经忙了很久。');
         expect(markup).not.toContain('italic');
         expect(markup).not.toContain('&quot;我今天已经忙了很久。&quot;');
+    });
+
+    it('角色引用时，正文也复用角色侧的普通气泡类', () => {
+        const markup = renderMessage({
+            id: 32,
+            charId: 'char-1',
+            role: 'assistant',
+            type: 'text',
+            content: '我记得你刚刚说的。',
+            timestamp: 32,
+            replyTo: { id: 31, name: '我', content: '那你先休息一下。' },
+        });
+
+        expect(markup).toContain('sully-bubble-reply-main sully-bubble-ai');
     });
 
     it('心象卡片提供长按复制提示与独立交互入口', () => {

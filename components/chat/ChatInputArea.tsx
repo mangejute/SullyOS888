@@ -61,6 +61,8 @@ interface ChatInputAreaProps {
     acnh?: boolean;
     /** 开发调试入口只在解锁后显示，放在加号面板内，不再悬浮在聊天内容上。 */
     devDebugAvailable?: boolean;
+    /** 复古微信把表情按钮作为输入框右侧的独立按键，避免挤进白色输入框。 */
+    retroInputLayout?: boolean;
 }
 
 const ChatInputArea: React.FC<ChatInputAreaProps> = ({
@@ -84,6 +86,7 @@ const ChatInputArea: React.FC<ChatInputAreaProps> = ({
     chromeStyle = 'soft',
     acnh = false,
     devDebugAvailable = false,
+    retroInputLayout = false,
 }) => {
     const chatImageInputRef = useRef<HTMLInputElement>(null);
     const cameraImageInputRef = useRef<HTMLInputElement>(null);
@@ -534,10 +537,22 @@ const ChatInputArea: React.FC<ChatInputAreaProps> = ({
                             placeholder="Message..." 
                             style={{ height: 'auto' }} 
                         />
-                        <button onClick={() => setShowPanel(showPanel === 'emojis' ? 'none' : 'emojis')} className={`sully-chat-emoji-button p-2 shrink-0 ${isDiscordStyle ? 'text-slate-400 hover:text-sky-300' : isPixelStyle ? 'text-[#8f674a] hover:text-[#a16207]' : 'text-slate-400 hover:text-primary'}`}>
+                        {!retroInputLayout && (
+                            <button onClick={() => setShowPanel(showPanel === 'emojis' ? 'none' : 'emojis')} className={`sully-chat-emoji-button p-2 shrink-0 ${isDiscordStyle ? 'text-slate-400 hover:text-sky-300' : isPixelStyle ? 'text-[#8f674a] hover:text-[#a16207]' : 'text-slate-400 hover:text-primary'}`}>
+                                <Smiley className="w-6 h-6" weight="regular" />
+                            </button>
+                        )}
+                    </div>
+                    {retroInputLayout && (
+                        <button
+                            type="button"
+                            onClick={() => setShowPanel(showPanel === 'emojis' ? 'none' : 'emojis')}
+                            className={`sully-chat-emoji-button ${actionButtonClass}`}
+                            aria-label="表情"
+                        >
                             <Smiley className="w-6 h-6" weight="regular" />
                         </button>
-                    </div>
+                    )}
                     <button
                         type="button"
                         onClick={handleSendButtonClick}

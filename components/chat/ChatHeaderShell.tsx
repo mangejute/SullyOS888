@@ -43,6 +43,8 @@ interface ChatHeaderShellProps {
     onDeleteBuff?: (buffId: string) => void;
     /** 隐藏顶栏情绪 buff 栏（Appearance 里的「显示情绪栏」开关）。 */
     hideBuffs?: boolean;
+    /** 复古微信将字数并入情绪状态栏，标题下不再单列发送/检测状态。 */
+    compactStatusInBuffRow?: boolean;
     headerStyle?: 'default' | 'minimal' | 'gradient' | 'wechat' | 'telegram' | 'discord' | 'pixel';
     avatarShape?: 'circle' | 'rounded' | 'square';
     headerAlign?: 'left' | 'center';
@@ -92,6 +94,7 @@ const ChatHeaderShell: React.FC<ChatHeaderShellProps> = ({
     triggerIcon = 'lightning',
     showTrigger = true,
     hideBuffs = false,
+    compactStatusInBuffRow = false,
     headerStyle = 'default',
     avatarShape = 'circle',
     headerAlign = 'left',
@@ -286,14 +289,25 @@ const ChatHeaderShell: React.FC<ChatHeaderShellProps> = ({
         ? <Stop className="w-5 h-5" weight="fill" />
         : <Lightning className="w-5 h-5" weight="bold" />;
 
+    const hasBuffRowContent = buffs.length > 0 || (compactStatusInBuffRow && !!lastTokenUsage);
+    const renderTokenChip = () => lastTokenUsage && (
+        <div
+            className={`sully-chat-token shrink-0 text-[9px] px-1.5 py-0.5 rounded-md font-mono border ${isDarkHeader ? 'bg-slate-800 text-slate-300 border-white/10' : isPixelHeader ? 'bg-[#fff7ed] text-[#8f674a] border-[#8f674a]/20' : 'bg-slate-100 text-slate-400 border-slate-200'}`}
+            title={tokenBreakdown ? `prompt: ${tokenBreakdown.prompt} | completion: ${tokenBreakdown.completion} | msgs: ${tokenBreakdown.msgCount} | pass: ${tokenBreakdown.pass}` : ''}
+        >
+            {lastTokenUsage}
+        </div>
+    );
+
     const renderBuffRow = (centered: boolean) => {
-        if (buffs.length === 0) return null;
+        if (!hasBuffRowContent) return null;
         return (
             <div className={`sully-chat-buffs relative w-full min-w-0 max-w-full ${centered ? 'flex justify-center' : ''}`}>
                 <div
                     ref={buffPreviewRef}
                     className={`flex w-full min-w-0 max-w-full items-center gap-0.5 overflow-x-auto whitespace-nowrap pr-1 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden ${centered ? 'justify-center' : ''}`}
                 >
+                    {compactStatusInBuffRow && renderTokenChip()}
                     {visibleBuffs.map((buff) => (
                         <button
                             key={buff.id}
@@ -342,7 +356,7 @@ const ChatHeaderShell: React.FC<ChatHeaderShellProps> = ({
         );
     };
 
-    const floatingStatusNodes = (lastTokenUsage || isInstantSending || isEmotionEvaluating || isMemoryPalaceProcessing) ? (
+    const floatingStatusNodes = !compactStatusInBuffRow && (lastTokenUsage || isInstantSending || isEmotionEvaluating || isMemoryPalaceProcessing) ? (
         <div className={`absolute ${extraAction ? 'right-20' : 'right-12'} top-1/2 -translate-y-1/2 flex items-center gap-1.5 pointer-events-none`}>
             {lastTokenUsage && (
                 <div className={`sully-chat-token text-[9px] px-1.5 py-0.5 rounded-md font-mono border ${isDarkHeader ? 'bg-slate-800 text-slate-300 border-white/10' : isPixelHeader ? 'bg-[#fff7ed] text-[#8f674a] border-[#8f674a]/20' : 'bg-slate-100/95 text-slate-400 border-slate-200'}`}>
@@ -370,7 +384,7 @@ const ChatHeaderShell: React.FC<ChatHeaderShellProps> = ({
     const renderCenteredInfo = () => (
         <div className="flex w-full min-w-0 max-w-full flex-col items-center text-center">
             <div className={`sully-chat-name font-bold ${primaryTextClass}`}>{activeCharacter.name}</div>
-            {buffs.length > 0 && (
+            {hasBuffRowContent && (
                 <div className="mt-1 min-h-[18px] w-full">
                     {renderBuffRow(true)}
                 </div>
@@ -382,25 +396,23 @@ const ChatHeaderShell: React.FC<ChatHeaderShellProps> = ({
         <>
             <div className="sully-chat-info flex-1 min-w-0 flex flex-col items-start text-left">
                 <div className={`sully-chat-name font-bold ${primaryTextClass}`}>{activeCharacter.name}</div>
-                <div className="sully-chat-status flex items-center gap-2 flex-wrap">
-                    {onlineStatusNode}
-                    {lastTokenUsage && (
-                        <div className={`sully-chat-token text-[9px] px-1.5 py-0.5 rounded-md font-mono border ${isDarkHeader ? 'bg-slate-800 text-slate-300 border-white/10' : isPixelHeader ? 'bg-[#fff7ed] text-[#8f674a] border-[#8f674a]/20' : 'bg-slate-100 text-slate-400 border-slate-200'}`} title={tokenBreakdown ? `prompt: ${tokenBreakdown.prompt} | completion: ${tokenBreakdown.completion} | msgs: ${tokenBreakdown.msgCount} | pass: ${tokenBreakdown.pass}` : ''}>
-                            {lastTokenUsage}
-                        </div>
-                    )}
-                    {isInstantSending && (
-                        <div className={`text-[9px] px-1.5 py-0.5 rounded-md font-semibold border animate-pulse ${isDarkHeader ? 'bg-sky-500/15 text-sky-200 border-sky-400/20' : isPixelHeader ? 'bg-[#eff6ff] text-[#1d4ed8] border-[#1d4ed8]/20' : 'bg-sky-50 text-sky-600 border-sky-200'}`}>
-                            发送中…
-                        </div>
-                    )}
-                    {isEmotionEvaluating && (
-                        <div className={`text-[9px] px-1.5 py-0.5 rounded-md font-semibold border animate-pulse ${isDarkHeader ? 'bg-violet-500/15 text-violet-200 border-violet-400/20' : isPixelHeader ? 'bg-[#fff7ed] text-[#8f674a] border-[#8f674a]/20' : 'bg-violet-50 text-violet-500 border-violet-200'}`}>
-                            情绪分析中
-                        </div>
-                    )}
-                </div>
-                {buffs.length > 0 && (
+                {!compactStatusInBuffRow && (
+                    <div className="sully-chat-status flex items-center gap-2 flex-wrap">
+                        {onlineStatusNode}
+                        {renderTokenChip()}
+                        {isInstantSending && (
+                            <div className={`text-[9px] px-1.5 py-0.5 rounded-md font-semibold border animate-pulse ${isDarkHeader ? 'bg-sky-500/15 text-sky-200 border-sky-400/20' : isPixelHeader ? 'bg-[#eff6ff] text-[#1d4ed8] border-[#1d4ed8]/20' : 'bg-sky-50 text-sky-600 border-sky-200'}`}>
+                                发送中…
+                            </div>
+                        )}
+                        {isEmotionEvaluating && (
+                            <div className={`text-[9px] px-1.5 py-0.5 rounded-md font-semibold border animate-pulse ${isDarkHeader ? 'bg-violet-500/15 text-violet-200 border-violet-400/20' : isPixelHeader ? 'bg-[#fff7ed] text-[#8f674a] border-[#8f674a]/20' : 'bg-violet-50 text-violet-500 border-violet-200'}`}>
+                                情绪分析中
+                            </div>
+                        )}
+                    </div>
+                )}
+                {hasBuffRowContent && (
                     <div className="mt-1 w-full">
                         {renderBuffRow(false)}
                     </div>

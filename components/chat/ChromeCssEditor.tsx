@@ -268,16 +268,15 @@ PRESETS.push({
     swatch: 'linear-gradient(180deg,#333 0 30%,#e7e7e7 30%)',
     code: `/* 复古微信：老版灰阶界面，按参考图还原 */
 .sully-chat-root{background:#e7e7e7!important;color:#161616!important;--sully-chat-bubble-mt:8px;--sully-chat-avatar-size:1.75rem;}
-.sully-chat-header{background:linear-gradient(#414246,#292a2d)!important;color:#fff!important;border-top:1px solid #56575a!important;border-bottom:2px solid #17181a!important;box-shadow:inset 0 1px rgba(255,255,255,.12)!important;min-height:6rem!important;height:auto!important;padding-left:.7rem!important;padding-right:.7rem!important;padding-bottom:.85rem!important;overflow:visible!important;}
+.sully-chat-header{background:linear-gradient(#414246,#292a2d)!important;color:#fff!important;border-top:1px solid #56575a!important;border-bottom:2px solid #17181a!important;box-shadow:inset 0 1px rgba(255,255,255,.12)!important;min-height:4.75rem!important;height:auto!important;padding-left:.7rem!important;padding-right:.7rem!important;padding-bottom:.55rem!important;overflow:visible!important;}
 .sully-chat-back{color:#f3f3f3!important;background:transparent!important;border-radius:0!important;}
-.sully-chat-info{position:absolute!important;left:50%!important;top:calc(50% + .35rem)!important;transform:translate(-50%,-50%)!important;width:max-content!important;max-width:72%!important;align-items:center!important;text-align:center!important;}
+.sully-chat-info{position:absolute!important;left:50%!important;top:50%!important;transform:translate(-50%,-50%)!important;width:max-content!important;max-width:72%!important;align-items:center!important;text-align:center!important;}
 .sully-chat-name{color:#f5f5f5!important;font-size:.98rem!important;font-weight:500!important;letter-spacing:0!important;white-space:nowrap!important;}
-.sully-chat-status{color:#62d495!important;font-size:.68rem!important;margin-top:.18rem!important;}
-.sully-chat-status{justify-content:center!important;}
-.sully-chat-buffs{margin-top:.15rem!important;width:100%!important;max-width:none!important;overflow:visible!important;}
+.sully-chat-status{display:none!important;}
+.sully-chat-buffs{margin-top:.28rem!important;width:100%!important;max-width:none!important;overflow:visible!important;}
 .sully-chat-buffs > div:first-child{width:100%!important;max-width:none!important;overflow:visible!important;flex-wrap:wrap!important;justify-content:center!important;white-space:normal!important;row-gap:.15rem!important;}
 .sully-chat-buffs button{max-width:none!important;overflow:visible!important;text-overflow:clip!important;white-space:nowrap!important;}
-.sully-chat-buffs button{background:#55565a!important;color:#eee!important;border:1px solid #777!important;border-radius:2px!important;font-size:.65rem!important;padding:.18rem .45rem!important;}
+.sully-chat-buffs button,.sully-chat-buffs .sully-chat-token{display:inline-flex!important;align-items:center!important;justify-content:center!important;min-height:1.45rem!important;background:linear-gradient(#bfc1c4,#76787c)!important;color:#fff!important;border:1px solid #9b9da1!important;border-radius:3px!important;box-shadow:inset 0 1px rgba(255,255,255,.72),0 1px 1px rgba(0,0,0,.45)!important;font-size:.65rem!important;line-height:1!important;padding:.18rem .45rem!important;}
 .sully-chat-token{background:#505155!important;color:#ddd!important;border:1px solid #777!important;border-radius:2px!important;}
 .sully-chat-trigger,.sully-chat-top-action{color:#f4f4f4!important;background:linear-gradient(#bfc1c4,#76787c)!important;border:1px solid #9b9da1!important;box-shadow:inset 0 1px rgba(255,255,255,.45),0 1px 1px rgba(0,0,0,.28)!important;border-radius:3px!important;}
 .sully-chat-top-action{width:2.55rem!important;height:1.8rem!important;padding:.22rem!important;margin-left:.42rem!important;display:flex!important;align-items:center!important;justify-content:center!important;}
@@ -304,22 +303,19 @@ PRESETS.push({
 .sully-chat-input-wrap{background:#dedede!important;border:1px solid #68696d!important;border-radius:5px!important;box-shadow:inset 0 1px #f8f8f8,0 1px 1px rgba(24,25,27,.55)!important;min-height:1.9rem!important;}
 .sully-chat-textarea{color:#181818!important;font-size:.82rem!important;padding:.35rem .55rem!important;}
 .sully-chat-textarea::placeholder{color:#777!important;}
-.sully-chat-add-button,.sully-chat-emoji-button,.sully-chat-send-button{color:#25262a!important;background:linear-gradient(#f4f4f4,#aeb0b4)!important;border:1px solid #717277!important;box-shadow:inset 0 1px #fff,0 1px 1px rgba(23,24,26,.6)!important;border-radius:50%!important;}
-.sully-chat-add-button,.sully-chat-send-button{width:1.95rem!important;min-width:1.95rem!important;height:1.95rem!important;}
-.sully-chat-emoji-button{width:1.75rem!important;height:1.75rem!important;padding:.25rem!important;}
-.sully-chat-add-button svg,.sully-chat-send-button svg{width:.95rem!important;height:.95rem!important;}
-.sully-chat-emoji-button svg{width:1rem!important;height:1rem!important;}
+.sully-chat-add-button,.sully-chat-emoji-button,.sully-chat-send-button{width:1.95rem!important;min-width:1.95rem!important;height:1.95rem!important;flex:0 0 1.95rem!important;padding:.25rem!important;color:#25262a!important;background:linear-gradient(#f4f4f4,#aeb0b4)!important;border:1px solid #717277!important;box-shadow:inset 0 1px #fff,0 1px 1px rgba(23,24,26,.6)!important;border-radius:50%!important;}
+.sully-chat-add-button svg,.sully-chat-emoji-button svg,.sully-chat-send-button svg{width:.95rem!important;height:.95rem!important;}
 .sully-chat-message-time{position:absolute!important;top:calc(100% + .08rem)!important;left:50%!important;right:auto!important;transform:translateX(-50%)!important;background:linear-gradient(#ededed,#cecece)!important;color:#4b4b4b!important;border:1px solid #858585!important;border-radius:4px!important;padding:1px 6px!important;line-height:1.1!important;box-shadow:inset 0 1px #fff,0 1px 1px rgba(0,0,0,.14)!important;z-index:3!important;}
 
 /* 老版微信灰色气泡：两侧同色，黑字，硬朗边框。尾巴由独立元素渲染。 */
 .sully-bubble-ai,.sully-bubble-user{--sully-bubble-bg:#b8b8b8;--sully-bubble-text:#171717;background:linear-gradient(#c9c9c9,#ababab)!important;color:#171717!important;border:1px solid #6d6d6d!important;border-radius:4px!important;box-shadow:inset 0 1px rgba(255,255,255,.65),0 1px 1px rgba(0,0,0,.16)!important;position:relative!important;padding:.28rem .72rem!important;min-height:1.75rem!important;display:flex!important;align-items:center!important;}
 .sully-bubble-with-reply{display:flex!important;flex-direction:column!important;align-items:stretch!important;width:max-content!important;max-width:100%!important;height:auto!important;min-height:var(--sully-chat-avatar-size,1.75rem)!important;max-height:none!important;background:transparent!important;border:0!important;box-shadow:none!important;padding:0!important;gap:.25rem!important;}
-/* 复古微信引用：主回复是完整气泡；原消息只保留一行弱化预览，不再重画成第二个气泡或卡片。 */
-.sully-bubble-with-reply > .sully-bubble-text{display:block!important;order:1!important;align-self:flex-end!important;width:fit-content!important;min-width:0!important;box-sizing:border-box!important;max-width:100%!important;background:linear-gradient(#c9c9c9,#ababab)!important;color:#171717!important;border:1px solid #6d6d6d!important;border-radius:4px!important;box-shadow:inset 0 1px rgba(255,255,255,.65),0 1px 1px rgba(0,0,0,.16)!important;padding:.28rem .72rem!important;min-height:var(--sully-chat-avatar-size,1.75rem)!important;}
+/* 正文重新使用同侧普通气泡类，只负责引用布局，不能覆盖主题的颜色、边框或阴影。 */
+.sully-bubble-with-reply > .sully-bubble-reply-main{display:block!important;order:1!important;align-self:flex-end!important;width:fit-content!important;min-width:0!important;box-sizing:border-box!important;max-width:100%!important;margin-top:0!important;}
 /* 引用条随摘要收缩，主消息与引用的右边缘保持一致；长摘要才使用最大宽度并省略。 */
 .sully-bubble-with-reply > .sully-reply-quote{display:block!important;order:2!important;align-self:flex-end!important;width:fit-content!important;max-width:min(12rem,76vw)!important;min-width:0!important;flex:0 0 auto!important;box-sizing:border-box!important;margin:0!important;padding:.22rem .45rem!important;background:#d3d3d3!important;color:#777!important;border:0!important;border-radius:2px!important;opacity:1!important;overflow:hidden!important;white-space:nowrap!important;text-overflow:ellipsis!important;line-height:1.25!important;}
-.sully-chat-message-ai .sully-bubble-with-reply > .sully-bubble-text,.sully-chat-message-ai .sully-bubble-with-reply > .sully-reply-quote{align-self:flex-start!important;}
-.sully-bubble-with-reply > .sully-bubble-tail{background:linear-gradient(#c9c9c9,#ababab)!important;top:calc(var(--sully-chat-avatar-size,1.75rem) / 2)!important;}
+.sully-chat-message-ai .sully-bubble-with-reply > .sully-bubble-reply-main,.sully-chat-message-ai .sully-bubble-with-reply > .sully-reply-quote{align-self:flex-start!important;}
+.sully-bubble-with-reply > .sully-bubble-tail{background:var(--sully-bubble-bg,#b8b8b8)!important;top:calc(var(--sully-chat-avatar-size,1.75rem) / 2)!important;}
 .sully-bubble-with-reply .sully-reply-quote-sender,.sully-bubble-with-reply .sully-reply-quote-preview{display:inline!important;max-width:none!important;font-size:.66rem!important;font-style:normal!important;font-weight:400!important;opacity:1!important;color:#777!important;}
 .sully-bubble-with-reply .sully-reply-quote-sender{font-weight:500!important;color:#686868!important;}
 .sully-bubble-with-reply .sully-reply-quote-sender::after{content:" ";}
@@ -333,9 +329,9 @@ PRESETS.push({
 .sully-chat-inputbar{padding-bottom:.5rem!important;}
 /* 一行消息：气泡高度锁成和头像同一个变量，两者严格等高（真实微信观感）。 */
 .sully-chat-message-short .sully-bubble-ai,.sully-chat-message-short .sully-bubble-user{height:var(--sully-chat-avatar-size,1.75rem)!important;min-height:var(--sully-chat-avatar-size,1.75rem)!important;max-height:var(--sully-chat-avatar-size,1.75rem)!important;padding-top:0!important;padding-bottom:0!important;box-sizing:border-box!important;}
-.sully-chat-message-short .sully-bubble-with-reply{height:auto!important;max-height:none!important;min-height:var(--sully-chat-avatar-size,1.75rem)!important;}
+.sully-chat-message-short .sully-bubble-with-reply,.sully-chat-message-short .sully-bubble-reply-main{height:auto!important;max-height:none!important;min-height:var(--sully-chat-avatar-size,1.75rem)!important;}
 .sully-chat-message-short .sully-bubble-text{font-size:13px!important;line-height:1.2!important;color:#171717!important;}
-.sully-chat-message-long .sully-bubble-text{font-size:13px!important;line-height:1.42!important;color:#171717!important;}`,
+.sully-chat-message-long .sully-bubble-text{font-size:13px!important;line-height:1.25!important;color:#171717!important;}`,
 });
 
 // 旧版本仍保留这组数据结构用于读取历史预设，但新编辑器不再显示分离的气泡代码框。

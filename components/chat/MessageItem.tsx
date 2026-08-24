@@ -1370,7 +1370,7 @@ interface MessageItemProps {
     msg: Message;
     isFirstInGroup: boolean;
     isLastInGroup: boolean;
-    /** 最后一条消息不显示底部时间，避免时间标签悬在输入框上方。 */
+    /** 流式临时消息不显示底部时间，避免时间标签在生成期间反复变化。 */
     isFinalMessage?: boolean;
     activeTheme: ChatTheme;
     charAvatar: string;
@@ -2080,7 +2080,8 @@ const MessageItem = React.memo(({
                     </div>
                 </div>
 
-                {isLastInGroup && !isFinalMessage && showTimestamp !== 'never' && (
+                {/* 已保存的最后一条也显示自己的时间；负 id 只用于流式临时预览。 */}
+                {isLastInGroup && m.id > 0 && showTimestamp !== 'never' && (
                     <div className={`sully-chat-message-time absolute top-full left-1/2 -translate-x-1/2 mt-1 px-1 text-[9px] text-slate-400/80 font-medium whitespace-nowrap pointer-events-none ${showTimestamp === 'hover' ? 'opacity-0 group-hover:opacity-100 transition-opacity' : ''}`}>
                         {formatTime(m.timestamp)}
                     </div>
@@ -3740,7 +3741,11 @@ const MessageItem = React.memo(({
             {/* Layer 4: Text Content — shown when there's visible text after stripping voice tags */}
             {/* 外语语音消息把双语文字交给下方语音条渲染，顶部不再重复正文 */}
             {displayContent && !isForeignVoiceMsg && (
-            <div ref={bubbleTextRef} className="sully-bubble-text relative z-10 text-[15px] leading-relaxed whitespace-pre-wrap break-all select-text">
+            <div
+                ref={bubbleTextRef}
+                className={`sully-bubble-text ${m.replyTo ? `sully-bubble-reply-main ${isUser ? 'sully-bubble-user' : 'sully-bubble-ai'}` : ''} relative z-10 text-[15px] leading-relaxed whitespace-pre-wrap break-all select-text`}
+                style={m.replyTo ? containerStyle : undefined}
+            >
                 {renderContent(displayContent)}
             </div>
             )}
@@ -3956,6 +3961,7 @@ const MessageItem = React.memo(({
 }, (prev, next) => {
     return prev.msg.id === next.msg.id &&
            prev.msg.content === next.msg.content &&
+           prev.msg.timestamp === next.msg.timestamp &&
            // 可交互卡片的状态活在 metadata 里（生活记录卡确认/否决、转账卡收退款）。
            // 这里不深比整个 metadata（可能含大对象），只盯这几个会改变渲染的状态位——
            // 否则用户点了「确认」，DB 已更新、消息已重载，卡片却因 memo 判等而纹丝不动。
