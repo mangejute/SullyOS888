@@ -3192,6 +3192,8 @@ const Chat: React.FC = () => {
                   .sully-bubble-with-reply .sully-bubble-text{width:100%!important;}
                  `}
                  .sully-bubble-tail{background:var(--sully-bubble-tail-bg,var(--sully-bubble-bg,#b8b8b8))!important;}
+                 .sully-chat-message-user .sully-bubble-text{color:#fff!important;}
+                 .sully-chat-message-ai .sully-bubble-text{color:#222!important;}
                  .sully-bubble-tail-ai{left:-6px!important;right:auto!important;top:50%!important;transform:translateY(-50%)!important;}
                  .sully-bubble-tail-user{right:-6px!important;left:auto!important;top:50%!important;transform:translateY(-50%) scaleX(-1)!important;}
                  .sully-bubble-tail-long{top:1rem!important;transform:none!important;}
@@ -3752,7 +3754,7 @@ const Chat: React.FC = () => {
                             msg={m}
                             isFirstInGroup={breaksWithPrevious}
                             isLastInGroup={breaksWithNext}
-                            showGroupTimestamp={retroChatCssActive && breaksWithPrevious}
+                            showGroupTimestamp={retroChatCssActive}
                             isFinalMessage={i === (finalVisibleMessageIndex >= 0 ? finalVisibleMessageIndex : displayMessages.length - 1)}
                             activeTheme={activeTheme}
                             charAvatar={char.avatar}

@@ -1992,7 +1992,7 @@ const MessageItem = React.memo(({
     const isLongMessage = measuredMultiline || alignmentText.split('\n').length >= 2;
     const commonLayout = (content: React.ReactNode) => (
         <>
-            {showGroupTimestamp && m.id > 0 && showTimestamp !== 'never' && (
+            {showGroupTimestamp && isFirstInGroup && m.id > 0 && showTimestamp !== 'never' && (
                 <div className={`sully-chat-message-time sully-chat-message-time-before px-1 text-[9px] text-slate-400/80 font-medium whitespace-nowrap pointer-events-none ${showTimestamp === 'hover' ? 'opacity-0 transition-opacity' : ''}`}>
                     {formatTime(m.timestamp)}
                 </div>
