@@ -3702,7 +3702,7 @@ const MessageItem = React.memo(({
             style={isVoiceOnlyMsg ? undefined : containerStyle}>
 
             {/* 尾巴使用独立元素，避免历史主题的 ::before/::after 规则把三角形放大。 */}
-            {!isVoiceOnlyMsg && !isModuleCard && (
+            {!isVoiceOnlyMsg && !isModuleCard && !m.replyTo && (
                 <span
                     aria-hidden="true"
                     className={`sully-bubble-tail ${isUser ? 'sully-bubble-tail-user' : 'sully-bubble-tail-ai'} ${isLongMessage ? 'sully-bubble-tail-long' : ''}`}
@@ -3754,6 +3754,12 @@ const MessageItem = React.memo(({
                 className={`sully-bubble-text ${m.replyTo ? `sully-bubble-reply-main ${isUser ? 'sully-bubble-user' : 'sully-bubble-ai'}` : ''} relative z-10 text-[15px] leading-relaxed whitespace-pre-wrap break-all select-text`}
                 style={m.replyTo ? containerStyle : undefined}
             >
+                {m.replyTo && (
+                    <span
+                        aria-hidden="true"
+                        className={`sully-bubble-tail ${isUser ? 'sully-bubble-tail-user' : 'sully-bubble-tail-ai'} ${isLongMessage ? 'sully-bubble-tail-long' : ''}`}
+                    />
+                )}
                 {renderContent(displayContent)}
             </div>
             )}
