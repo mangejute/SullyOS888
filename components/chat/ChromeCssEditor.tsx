@@ -334,6 +334,8 @@ PRESETS.push({
 .sully-chat-message-short .sully-bubble-ai,.sully-chat-message-short .sully-bubble-user{height:var(--sully-chat-avatar-size,1.75rem)!important;min-height:var(--sully-chat-avatar-size,1.75rem)!important;max-height:var(--sully-chat-avatar-size,1.75rem)!important;padding-top:0!important;padding-bottom:0!important;box-sizing:border-box!important;}
 .sully-chat-message-short .sully-bubble-tail{top:50%!important;transform:translateY(-50%)!important;}
 .sully-chat-message-short .sully-bubble-tail-user{transform:translateY(-50%) scaleX(-1)!important;}
+.sully-chat-message-short .sully-bubble-with-reply > .sully-bubble-reply-main > .sully-bubble-tail{top:50%!important;transform:translateY(-50%)!important;}
+.sully-chat-message-short .sully-bubble-with-reply > .sully-bubble-reply-main > .sully-bubble-tail-user{transform:translateY(-50%) scaleX(-1)!important;}
 .sully-chat-message-short .sully-bubble-with-reply,.sully-chat-message-short .sully-bubble-reply-main{height:auto!important;max-height:none!important;min-height:var(--sully-chat-avatar-size,1.75rem)!important;}
 .sully-chat-message-short .sully-bubble-text{font-size:13px!important;line-height:1.2!important;color:#171717!important;}
 .sully-chat-message-long .sully-bubble-text{font-size:13px!important;line-height:1.25!important;color:#171717!important;}
