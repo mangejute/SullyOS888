@@ -92,6 +92,27 @@ describe('MessageItem module layout', () => {
         expect(markup).toContain('https://example.com/char.png');
     });
 
+    it('引用消息保留主回复与紧凑引用预览两个独立层', () => {
+        const markup = renderMessage({
+            id: 31,
+            charId: 'char-1',
+            role: 'user',
+            type: 'text',
+            content: '那你先休息一下。',
+            timestamp: 31,
+            replyTo: { id: 30, name: '角色', content: '我今天已经忙了很久。' },
+        });
+
+        expect(markup).toContain('sully-bubble-with-reply');
+        expect(markup).toContain('sully-bubble-text');
+        expect(markup).toContain('sully-reply-quote');
+        expect(markup).toContain('sully-reply-quote-sender');
+        expect(markup).toContain('sully-reply-quote-preview');
+        expect(markup).toContain('引用 角色：我今天已经忙了很久。');
+        expect(markup).not.toContain('italic');
+        expect(markup).not.toContain('&quot;我今天已经忙了很久。&quot;');
+    });
+
     it('心象卡片提供长按复制提示与独立交互入口', () => {
         const markup = renderMessage({
             id: 4,

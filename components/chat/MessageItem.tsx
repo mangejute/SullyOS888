@@ -1497,6 +1497,30 @@ const MessageItem = React.memo(({
     const [imagePreviewOpen, setImagePreviewOpen] = useState(false);
     const [loadedImageUrl, setLoadedImageUrl] = useState<string | null>(null);
     const [imageLoadFailed, setImageLoadFailed] = useState(false);
+    // 仅用字符数无法可靠判断换行：窄屏下「第二行只有几个字」也可能是自然换行。
+    // 记录实际正文高度，等浏览器完成排版后再把消息切到多行布局。
+    const bubbleTextRef = useRef<HTMLDivElement | null>(null);
+    const [measuredMultiline, setMeasuredMultiline] = useState(false);
+
+    useEffect(() => {
+        const element = bubbleTextRef.current;
+        if (!element || isSystem || m.type !== 'text') return;
+
+        const measure = () => {
+            const style = window.getComputedStyle(element);
+            const lineHeight = Number.parseFloat(style.lineHeight);
+            if (!Number.isFinite(lineHeight) || lineHeight <= 0) return;
+            // 1.35 留出字体抗锯齿和小数像素误差，只有确实出现第二行才切换。
+            const next = element.scrollHeight > lineHeight * 1.35;
+            setMeasuredMultiline(previous => previous === next ? previous : next);
+        };
+
+        measure();
+        if (typeof ResizeObserver === 'undefined') return;
+        const observer = new ResizeObserver(measure);
+        observer.observe(element);
+        return () => observer.disconnect();
+    }, [m.id, m.content, isSystem]);
 
     // 先把图片完整下载并解码，再交给页面显示，避免浏览器把渐进式图片一截一截地绘制出来。
     useEffect(() => {
@@ -1959,10 +1983,10 @@ const MessageItem = React.memo(({
             </div>
         </div>
     ) : null;
-    // 头像对齐按消息高度分两档：短消息居中，超过两行的消息贴气泡顶部。
-    // 用正文长度和显式换行作稳定估算，避免依赖浏览器逐字测量造成布局抖动。
+    // 头像对齐按消息高度分两档：短消息居中，超过一行的消息贴气泡顶部。
+    // 显式换行立即生效；自然换行由上面的 ResizeObserver 根据实际排版补上。
     const alignmentText = String(m.content || '').replace(/<[^>]*>/g, '').trim();
-    const isLongMessage = alignmentText.split('\n').length > 2 || alignmentText.length > 28;
+    const isLongMessage = measuredMultiline || alignmentText.split('\n').length >= 2;
     const commonLayout = (content: React.ReactNode) => (
         <>
             {centerModules && thinkingChainNode && (
@@ -3704,16 +3728,19 @@ const MessageItem = React.memo(({
 
             {/* Layer 3: Reply/Quote Block */}
             {m.replyTo && (
-                <div className="sully-reply-quote relative z-10 mb-1 text-[10px] bg-black/5 p-1.5 rounded-md border-l-2 border-current opacity-60 flex flex-col gap-0.5 max-w-full overflow-hidden">
-                    <span className="font-bold opacity-90 truncate">{m.replyTo.name}</span>
-                    <span className="truncate italic">"{replyPreview.length > 10 ? replyPreview.slice(0, 10) + '...' : replyPreview}"</span>
+                <div
+                    className="sully-reply-quote relative z-10 mb-1 text-[10px] bg-black/5 p-1.5 rounded-md border-l-2 border-current opacity-60 flex flex-col gap-0.5 max-w-full overflow-hidden"
+                    aria-label={`引用 ${m.replyTo.name}：${replyPreview}`}
+                >
+                    <span className="sully-reply-quote-sender font-bold opacity-90 truncate">{m.replyTo.name}</span>
+                    <span className="sully-reply-quote-preview truncate">{replyPreview.length > 24 ? replyPreview.slice(0, 24) + '…' : replyPreview}</span>
                 </div>
             )}
 
             {/* Layer 4: Text Content — shown when there's visible text after stripping voice tags */}
             {/* 外语语音消息把双语文字交给下方语音条渲染，顶部不再重复正文 */}
             {displayContent && !isForeignVoiceMsg && (
-            <div className="sully-bubble-text relative z-10 text-[15px] leading-relaxed whitespace-pre-wrap break-all select-text">
+            <div ref={bubbleTextRef} className="sully-bubble-text relative z-10 text-[15px] leading-relaxed whitespace-pre-wrap break-all select-text">
                 {renderContent(displayContent)}
             </div>
             )}

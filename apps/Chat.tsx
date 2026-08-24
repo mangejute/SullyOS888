@@ -3167,12 +3167,25 @@ const Chat: React.FC = () => {
                  .sully-chat-info{top:calc(50% + .18rem)!important;transform:translate(-50%,-50%)!important;}
                  .sully-chat-info .sully-chat-status{margin-top:.18rem!important;}
                   .sully-chat-message-avatar-slot,.sully-chat-message-avatar,.sully-chat-message-avatar-img{width:var(--sully-chat-avatar-size)!important;height:var(--sully-chat-avatar-size)!important;box-sizing:border-box!important;}
+                  .sully-chat-message-avatar-slot,.sully-chat-message-avatar{line-height:0!important;}
+                  .sully-chat-message-avatar-img{display:block!important;vertical-align:top!important;}
                  .sully-bubble-ai,.sully-bubble-user{min-height:var(--sully-chat-avatar-size)!important;padding:.28rem .72rem!important;display:flex!important;align-items:center!important;}
                  .sully-bubble-ai,.sully-bubble-user{border-radius:4px!important;}
-                 /* 微信引用消息：引用内容独占一行，正文排在下面，避免与当前消息横向挤压。 */
+                 ${retroChatCssActive ? `
+                  /* 微信引用消息：当前回复保留主气泡，原消息显示为其下方紧凑的灰色引用条。 */
+                  .sully-bubble-with-reply{display:flex!important;flex-direction:column!important;align-items:stretch!important;width:max-content!important;max-width:100%!important;height:auto!important;min-height:var(--sully-chat-avatar-size)!important;max-height:none!important;background:transparent!important;border:0!important;box-shadow:none!important;padding:0!important;gap:.25rem!important;}
+                  .sully-bubble-with-reply > .sully-bubble-text{display:block!important;order:1!important;align-self:flex-end!important;box-sizing:border-box!important;max-width:100%!important;background:linear-gradient(#c9c9c9,#ababab)!important;color:#171717!important;border:1px solid #6d6d6d!important;border-radius:4px!important;box-shadow:inset 0 1px rgba(255,255,255,.65),0 1px 1px rgba(0,0,0,.16)!important;padding:.28rem .72rem!important;min-height:var(--sully-chat-avatar-size)!important;}
+                  .sully-bubble-with-reply > .sully-reply-quote{display:block!important;order:2!important;align-self:flex-end!important;width:min(12rem,76vw)!important;flex:0 0 auto!important;box-sizing:border-box!important;margin:0!important;padding:.22rem .45rem!important;background:#d3d3d3!important;color:#777!important;border:0!important;border-radius:2px!important;opacity:1!important;overflow:hidden!important;white-space:nowrap!important;text-overflow:ellipsis!important;line-height:1.25!important;}
+                  .sully-chat-message-ai .sully-bubble-with-reply > .sully-bubble-text,.sully-chat-message-ai .sully-bubble-with-reply > .sully-reply-quote{align-self:flex-start!important;}
+                  .sully-bubble-with-reply > .sully-bubble-tail{background:linear-gradient(#c9c9c9,#ababab)!important;top:calc(var(--sully-chat-avatar-size) / 2)!important;}
+                  .sully-bubble-with-reply .sully-reply-quote-sender,.sully-bubble-with-reply .sully-reply-quote-preview{display:inline!important;max-width:none!important;font-size:.66rem!important;font-style:normal!important;font-weight:400!important;opacity:1!important;color:#777!important;}
+                  .sully-bubble-with-reply .sully-reply-quote-sender{font-weight:500!important;color:#686868!important;}
+                  .sully-bubble-with-reply .sully-reply-quote-sender::after{content:" ";}
+                 ` : `
                   .sully-bubble-with-reply{display:flex!important;flex-direction:column!important;align-items:stretch!important;height:auto!important;min-height:var(--sully-chat-avatar-size)!important;max-height:none!important;}
                   .sully-bubble-with-reply .sully-reply-quote{width:100%!important;flex:0 0 auto!important;box-sizing:border-box!important;margin:0 0 .35rem!important;padding:.3rem .45rem!important;background:rgba(0,0,0,.055)!important;border-left:2px solid rgba(80,80,80,.45)!important;border-radius:2px!important;opacity:1!important;overflow:hidden!important;}
                   .sully-bubble-with-reply .sully-bubble-text{width:100%!important;}
+                 `}
                  .sully-bubble-tail{background:inherit!important;}
                  .sully-bubble-tail-ai{left:-7px!important;right:auto!important;top:50%!important;transform:translateY(-50%)!important;}
                  .sully-bubble-tail-user{right:-7px!important;left:auto!important;top:50%!important;transform:translateY(-50%) scaleX(-1)!important;}
