@@ -550,7 +550,7 @@ const ChatInputArea: React.FC<ChatInputAreaProps> = ({
                             className={`sully-chat-emoji-button ${retroInputLayout ? sendButtonClass : actionButtonClass}`}
                             aria-label="表情"
                         >
-                            <Smiley className="w-6 h-6" weight="regular" />
+                            <Smiley className="w-6 h-6" weight="fill" />
                         </button>
                     )}
                     <button

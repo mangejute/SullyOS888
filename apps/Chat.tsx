@@ -3185,16 +3185,19 @@ const Chat: React.FC = () => {
                   .sully-bubble-with-reply{margin-top:var(--sully-chat-bubble-mt,0)!important;}
                   .sully-bubble-with-reply .sully-bubble-reply-main{margin-top:0!important;}
                  ${retroChatCssActive ? `
-                  /* 复古微信正文气泡：角色浅灰、用户深灰；引用只附加摘要，不改变正文气泡。 */
-                   .sully-bubble-ai{--sully-bubble-tail-fill:linear-gradient(#f7f7f7,#d8d8d8)!important;--sully-bubble-tail-border:#555!important;--sully-bubble-tail-shadow:rgba(0,0,0,.18)!important;background:linear-gradient(#f7f7f7,#d8d8d8)!important;color:#222!important;border:1px solid #b8b8b8!important;box-shadow:inset 0 1px #fff,0 1px 2px rgba(0,0,0,.18)!important;}
-                   /* 角色侧直接使用用户给的完整气泡图。九宫格只拉伸中间，不把左侧折角压扁。 */
-                   .sully-bubble-ai.sully-bubble-ai-reference-single,.sully-bubble-ai.sully-bubble-ai-reference-multiline{background:transparent!important;border:1px solid transparent!important;border-radius:0!important;border-image-repeat:stretch!important;border-image-width:6px 8px 6px 12px!important;border-image-outset:6px 8px 6px 12px!important;box-shadow:none!important;margin-top:calc(var(--sully-chat-bubble-mt,0px) + 6px)!important;}
-                   .sully-bubble-ai.sully-bubble-ai-reference-single{border-image-source:url('./chat-themes/retro-wechat-ai-single.png')!important;border-image-slice:10 8 8 12 fill!important;}
-                   .sully-bubble-ai.sully-bubble-ai-reference-multiline{border-image-source:url('./chat-themes/retro-wechat-ai-multiline.png')!important;border-image-slice:9 8 33 12 fill!important;}
-                   .sully-bubble-user{--sully-bubble-tail-fill:linear-gradient(#4a4a4a,#282828)!important;--sully-bubble-tail-border:#1d1d1d!important;--sully-bubble-tail-shadow:rgba(0,0,0,.35)!important;background:linear-gradient(#4a4a4a,#282828)!important;color:#fff!important;border:1px solid #1d1d1d!important;box-shadow:inset 0 1px rgba(255,255,255,.16),0 1px 2px rgba(0,0,0,.35)!important;}
-                   /* 尾巴与气泡本体是兄弟节点，颜色变量必须在尾巴自身上再声明一次。 */
-                   .sully-bubble-tail-ai{--sully-bubble-tail-start:#f7f7f7!important;--sully-bubble-tail-end:#d8d8d8!important;--sully-bubble-tail-border:#555!important;}
-                   .sully-bubble-tail-user{--sully-bubble-tail-start:#4a4a4a!important;--sully-bubble-tail-end:#282828!important;--sully-bubble-tail-border:#1d1d1d!important;}
+                  /* 复古微信正文气泡：角色浅灰、用户深灰；引用只附加摘要，不改变正文气泡。
+                     高光渐变固定在 --sully-bubble-sheen 内走完再续接同色纯色，气泡自身无缝，
+                     但尾巴那一段的颜色不再随气泡高度漂移，尾巴才能复用同一条渐变做到同色。 */
+                   /* 尾巴的伪元素挂在 .sully-bubble-layer（气泡的父级）上，CSS 变量只向下继承，
+                      所以这个值必须声明在消息行上；写在气泡本体上父级读不到，尾巴会整个变透明。 */
+                   .sully-chat-message-ai{--sully-tail-img:url('./chat-themes/retro-wechat-tail-ai.png')!important;}
+                   .sully-chat-message-user{--sully-tail-img:url('./chat-themes/retro-wechat-tail-user.png')!important;}
+                   .sully-bubble-ai{background:linear-gradient(#f7f7f7,#d8d8d8) 0 0/100% var(--sully-bubble-sheen) no-repeat,#d8d8d8!important;color:#222!important;border:1px solid #b8b8b8!important;box-shadow:inset 0 1px #fff,0 1px 2px rgba(0,0,0,.18)!important;}
+                   /* 角色侧一度改用 PNG 素材（border-image，尾巴画在图里），现已回到纯 CSS；这里关掉素材残留。 */
+                   .sully-bubble-ai.sully-bubble-ai-reference-single,.sully-bubble-ai.sully-bubble-ai-reference-multiline{border-image:none!important;background:linear-gradient(#f7f7f7,#d8d8d8) 0 0/100% var(--sully-bubble-sheen) no-repeat,#d8d8d8!important;border:1px solid #b8b8b8!important;border-radius:4px!important;box-shadow:inset 0 1px #fff,0 1px 2px rgba(0,0,0,.18)!important;margin-top:var(--sully-chat-bubble-mt,8px)!important;}
+                   .sully-bubble-user{background:linear-gradient(#4a4a4a,#282828) 0 0/100% var(--sully-bubble-sheen) no-repeat,#282828!important;color:#fff!important;border:1px solid #1d1d1d!important;box-shadow:inset 0 1px rgba(255,255,255,.16),0 1px 2px rgba(0,0,0,.35)!important;}
+                   /* 尾巴改由伪元素绘制（见下），MessageItem 的 SVG 节点在复古微信下不使用。 */
+                   .sully-chat-root .sully-bubble-tail{display:none!important;}
                   /* 微信引用消息：当前回复保留主气泡，原消息显示为其下方紧凑的灰色引用条。 */
                   .sully-bubble-with-reply{display:flex!important;flex-direction:column!important;align-items:stretch!important;width:max-content!important;max-width:100%!important;height:auto!important;min-height:var(--sully-chat-avatar-size)!important;max-height:none!important;background:transparent!important;border:0!important;box-shadow:none!important;padding:0!important;gap:0!important;}
                   .sully-bubble-with-reply > .sully-bubble-reply-stack{display:block!important;order:1!important;align-self:flex-end!important;width:fit-content!important;min-width:0!important;box-sizing:border-box!important;max-width:100%!important;margin-top:0!important;}
@@ -3205,6 +3208,17 @@ const Chat: React.FC = () => {
                   .sully-bubble-with-reply .sully-reply-quote-sender,.sully-bubble-with-reply .sully-reply-quote-preview{display:inline!important;max-width:none!important;font-size:.66rem!important;font-style:normal!important;font-weight:400!important;opacity:1!important;color:#777!important;}
                   .sully-bubble-with-reply .sully-reply-quote-sender{font-weight:500!important;color:#686868!important;}
                   .sully-bubble-with-reply .sully-reply-quote-sender::after{content:" ";}
+                  /* 气泡尾巴：改用 PNG 素材（retro-wechat-tail-ai/user.png，9×15），填充与 1px 描边已画在图里，
+                     不再用 clip-path + drop-shadow（drop-shadow 的偏移会先于 clip-path 生成、再被 clip-path 整个裁掉，描边画不出来）。
+                     位置只认 --sully-tail-top（≡ 头像中线），与气泡高度无关：
+                     单行时正好落在气泡中线上，多行时原地不动。 */
+                  .sully-chat-root{--sully-bubble-sheen:var(--sully-chat-avatar-size,1.75rem);--sully-tail-w:9px;--sully-tail-h:15px;--sully-tail-top:calc(var(--sully-chat-avatar-size,1.75rem) / 2 - var(--sully-tail-h) / 2);--sully-tail-overlap:1px;}
+                  .sully-chat-root .sully-bubble-layer:not(:has(> .sully-bubble-with-reply))::before,
+                  .sully-chat-root .sully-bubble-reply-stack::before{content:""!important;position:absolute!important;top:var(--sully-tail-top)!important;width:var(--sully-tail-w)!important;height:var(--sully-tail-h)!important;box-sizing:border-box!important;margin:0!important;padding:0!important;background:var(--sully-tail-img) 0 0/100% 100% no-repeat!important;clip-path:none!important;filter:none!important;border:0!important;z-index:3!important;pointer-events:none!important;}
+                  .sully-chat-root .sully-chat-message-ai .sully-bubble-layer:not(:has(> .sully-bubble-with-reply))::before,
+                  .sully-chat-root .sully-chat-message-ai .sully-bubble-reply-stack::before{left:calc(-1 * var(--sully-tail-w) + var(--sully-tail-overlap))!important;right:auto!important;}
+                  .sully-chat-root .sully-chat-message-user .sully-bubble-layer:not(:has(> .sully-bubble-with-reply))::before,
+                  .sully-chat-root .sully-chat-message-user .sully-bubble-reply-stack::before{right:calc(-1 * var(--sully-tail-w) + var(--sully-tail-overlap))!important;left:auto!important;}
                  ` : `
                   .sully-bubble-with-reply{display:flex!important;flex-direction:column!important;align-items:stretch!important;height:auto!important;min-height:var(--sully-chat-avatar-size)!important;max-height:none!important;}
                   .sully-bubble-with-reply .sully-reply-quote{width:100%!important;flex:0 0 auto!important;box-sizing:border-box!important;margin:0 0 .35rem!important;padding:.3rem .45rem!important;background:rgba(0,0,0,.055)!important;border-left:2px solid rgba(80,80,80,.45)!important;border-radius:2px!important;opacity:1!important;overflow:hidden!important;}
@@ -3220,8 +3234,6 @@ const Chat: React.FC = () => {
                   .sully-bubble-tail-long{top:calc(var(--sully-chat-avatar-size,1.75rem) / 2)!important;}
                  /* 一行消息：气泡高度锁成和头像同一个变量，两者严格等高（真实微信观感）。 */
                   .sully-chat-message-short .sully-bubble-ai,.sully-chat-message-short .sully-bubble-user{height:var(--sully-chat-avatar-size)!important;min-height:var(--sully-chat-avatar-size)!important;max-height:var(--sully-chat-avatar-size)!important;padding-top:0!important;padding-bottom:0!important;box-sizing:border-box!important;}
-                  /* 图片的上下描边各占 6px，正文盒子减去这 12px 后，单行成品仍与头像严格同高。 */
-                  .sully-chat-message-short .sully-bubble-ai.sully-bubble-ai-reference-single{height:calc(var(--sully-chat-avatar-size) - 12px)!important;min-height:calc(var(--sully-chat-avatar-size) - 12px)!important;max-height:calc(var(--sully-chat-avatar-size) - 12px)!important;padding-top:0!important;padding-bottom:0!important;box-sizing:border-box!important;}
                   .sully-chat-message-short .sully-bubble-tail{top:calc(var(--sully-chat-avatar-size,1.75rem) / 2)!important;}
                   .sully-chat-message-short .sully-bubble-tail-ai{transform:translateY(-50%)!important;}
                   .sully-chat-message-short .sully-bubble-tail-user{transform:translateY(-50%) scaleX(-1)!important;}
@@ -3571,11 +3583,11 @@ const Chat: React.FC = () => {
                  showOnlineStatus={false}
                  onShowCharsPanel={() => setShowPanel('chars')}
                 topActions={[
-                    { label: '视频通话', icon: <Phone className="w-5 h-5" weight="regular" />, onClick: () => {
+                    { label: '视频通话', icon: <Phone className="w-5 h-5" weight="fill" />, onClick: () => {
                         try { localStorage.setItem('sully-call-direct-video-intent-v1', JSON.stringify({ charId: char.id, at: Date.now(), returnTo: 'chat' })); } catch { /* private WebView */ }
                         openApp(AppID.Call);
                     } },
-                    { label: '聊天设置', icon: <GearSix className="w-5 h-5" weight="regular" />, onClick: () => setModalType('chat-settings') },
+                    { label: '聊天设置', icon: <GearSix className="w-5 h-5" weight="fill" />, onClick: () => setModalType('chat-settings') },
                 ]}
                  onDeleteBuff={(buffId) => {
                     const currentBuffs = char.activeBuffs || [];
