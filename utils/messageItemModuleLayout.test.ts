@@ -92,27 +92,53 @@ describe('MessageItem module layout', () => {
         expect(markup).toContain('https://example.com/char.png');
     });
 
-    it.each([
-        ['用户', 'user', 'sully-bubble-tail-user', 'sully-bubble-user'],
-        ['角色', 'assistant', 'sully-bubble-tail-ai', 'sully-bubble-ai'],
-    ] as const)('%s普通消息的尾巴在气泡本体之前渲染', (_label, role, tailClass, bubbleClass) => {
+    it('用户普通消息的独立尾巴在气泡本体之前渲染', () => {
         const markup = renderMessage({
-            id: role === 'user' ? 21 : 22,
+            id: 21,
             charId: 'char-1',
-            role,
+            role: 'user',
             type: 'text',
             content: '尾巴层级检查',
             timestamp: 21,
         });
 
-        const tailIndex = markup.indexOf(tailClass);
-        const bubbleIndex = markup.indexOf(bubbleClass, tailIndex);
+        const tailIndex = markup.indexOf('sully-bubble-tail-user');
+        const bubbleIndex = markup.indexOf('sully-bubble-user', tailIndex);
 
         // 尾巴是气泡的下层兄弟节点：先渲染尾巴，再渲染 z-index 更高的正文气泡。
         expect(tailIndex).toBeGreaterThan(-1);
         expect(bubbleIndex).toBeGreaterThan(tailIndex);
         expect(markup.slice(tailIndex, bubbleIndex)).toContain('sully-bubble-tail-inner');
         expect(markup.slice(tailIndex, bubbleIndex)).toContain('linearGradient');
+    });
+
+    it('角色普通消息直接使用用户提供的单行气泡素材，不再生成 SVG 尾巴', () => {
+        const markup = renderMessage({
+            id: 23,
+            charId: 'char-1',
+            role: 'assistant',
+            type: 'text',
+            content: '角色尾巴形状检查',
+            timestamp: 23,
+        });
+
+        expect(markup).toContain('sully-bubble-ai sully-bubble-ai-reference-single');
+        expect(markup).not.toContain('sully-bubble-tail-ai');
+        expect(markup).not.toContain('sully-bubble-tail-svg-ai');
+    });
+
+    it('角色多行消息直接使用用户提供的多行气泡素材', () => {
+        const markup = renderMessage({
+            id: 24,
+            charId: 'char-1',
+            role: 'assistant',
+            type: 'text',
+            content: '第一行\n第二行',
+            timestamp: 24,
+        });
+
+        expect(markup).toContain('sully-bubble-ai sully-bubble-ai-reference-multiline');
+        expect(markup).not.toContain('sully-bubble-tail-ai');
     });
 
     it('引用消息保留主回复与紧凑引用预览两个独立层', () => {
@@ -132,7 +158,7 @@ describe('MessageItem module layout', () => {
         expect(markup).not.toMatch(/class="[^"]*sully-bubble-with-reply[^"]*sully-bubble-(?:ai|user)/);
         expect(markup).toContain('sully-bubble-text');
         expect(markup).toContain('sully-bubble-reply-main sully-bubble-user');
-        // 尾巴由描边外层和继承气泡填充的内层共同组成；引用摘要不会抢走定位参照物。
+        // 用户的引用正文和普通用户气泡是同一类；引用摘要不会抢走定位参照物。
         expect(markup).toContain('sully-bubble-tail sully-bubble-tail-user');
         expect(markup).toContain('sully-bubble-tail-inner');
         expect(markup).toContain('sully-reply-quote');
@@ -148,7 +174,7 @@ describe('MessageItem module layout', () => {
         expect(mainBubbleIndex).toBeGreaterThan(tailIndex);
     });
 
-    it('角色引用时，正文也复用角色侧的普通气泡类', () => {
+    it('角色引用时，正文也使用用户提供的角色气泡素材', () => {
         const markup = renderMessage({
             id: 32,
             charId: 'char-1',
@@ -159,9 +185,8 @@ describe('MessageItem module layout', () => {
             replyTo: { id: 31, name: '我', content: '那你先休息一下。' },
         });
 
-        expect(markup).toContain('sully-bubble-reply-main sully-bubble-ai');
-        expect(markup).toContain('sully-bubble-tail sully-bubble-tail-ai');
-        expect(markup).toContain('sully-bubble-tail-inner');
+        expect(markup).toContain('sully-bubble-reply-main sully-bubble-ai sully-bubble-ai-reference-single');
+        expect(markup).not.toContain('sully-bubble-tail-ai');
     });
 
     it('心象卡片提供长按复制提示与独立交互入口', () => {

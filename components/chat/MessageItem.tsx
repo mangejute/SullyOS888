@@ -2001,16 +2001,24 @@ const MessageItem = React.memo(({
     // 显式换行立即生效；自然换行由上面的 ResizeObserver 根据实际排版补上。
     const alignmentText = String(m.content || '').replace(/<[^>]*>/g, '').trim();
     const isLongMessage = measuredMultiline || alignmentText.split('\n').length >= 2;
-    // 尾巴必须是气泡本体的下层兄弟节点，不能作为本体子元素再靠负 z-index 猜绘制顺序。
-    // 用 SVG 的外描边 + 内填充，而不是嵌套的 clip-path 三角形，避免内层被裁掉后变成空心。
-    // 气泡本体会稳定盖住尾巴收进来的那一半；单行、多行和引用正文都用同一定位方式。
+    // 角色侧不再用代码拼尾巴：复古微信主题会直接铺用户提供的单行 / 多行气泡图片。
+    // 用户侧仍保留独立尾巴，引用摘要也不会影响它的定位。
+    const aiBubbleReferenceClass = !isUser
+        ? (isLongMessage ? 'sully-bubble-ai-reference-multiline' : 'sully-bubble-ai-reference-single')
+        : '';
     const tailGradientId = `sully-bubble-tail-gradient-${tailSvgInstanceId}`;
-    const renderBubbleTail = () => (
+    // 角色侧气泡完全使用用户提供的 PNG 素材，不保留 CSS/SVG 的备用画法。
+    // 用户侧仍沿用已确认的独立尾巴。
+    const renderBubbleTail = () => isUser ? (
         <span
             aria-hidden="true"
-            className={`sully-bubble-tail ${isUser ? 'sully-bubble-tail-user' : 'sully-bubble-tail-ai'}`}
+            className="sully-bubble-tail sully-bubble-tail-user"
         >
-            <svg className="sully-bubble-tail-svg" viewBox="0 0 12 12" focusable="false">
+            <svg
+                className="sully-bubble-tail-svg sully-bubble-tail-svg-user"
+                viewBox="0 0 12 12"
+                focusable="false"
+            >
                 <defs>
                     <linearGradient id={tailGradientId} x1="0" y1="0" x2="0" y2="1">
                         <stop offset="0%" className="sully-bubble-tail-stop-start" />
@@ -2021,7 +2029,7 @@ const MessageItem = React.memo(({
                 <path className="sully-bubble-tail-inner" d="M10.65 1.55V10.45L1.65 6Z" fill={`url(#${tailGradientId})`} />
             </svg>
         </span>
-    );
+    ) : null;
     const commonLayout = (content: React.ReactNode) => (
         <>
             {showGroupTimestamp && startsTimestampGroup && m.id > 0 && showTimestamp !== 'never' && (
@@ -3743,7 +3751,7 @@ const MessageItem = React.memo(({
         {!isVoiceOnlyMsg && !isModuleCard && !m.replyTo && renderBubbleTail()}
         <div className={isVoiceOnlyMsg
             ? `relative ${suppressEntranceAnimation ? '' : 'animate-fade-in'}`
-            : `relative ${bubbleVariant === 'flat' || bubbleVariant === 'outline' || bubbleVariant === 'wechat' ? '' : 'shadow-sm '}px-5 py-3 ${suppressEntranceAnimation ? '' : 'animate-fade-in'} ${bubbleVariant === 'outline' ? 'sully-bubble-outline' : 'border border-black/5 '}active:scale-[0.98] transition-transform overflow-visible ${m.replyTo ? 'sully-bubble-with-reply' : (isUser ? 'sully-bubble-user' : 'sully-bubble-ai')}`}
+            : `relative ${bubbleVariant === 'flat' || bubbleVariant === 'outline' || bubbleVariant === 'wechat' ? '' : 'shadow-sm '}px-5 py-3 ${suppressEntranceAnimation ? '' : 'animate-fade-in'} ${bubbleVariant === 'outline' ? 'sully-bubble-outline' : 'border border-black/5 '}active:scale-[0.98] transition-transform overflow-visible ${m.replyTo ? 'sully-bubble-with-reply' : (isUser ? 'sully-bubble-user' : `sully-bubble-ai ${aiBubbleReferenceClass}`)}`}
             style={isVoiceOnlyMsg ? undefined : containerStyle}>
 
             {/* Layer 1: Background Image with Independent Opacity */}
@@ -3790,7 +3798,7 @@ const MessageItem = React.memo(({
                     {!isVoiceOnlyMsg && !isModuleCard && renderBubbleTail()}
                     <div
                         ref={bubbleTextRef}
-                        className={`sully-bubble-text sully-bubble-reply-main ${isUser ? 'sully-bubble-user' : 'sully-bubble-ai'} relative z-10 text-[15px] leading-relaxed whitespace-pre-wrap break-all select-text`}
+                        className={`sully-bubble-text sully-bubble-reply-main ${isUser ? 'sully-bubble-user' : `sully-bubble-ai ${aiBubbleReferenceClass}`} relative z-10 text-[15px] leading-relaxed whitespace-pre-wrap break-all select-text`}
                         style={containerStyle}
                     >
                         {renderContent(displayContent)}

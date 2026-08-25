@@ -3183,10 +3183,14 @@ const Chat: React.FC = () => {
                   .sully-bubble-ai,.sully-bubble-user{border-radius:4px!important;}
                   /* 引用外壳只负责排列正文和引用条，不再被当成一个气泡。 */
                   .sully-bubble-with-reply{margin-top:var(--sully-chat-bubble-mt,0)!important;}
-                  .sully-bubble-with-reply > .sully-bubble-reply-main{margin-top:0!important;}
+                  .sully-bubble-with-reply .sully-bubble-reply-main{margin-top:0!important;}
                  ${retroChatCssActive ? `
                   /* 复古微信正文气泡：角色浅灰、用户深灰；引用只附加摘要，不改变正文气泡。 */
                    .sully-bubble-ai{--sully-bubble-tail-fill:linear-gradient(#f7f7f7,#d8d8d8)!important;--sully-bubble-tail-border:#555!important;--sully-bubble-tail-shadow:rgba(0,0,0,.18)!important;background:linear-gradient(#f7f7f7,#d8d8d8)!important;color:#222!important;border:1px solid #b8b8b8!important;box-shadow:inset 0 1px #fff,0 1px 2px rgba(0,0,0,.18)!important;}
+                   /* 角色侧直接使用用户给的完整气泡图。九宫格只拉伸中间，不把左侧折角压扁。 */
+                   .sully-bubble-ai.sully-bubble-ai-reference-single,.sully-bubble-ai.sully-bubble-ai-reference-multiline{background:transparent!important;border:1px solid transparent!important;border-radius:0!important;border-image-repeat:stretch!important;border-image-width:6px 8px 6px 12px!important;border-image-outset:6px 8px 6px 12px!important;box-shadow:none!important;margin-top:calc(var(--sully-chat-bubble-mt,0px) + 6px)!important;}
+                   .sully-bubble-ai.sully-bubble-ai-reference-single{border-image-source:url('./chat-themes/retro-wechat-ai-single.png')!important;border-image-slice:10 8 8 12 fill!important;}
+                   .sully-bubble-ai.sully-bubble-ai-reference-multiline{border-image-source:url('./chat-themes/retro-wechat-ai-multiline.png')!important;border-image-slice:9 8 33 12 fill!important;}
                    .sully-bubble-user{--sully-bubble-tail-fill:linear-gradient(#4a4a4a,#282828)!important;--sully-bubble-tail-border:#1d1d1d!important;--sully-bubble-tail-shadow:rgba(0,0,0,.35)!important;background:linear-gradient(#4a4a4a,#282828)!important;color:#fff!important;border:1px solid #1d1d1d!important;box-shadow:inset 0 1px rgba(255,255,255,.16),0 1px 2px rgba(0,0,0,.35)!important;}
                    /* 尾巴与气泡本体是兄弟节点，颜色变量必须在尾巴自身上再声明一次。 */
                    .sully-bubble-tail-ai{--sully-bubble-tail-start:#f7f7f7!important;--sully-bubble-tail-end:#d8d8d8!important;--sully-bubble-tail-border:#555!important;}
@@ -3210,11 +3214,14 @@ const Chat: React.FC = () => {
                  .sully-chat-message-user .sully-bubble-text,.sully-chat-message-user .sully-bubble-text *{color:#fff!important;}
                  .sully-chat-message-ai .sully-bubble-text,.sully-chat-message-ai .sully-bubble-text *{color:#222!important;}
                  .sully-chat-emoji-button,.sully-chat-send-button{width:1.95rem!important;min-width:1.95rem!important;max-width:1.95rem!important;height:1.95rem!important;min-height:1.95rem!important;max-height:1.95rem!important;flex:0 0 1.95rem!important;box-sizing:border-box!important;padding:.25rem!important;}
-                 .sully-bubble-tail-ai{left:-8px!important;right:auto!important;top:calc(var(--sully-chat-avatar-size,1.75rem) / 2)!important;transform:translateY(-50%)!important;}
+                 .sully-bubble-tail-ai{width:12px!important;height:10px!important;left:-12px!important;right:auto!important;top:calc(var(--sully-chat-avatar-size,1.75rem) / 2)!important;transform:translateY(-50%)!important;}
+                 .sully-bubble-tail-ai .sully-bubble-tail-svg{width:12px!important;height:10px!important;}
                  .sully-bubble-tail-user{right:-8px!important;left:auto!important;top:calc(var(--sully-chat-avatar-size,1.75rem) / 2)!important;transform:translateY(-50%) scaleX(-1)!important;}
-                 .sully-bubble-tail-long{top:calc(var(--sully-chat-avatar-size,1.75rem) / 2)!important;}
+                  .sully-bubble-tail-long{top:calc(var(--sully-chat-avatar-size,1.75rem) / 2)!important;}
                  /* 一行消息：气泡高度锁成和头像同一个变量，两者严格等高（真实微信观感）。 */
                   .sully-chat-message-short .sully-bubble-ai,.sully-chat-message-short .sully-bubble-user{height:var(--sully-chat-avatar-size)!important;min-height:var(--sully-chat-avatar-size)!important;max-height:var(--sully-chat-avatar-size)!important;padding-top:0!important;padding-bottom:0!important;box-sizing:border-box!important;}
+                  /* 图片的上下描边各占 6px，正文盒子减去这 12px 后，单行成品仍与头像严格同高。 */
+                  .sully-chat-message-short .sully-bubble-ai.sully-bubble-ai-reference-single{height:calc(var(--sully-chat-avatar-size) - 12px)!important;min-height:calc(var(--sully-chat-avatar-size) - 12px)!important;max-height:calc(var(--sully-chat-avatar-size) - 12px)!important;padding-top:0!important;padding-bottom:0!important;box-sizing:border-box!important;}
                   .sully-chat-message-short .sully-bubble-tail{top:calc(var(--sully-chat-avatar-size,1.75rem) / 2)!important;}
                   .sully-chat-message-short .sully-bubble-tail-ai{transform:translateY(-50%)!important;}
                   .sully-chat-message-short .sully-bubble-tail-user{transform:translateY(-50%) scaleX(-1)!important;}
@@ -3229,6 +3236,10 @@ const Chat: React.FC = () => {
                     于是「头像外框顶 === 气泡外框顶」是恒等式，改气泡间距时两者自动同步。 */
                  .sully-chat-root{--sully-chat-bubble-mt:8px;--sully-chat-avatar-size:1.75rem;}
                  .sully-bubble-ai,.sully-bubble-user{margin-top:var(--sully-chat-bubble-mt)!important;}
+                 /* 普通正文和引用正文的定位参照不同：引用外壳已经承担了顶部节距。 */
+                 .sully-bubble-layer > .sully-bubble-tail{top:calc(var(--sully-chat-bubble-mt,0px) + var(--sully-chat-avatar-size,1.75rem) / 2)!important;}
+                 .sully-bubble-reply-stack > .sully-bubble-tail{top:calc(var(--sully-chat-avatar-size,1.75rem) / 2)!important;}
+                 .sully-bubble-with-reply .sully-bubble-reply-main{margin-top:0!important;}
                  /* 两行及以上：头像外框顶与气泡外框顶严格齐平。 */
                  .sully-chat-message-long .sully-chat-message-avatar-slot{top:var(--sully-chat-bubble-mt)!important;bottom:auto!important;transform:none!important;}
                   /* 一行和多行都从同一个顶部间距开始；短消息因气泡锁高而与头像严格同高。 */

@@ -74,6 +74,19 @@
     z-index: 2;
   }
 
+  /* 普通正文有顶部节距，尾巴跟着补偿；引用正文的定位容器已经随外壳下移一次。 */
+  .sully-bubble-layer > .sully-bubble-tail {
+    top: calc(var(--sully-chat-bubble-mt, 0px) + var(--sully-chat-avatar-size, 1.75rem) / 2);
+  }
+
+  .sully-bubble-reply-stack > .sully-bubble-tail {
+    top: calc(var(--sully-chat-avatar-size, 1.75rem) / 2);
+  }
+
+  .sully-bubble-with-reply .sully-bubble-reply-main {
+    margin-top: 0 !important;
+  }
+
   .sully-bubble-tail-svg {
     display: block;
     width: 12px;
@@ -94,11 +107,18 @@
   }
 
   .sully-bubble-tail-ai {
+    /* 角色侧参考图是短而扁的折角，不使用用户侧的等腰三角。 */
+    width: 12px;
+    height: 10px;
     right: auto;
-    /* 藏入气泡本体约 4px；露出约 8px 的短尖，正文会盖住接缝。 */
-    left: -8px;
-    /* 基准三角的尖端朝左，角色气泡在左侧时不镜像。 */
+    /* 尾巴底边正好贴到正文左边框，正文压住接缝但不裁掉折角。 */
+    left: -12px;
     transform: translateY(-50%);
+  }
+
+  .sully-bubble-tail-ai .sully-bubble-tail-svg {
+    width: 12px;
+    height: 10px;
   }
 
   .sully-bubble-tail-user {
