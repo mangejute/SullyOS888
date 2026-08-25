@@ -111,7 +111,8 @@ describe('MessageItem module layout', () => {
         // 尾巴是气泡的下层兄弟节点：先渲染尾巴，再渲染 z-index 更高的正文气泡。
         expect(tailIndex).toBeGreaterThan(-1);
         expect(bubbleIndex).toBeGreaterThan(tailIndex);
-        expect(markup.slice(tailIndex, bubbleIndex)).toContain('sully-bubble-tail-fill');
+        expect(markup.slice(tailIndex, bubbleIndex)).toContain('sully-bubble-tail-inner');
+        expect(markup.slice(tailIndex, bubbleIndex)).toContain('linearGradient');
     });
 
     it('引用消息保留主回复与紧凑引用预览两个独立层', () => {
@@ -133,7 +134,7 @@ describe('MessageItem module layout', () => {
         expect(markup).toContain('sully-bubble-reply-main sully-bubble-user');
         // 尾巴由描边外层和继承气泡填充的内层共同组成；引用摘要不会抢走定位参照物。
         expect(markup).toContain('sully-bubble-tail sully-bubble-tail-user');
-        expect(markup).toContain('sully-bubble-tail-fill');
+        expect(markup).toContain('sully-bubble-tail-inner');
         expect(markup).toContain('sully-reply-quote');
         expect(markup).toContain('sully-reply-quote-sender');
         expect(markup).toContain('sully-reply-quote-preview');
@@ -160,7 +161,7 @@ describe('MessageItem module layout', () => {
 
         expect(markup).toContain('sully-bubble-reply-main sully-bubble-ai');
         expect(markup).toContain('sully-bubble-tail sully-bubble-tail-ai');
-        expect(markup).toContain('sully-bubble-tail-fill');
+        expect(markup).toContain('sully-bubble-tail-inner');
     });
 
     it('心象卡片提供长按复制提示与独立交互入口', () => {

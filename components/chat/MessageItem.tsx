@@ -1,7 +1,7 @@
 
 
 
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useId, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { Message, ChatTheme } from '../../types';
 import { phoneFieldToText } from '../../utils/phoneEvidence';
@@ -1486,6 +1486,9 @@ const MessageItem = React.memo(({
 }: MessageItemProps) => {
     const isUser = m.role === 'user';
     const isSystem = m.role === 'system';
+    // 同一条消息可能同时出现在流式预览和正式列表；不能用消息 id 作为 SVG 渐变 id，
+    // 否则两个 SVG 会互相引用错误的渐变，导致一侧尾巴看起来空心。
+    const tailSvgInstanceId = useId().replace(/:/g, '');
     // 没有传入时维持旧调用方的分组语义，避免其它预览入口漏传后不显示时间。
     const startsTimestampGroup = isFirstInTimestampGroup ?? isFirstInGroup;
     const endsTimestampGroup = isLastInTimestampGroup ?? isLastInGroup;
@@ -1999,13 +2002,24 @@ const MessageItem = React.memo(({
     const alignmentText = String(m.content || '').replace(/<[^>]*>/g, '').trim();
     const isLongMessage = measuredMultiline || alignmentText.split('\n').length >= 2;
     // 尾巴必须是气泡本体的下层兄弟节点，不能作为本体子元素再靠负 z-index 猜绘制顺序。
-    // 这样本体会稳定盖住尾巴收进来的那一半；单行、多行和引用正文都用同一定位方式。
+    // 用 SVG 的外描边 + 内填充，而不是嵌套的 clip-path 三角形，避免内层被裁掉后变成空心。
+    // 气泡本体会稳定盖住尾巴收进来的那一半；单行、多行和引用正文都用同一定位方式。
+    const tailGradientId = `sully-bubble-tail-gradient-${tailSvgInstanceId}`;
     const renderBubbleTail = () => (
         <span
             aria-hidden="true"
             className={`sully-bubble-tail ${isUser ? 'sully-bubble-tail-user' : 'sully-bubble-tail-ai'}`}
         >
-            <span className="sully-bubble-tail-fill" />
+            <svg className="sully-bubble-tail-svg" viewBox="0 0 12 12" focusable="false">
+                <defs>
+                    <linearGradient id={tailGradientId} x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="0%" className="sully-bubble-tail-stop-start" />
+                        <stop offset="100%" className="sully-bubble-tail-stop-end" />
+                    </linearGradient>
+                </defs>
+                <path className="sully-bubble-tail-outline" d="M12 .5V11.5L.25 6Z" />
+                <path className="sully-bubble-tail-inner" d="M10.65 1.55V10.45L1.65 6Z" fill={`url(#${tailGradientId})`} />
+            </svg>
         </span>
     );
     const commonLayout = (content: React.ReactNode) => (
@@ -3549,6 +3563,12 @@ const MessageItem = React.memo(({
         ...(bubbleVariant === 'ios' ? { boxShadow: '0 10px 24px rgba(148,163,184,0.16)', border: '1px solid rgba(255,255,255,0.75)', backdropFilter: 'blur(12px)' } : {}),
     } as React.CSSProperties & Record<string, string | number>;
 
+    // CSS 主题只需要覆盖这两个颜色即可；尾巴本身与正文不共享父元素，不能再依赖颜色变量继承。
+    const bubbleLayerStyle = {
+        '--sully-bubble-tail-start': styleConfig.backgroundColor,
+        '--sully-bubble-tail-end': styleConfig.backgroundColor,
+    } as React.CSSProperties & Record<string, string | number>;
+
     // --- Inline formatting parser: code → bold → italic → plain ---
     const renderInline = (text: string): React.ReactNode[] => {
         // Pre-clean: markdown links [text](url) → just text
@@ -3716,7 +3736,10 @@ const MessageItem = React.memo(({
     const isForeignVoiceMsg = !isUser && m.type === 'text' && !!voiceData?.url && !!voiceData?.lang && !!cleanVoiceText(voiceData?.spokenText);
 
     return commonLayout(
-        <div className={`sully-bubble-layer ${isUser ? 'sully-bubble-layer-user' : 'sully-bubble-layer-ai'}`}>
+        <div
+            className={`sully-bubble-layer ${isUser ? 'sully-bubble-layer-user' : 'sully-bubble-layer-ai'}`}
+            style={bubbleLayerStyle}
+        >
         {!isVoiceOnlyMsg && !isModuleCard && !m.replyTo && renderBubbleTail()}
         <div className={isVoiceOnlyMsg
             ? `relative ${suppressEntranceAnimation ? '' : 'animate-fade-in'}`

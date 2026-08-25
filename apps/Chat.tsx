@@ -3142,12 +3142,15 @@ const Chat: React.FC = () => {
                  .sully-chat-inputbar textarea,.sully-chat-inputbar button{pointer-events:auto!important;visibility:visible!important;}
                  /* 清除历史主题遗留的大型气泡伪尾巴，尾巴由 MessageItem 的独立元素绘制。 */
                  .sully-bubble-ai::before,.sully-bubble-ai::after,.sully-bubble-user::before,.sully-bubble-user::after{content:none!important;display:none!important;}
-                 /* 外层画描边/投影，内层继承气泡填充。不要再用 border:0 把尾巴描边清掉。 */
+                 /* 尾巴由 SVG 的外描边与内填充组成；正文层始终盖住它收进气泡的一半。 */
                  .sully-bubble-layer,.sully-bubble-reply-stack{position:relative!important;display:block!important;width:fit-content!important;max-width:100%!important;isolation:isolate!important;overflow:visible!important;}
                  .sully-bubble-layer-user{align-self:flex-end!important;}.sully-bubble-layer-ai{align-self:flex-start!important;}
                  .sully-bubble-layer > .sully-bubble-ai,.sully-bubble-layer > .sully-bubble-user,.sully-bubble-reply-stack > .sully-bubble-reply-main{position:relative!important;z-index:2!important;}
-                 .sully-bubble-tail{position:absolute!important;display:block!important;top:calc(var(--sully-chat-avatar-size,1.75rem) / 2)!important;width:8px!important;height:8px!important;box-sizing:border-box!important;margin:0!important;padding:0!important;background:var(--sully-bubble-tail-border,rgba(0,0,0,.32))!important;border:0!important;box-shadow:none!important;clip-path:polygon(100% 0,100% 100%,0 50%)!important;filter:none!important;z-index:1!important;pointer-events:none!important;}
-                 .sully-bubble-tail-fill{position:absolute!important;display:block!important;top:1px!important;right:1px!important;bottom:1px!important;left:1px!important;background:var(--sully-bubble-tail-fill,var(--sully-bubble-bg,#b8b8b8))!important;clip-path:polygon(100% 0,100% 100%,0 50%)!important;}
+                 .sully-bubble-tail{position:absolute!important;display:block!important;top:calc(var(--sully-chat-avatar-size,1.75rem) / 2)!important;width:12px!important;height:12px!important;box-sizing:border-box!important;margin:0!important;padding:0!important;background:transparent!important;border:0!important;box-shadow:none!important;clip-path:none!important;filter:none!important;z-index:1!important;pointer-events:none!important;}
+                 .sully-bubble-tail-svg{display:block!important;width:12px!important;height:12px!important;overflow:visible!important;}
+                 .sully-bubble-tail-outline{fill:var(--sully-bubble-tail-border,rgba(0,0,0,.32))!important;}
+                 .sully-bubble-tail-stop-start{stop-color:var(--sully-bubble-tail-start,var(--sully-bubble-bg,#b8b8b8))!important;}
+                 .sully-bubble-tail-stop-end{stop-color:var(--sully-bubble-tail-end,var(--sully-bubble-bg,#b8b8b8))!important;}
                  /* The tail is part of the bubble, so it must paint above the avatar layer. */
                  .sully-chat-message-avatar-slot{z-index:4!important;}
                  /* 输入栏底部留一点呼吸空间，别把控件贴死在屏幕最下沿。
@@ -3186,8 +3189,8 @@ const Chat: React.FC = () => {
                    .sully-bubble-ai{--sully-bubble-tail-fill:linear-gradient(#f7f7f7,#d8d8d8)!important;--sully-bubble-tail-border:#555!important;--sully-bubble-tail-shadow:rgba(0,0,0,.18)!important;background:linear-gradient(#f7f7f7,#d8d8d8)!important;color:#222!important;border:1px solid #b8b8b8!important;box-shadow:inset 0 1px #fff,0 1px 2px rgba(0,0,0,.18)!important;}
                    .sully-bubble-user{--sully-bubble-tail-fill:linear-gradient(#4a4a4a,#282828)!important;--sully-bubble-tail-border:#1d1d1d!important;--sully-bubble-tail-shadow:rgba(0,0,0,.35)!important;background:linear-gradient(#4a4a4a,#282828)!important;color:#fff!important;border:1px solid #1d1d1d!important;box-shadow:inset 0 1px rgba(255,255,255,.16),0 1px 2px rgba(0,0,0,.35)!important;}
                    /* 尾巴与气泡本体是兄弟节点，颜色变量必须在尾巴自身上再声明一次。 */
-                   .sully-bubble-tail-ai{--sully-bubble-tail-fill:linear-gradient(#f7f7f7,#d8d8d8)!important;--sully-bubble-tail-border:#555!important;}
-                   .sully-bubble-tail-user{--sully-bubble-tail-fill:linear-gradient(#4a4a4a,#282828)!important;--sully-bubble-tail-border:#1d1d1d!important;}
+                   .sully-bubble-tail-ai{--sully-bubble-tail-start:#f7f7f7!important;--sully-bubble-tail-end:#d8d8d8!important;--sully-bubble-tail-border:#555!important;}
+                   .sully-bubble-tail-user{--sully-bubble-tail-start:#4a4a4a!important;--sully-bubble-tail-end:#282828!important;--sully-bubble-tail-border:#1d1d1d!important;}
                   /* 微信引用消息：当前回复保留主气泡，原消息显示为其下方紧凑的灰色引用条。 */
                   .sully-bubble-with-reply{display:flex!important;flex-direction:column!important;align-items:stretch!important;width:max-content!important;max-width:100%!important;height:auto!important;min-height:var(--sully-chat-avatar-size)!important;max-height:none!important;background:transparent!important;border:0!important;box-shadow:none!important;padding:0!important;gap:0!important;}
                   .sully-bubble-with-reply > .sully-bubble-reply-stack{display:block!important;order:1!important;align-self:flex-end!important;width:fit-content!important;min-width:0!important;box-sizing:border-box!important;max-width:100%!important;margin-top:0!important;}
@@ -3203,12 +3206,12 @@ const Chat: React.FC = () => {
                   .sully-bubble-with-reply .sully-reply-quote{width:100%!important;flex:0 0 auto!important;box-sizing:border-box!important;margin:0 0 .35rem!important;padding:.3rem .45rem!important;background:rgba(0,0,0,.055)!important;border-left:2px solid rgba(80,80,80,.45)!important;border-radius:2px!important;opacity:1!important;overflow:hidden!important;}
                   .sully-bubble-with-reply .sully-bubble-text{width:100%!important;}
                  `}
-                  .sully-bubble-tail{background:var(--sully-bubble-tail-border,rgba(0,0,0,.32))!important;clip-path:polygon(100% 0,100% 100%,0 50%)!important;filter:none!important;}
+                 .sully-bubble-tail{background:transparent!important;clip-path:none!important;filter:none!important;}
                  .sully-chat-message-user .sully-bubble-text,.sully-chat-message-user .sully-bubble-text *{color:#fff!important;}
                  .sully-chat-message-ai .sully-bubble-text,.sully-chat-message-ai .sully-bubble-text *{color:#222!important;}
                  .sully-chat-emoji-button,.sully-chat-send-button{width:1.95rem!important;min-width:1.95rem!important;max-width:1.95rem!important;height:1.95rem!important;min-height:1.95rem!important;max-height:1.95rem!important;flex:0 0 1.95rem!important;box-sizing:border-box!important;padding:.25rem!important;}
-                 .sully-bubble-tail-ai{left:-4px!important;right:auto!important;top:calc(var(--sully-chat-avatar-size,1.75rem) / 2)!important;transform:translateY(-50%)!important;}
-                 .sully-bubble-tail-user{right:-4px!important;left:auto!important;top:calc(var(--sully-chat-avatar-size,1.75rem) / 2)!important;transform:translateY(-50%) scaleX(-1)!important;}
+                 .sully-bubble-tail-ai{left:-8px!important;right:auto!important;top:calc(var(--sully-chat-avatar-size,1.75rem) / 2)!important;transform:translateY(-50%)!important;}
+                 .sully-bubble-tail-user{right:-8px!important;left:auto!important;top:calc(var(--sully-chat-avatar-size,1.75rem) / 2)!important;transform:translateY(-50%) scaleX(-1)!important;}
                  .sully-bubble-tail-long{top:calc(var(--sully-chat-avatar-size,1.75rem) / 2)!important;}
                  /* 一行消息：气泡高度锁成和头像同一个变量，两者严格等高（真实微信观感）。 */
                   .sully-chat-message-short .sully-bubble-ai,.sully-chat-message-short .sully-bubble-user{height:var(--sully-chat-avatar-size)!important;min-height:var(--sully-chat-avatar-size)!important;max-height:var(--sully-chat-avatar-size)!important;padding-top:0!important;padding-bottom:0!important;box-sizing:border-box!important;}
