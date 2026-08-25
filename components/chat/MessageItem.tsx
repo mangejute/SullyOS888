@@ -1370,6 +1370,9 @@ interface MessageItemProps {
     msg: Message;
     isFirstInGroup: boolean;
     isLastInGroup: boolean;
+    /** 时间分隔只看消息间隔，不跟随说话人切换。 */
+    isFirstInTimestampGroup?: boolean;
+    isLastInTimestampGroup?: boolean;
     /** 新一组消息开始前显示该组自己的时间分隔。 */
     showGroupTimestamp?: boolean;
     /** 流式临时消息不显示底部时间，避免时间标签在生成期间反复变化。 */
@@ -1438,6 +1441,8 @@ const MessageItem = React.memo(({
     msg: m,
     isFirstInGroup,
     isLastInGroup,
+    isFirstInTimestampGroup,
+    isLastInTimestampGroup,
     showGroupTimestamp = false,
     isFinalMessage = false,
     activeTheme,
@@ -1481,6 +1486,9 @@ const MessageItem = React.memo(({
 }: MessageItemProps) => {
     const isUser = m.role === 'user';
     const isSystem = m.role === 'system';
+    // 没有传入时维持旧调用方的分组语义，避免其它预览入口漏传后不显示时间。
+    const startsTimestampGroup = isFirstInTimestampGroup ?? isFirstInGroup;
+    const endsTimestampGroup = isLastInTimestampGroup ?? isLastInGroup;
     const spacingClass = messageSpacing === 'compact' ? (isLastInGroup ? 'mb-3' : 'mb-0.5') : messageSpacing === 'spacious' ? (isLastInGroup ? 'mb-8' : 'mb-2.5') : (isLastInGroup ? 'mb-6' : 'mb-1.5');
     const marginBottom = spacingClass;
     const avatarSizeClass = avatarSize === 'small' ? 'w-7 h-7' : avatarSize === 'large' ? 'w-12 h-12' : 'w-9 h-9';
@@ -1990,9 +1998,19 @@ const MessageItem = React.memo(({
     // 显式换行立即生效；自然换行由上面的 ResizeObserver 根据实际排版补上。
     const alignmentText = String(m.content || '').replace(/<[^>]*>/g, '').trim();
     const isLongMessage = measuredMultiline || alignmentText.split('\n').length >= 2;
+    // 尾巴必须是气泡本体的下层兄弟节点，不能作为本体子元素再靠负 z-index 猜绘制顺序。
+    // 这样本体会稳定盖住尾巴收进来的那一半；单行、多行和引用正文都用同一定位方式。
+    const renderBubbleTail = () => (
+        <span
+            aria-hidden="true"
+            className={`sully-bubble-tail ${isUser ? 'sully-bubble-tail-user' : 'sully-bubble-tail-ai'}`}
+        >
+            <span className="sully-bubble-tail-fill" />
+        </span>
+    );
     const commonLayout = (content: React.ReactNode) => (
         <>
-            {showGroupTimestamp && isFirstInGroup && m.id > 0 && showTimestamp !== 'never' && (
+            {showGroupTimestamp && startsTimestampGroup && m.id > 0 && showTimestamp !== 'never' && (
                 <div className={`sully-chat-message-time sully-chat-message-time-before px-1 text-[9px] text-slate-400/80 font-medium whitespace-nowrap pointer-events-none ${showTimestamp === 'hover' ? 'opacity-0 transition-opacity' : ''}`}>
                     {formatTime(m.timestamp)}
                 </div>
@@ -2089,7 +2107,7 @@ const MessageItem = React.memo(({
                 </div>
 
                 {/* 非复古主题保留原有组末时间；复古主题改为在下一组前显示，避免聊天底部悬空时间。 */}
-                {!showGroupTimestamp && isLastInGroup && m.id > 0 && showTimestamp !== 'never' && (
+                {!showGroupTimestamp && endsTimestampGroup && m.id > 0 && showTimestamp !== 'never' && (
                     <div className={`sully-chat-message-time absolute top-full left-1/2 -translate-x-1/2 mt-1 px-1 text-[9px] text-slate-400/80 font-medium whitespace-nowrap pointer-events-none ${showTimestamp === 'hover' ? 'opacity-0 group-hover:opacity-100 transition-opacity' : ''}`}>
                         {formatTime(m.timestamp)}
                     </div>
@@ -3698,18 +3716,12 @@ const MessageItem = React.memo(({
     const isForeignVoiceMsg = !isUser && m.type === 'text' && !!voiceData?.url && !!voiceData?.lang && !!cleanVoiceText(voiceData?.spokenText);
 
     return commonLayout(
+        <div className={`sully-bubble-layer ${isUser ? 'sully-bubble-layer-user' : 'sully-bubble-layer-ai'}`}>
+        {!isVoiceOnlyMsg && !isModuleCard && !m.replyTo && renderBubbleTail()}
         <div className={isVoiceOnlyMsg
             ? `relative ${suppressEntranceAnimation ? '' : 'animate-fade-in'}`
             : `relative ${bubbleVariant === 'flat' || bubbleVariant === 'outline' || bubbleVariant === 'wechat' ? '' : 'shadow-sm '}px-5 py-3 ${suppressEntranceAnimation ? '' : 'animate-fade-in'} ${bubbleVariant === 'outline' ? 'sully-bubble-outline' : 'border border-black/5 '}active:scale-[0.98] transition-transform overflow-visible ${m.replyTo ? 'sully-bubble-with-reply' : (isUser ? 'sully-bubble-user' : 'sully-bubble-ai')}`}
             style={isVoiceOnlyMsg ? undefined : containerStyle}>
-
-            {/* 尾巴使用独立元素，避免历史主题的 ::before/::after 规则把三角形放大。 */}
-            {!isVoiceOnlyMsg && !isModuleCard && !m.replyTo && (
-                <span
-                    aria-hidden="true"
-                    className={`sully-bubble-tail ${isUser ? 'sully-bubble-tail-user' : 'sully-bubble-tail-ai'} ${isLongMessage ? 'sully-bubble-tail-long' : ''}`}
-                />
-            )}
 
             {/* Layer 1: Background Image with Independent Opacity */}
             {styleConfig.backgroundImage && (
@@ -3750,21 +3762,25 @@ const MessageItem = React.memo(({
 
             {/* Layer 4: Text Content — shown when there's visible text after stripping voice tags */}
             {/* 外语语音消息把双语文字交给下方语音条渲染，顶部不再重复正文 */}
-            {displayContent && !isForeignVoiceMsg && (
-            <div
-                ref={bubbleTextRef}
-                className={`sully-bubble-text ${m.replyTo ? `sully-bubble-reply-main ${isUser ? 'sully-bubble-user' : 'sully-bubble-ai'}` : ''} relative z-10 text-[15px] leading-relaxed whitespace-pre-wrap break-all select-text`}
-                style={m.replyTo ? containerStyle : undefined}
-            >
-                {m.replyTo && (
-                    <span
-                        aria-hidden="true"
-                        className={`sully-bubble-tail ${isUser ? 'sully-bubble-tail-user' : 'sully-bubble-tail-ai'} ${isLongMessage ? 'sully-bubble-tail-long' : ''}`}
-                    />
-                )}
-                {renderContent(displayContent)}
-            </div>
-            )}
+            {displayContent && !isForeignVoiceMsg && (m.replyTo ? (
+                <div className="sully-bubble-reply-stack">
+                    {!isVoiceOnlyMsg && !isModuleCard && renderBubbleTail()}
+                    <div
+                        ref={bubbleTextRef}
+                        className={`sully-bubble-text sully-bubble-reply-main ${isUser ? 'sully-bubble-user' : 'sully-bubble-ai'} relative z-10 text-[15px] leading-relaxed whitespace-pre-wrap break-all select-text`}
+                        style={containerStyle}
+                    >
+                        {renderContent(displayContent)}
+                    </div>
+                </div>
+            ) : (
+                <div
+                    ref={bubbleTextRef}
+                    className="sully-bubble-text relative z-10 text-[15px] leading-relaxed whitespace-pre-wrap break-all select-text"
+                >
+                    {renderContent(displayContent)}
+                </div>
+            ))}
 
             {/* Layer 5: 双语「翻译/原文」切换 —— 气泡内右下角，细分隔线压层级，小灰字克制易找 */}
             {showTranslateButton && displayContent && !isForeignVoiceMsg && (
@@ -3973,6 +3989,7 @@ const MessageItem = React.memo(({
                 );
             })()}
         </div>
+        </div>
     );
 }, (prev, next) => {
     return prev.msg.id === next.msg.id &&
@@ -3986,6 +4003,8 @@ const MessageItem = React.memo(({
            prev.msg.metadata?.receipt === next.msg.metadata?.receipt &&
            prev.isFirstInGroup === next.isFirstInGroup &&
            prev.isLastInGroup === next.isLastInGroup &&
+           prev.isFirstInTimestampGroup === next.isFirstInTimestampGroup &&
+           prev.isLastInTimestampGroup === next.isLastInTimestampGroup &&
            prev.showGroupTimestamp === next.showGroupTimestamp &&
            prev.isFinalMessage === next.isFinalMessage &&
            prev.activeTheme === next.activeTheme &&

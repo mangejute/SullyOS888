@@ -92,6 +92,28 @@ describe('MessageItem module layout', () => {
         expect(markup).toContain('https://example.com/char.png');
     });
 
+    it.each([
+        ['用户', 'user', 'sully-bubble-tail-user', 'sully-bubble-user'],
+        ['角色', 'assistant', 'sully-bubble-tail-ai', 'sully-bubble-ai'],
+    ] as const)('%s普通消息的尾巴在气泡本体之前渲染', (_label, role, tailClass, bubbleClass) => {
+        const markup = renderMessage({
+            id: role === 'user' ? 21 : 22,
+            charId: 'char-1',
+            role,
+            type: 'text',
+            content: '尾巴层级检查',
+            timestamp: 21,
+        });
+
+        const tailIndex = markup.indexOf(tailClass);
+        const bubbleIndex = markup.indexOf(bubbleClass, tailIndex);
+
+        // 尾巴是气泡的下层兄弟节点：先渲染尾巴，再渲染 z-index 更高的正文气泡。
+        expect(tailIndex).toBeGreaterThan(-1);
+        expect(bubbleIndex).toBeGreaterThan(tailIndex);
+        expect(markup.slice(tailIndex, bubbleIndex)).toContain('sully-bubble-tail-fill');
+    });
+
     it('引用消息保留主回复与紧凑引用预览两个独立层', () => {
         const markup = renderMessage({
             id: 31,
@@ -109,12 +131,20 @@ describe('MessageItem module layout', () => {
         expect(markup).not.toMatch(/class="[^"]*sully-bubble-with-reply[^"]*sully-bubble-(?:ai|user)/);
         expect(markup).toContain('sully-bubble-text');
         expect(markup).toContain('sully-bubble-reply-main sully-bubble-user');
+        // 尾巴由描边外层和继承气泡填充的内层共同组成；引用摘要不会抢走定位参照物。
+        expect(markup).toContain('sully-bubble-tail sully-bubble-tail-user');
+        expect(markup).toContain('sully-bubble-tail-fill');
         expect(markup).toContain('sully-reply-quote');
         expect(markup).toContain('sully-reply-quote-sender');
         expect(markup).toContain('sully-reply-quote-preview');
         expect(markup).toContain('引用 角色：我今天已经忙了很久。');
         expect(markup).not.toContain('italic');
         expect(markup).not.toContain('&quot;我今天已经忙了很久。&quot;');
+
+        const tailIndex = markup.indexOf('sully-bubble-tail sully-bubble-tail-user');
+        const mainBubbleIndex = markup.indexOf('sully-bubble-reply-main sully-bubble-user', tailIndex);
+        // 引用摘要在正文下方，不能成为尾巴定位或叠放的依据。
+        expect(mainBubbleIndex).toBeGreaterThan(tailIndex);
     });
 
     it('角色引用时，正文也复用角色侧的普通气泡类', () => {
@@ -129,6 +159,8 @@ describe('MessageItem module layout', () => {
         });
 
         expect(markup).toContain('sully-bubble-reply-main sully-bubble-ai');
+        expect(markup).toContain('sully-bubble-tail sully-bubble-tail-ai');
+        expect(markup).toContain('sully-bubble-tail-fill');
     });
 
     it('心象卡片提供长按复制提示与独立交互入口', () => {

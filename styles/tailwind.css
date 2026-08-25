@@ -10,6 +10,8 @@
     color: var(--sully-bubble-text, inherit);
     opacity: var(--sully-bubble-opacity, 1);
     border-radius: var(--sully-bubble-radius, 16px);
+    /* 让负层尾巴只露在气泡外侧，气泡本体会盖住它插入内部的底边。 */
+    isolation: isolate;
   }
 
   .sully-bubble-outline {
@@ -17,4 +19,86 @@
     border: 2px solid var(--sully-bubble-outline-color, currentColor);
     box-shadow: none;
   }
+
+  /*
+   * 气泡尾巴是独立的双层节点：外层是描边和投影，内层继承气泡的填充。
+   * 不能把 border 直接加在 clip-path 三角上，浏览器会把边框一起裁掉，视觉上
+   * 就会变成一块没有描边的浅色三角。这个基础样式始终加载，不能依赖某个主题。
+   */
+  .sully-bubble-tail {
+    position: absolute;
+    display: block;
+    /*
+     * The tail needs a real outside layer.  A CSS border on a clipped triangle
+     * is clipped away by the browser, which was the reason it looked like a
+     * separate flat-colour triangle.  The dark outer triangle below is the
+     * 1px outline; the child is the bubble fill.
+     */
+    /* 它永远以一行气泡的中点为准；两行以上也不向下漂。 */
+    top: calc(var(--sully-chat-avatar-size, 1.75rem) / 2);
+    width: 8px;
+    height: 8px;
+    box-sizing: border-box;
+    margin: 0;
+    padding: 0;
+    background: var(--sully-bubble-tail-border, rgba(0, 0, 0, 0.32));
+    clip-path: polygon(100% 0, 100% 100%, 0 50%);
+    filter: none;
+    /* 尾巴与气泡本体是兄弟层：本体在 2，尾巴在 1，接缝必定被本体盖住。 */
+    z-index: 1;
+    pointer-events: none;
+  }
+
+  .sully-bubble-layer,
+  .sully-bubble-reply-stack {
+    position: relative;
+    display: block;
+    width: fit-content;
+    max-width: 100%;
+    isolation: isolate;
+    overflow: visible;
+  }
+
+  .sully-bubble-layer-user {
+    align-self: flex-end;
+  }
+
+  .sully-bubble-layer-ai {
+    align-self: flex-start;
+  }
+
+  .sully-bubble-layer > .sully-bubble-ai,
+  .sully-bubble-layer > .sully-bubble-user,
+  .sully-bubble-reply-stack > .sully-bubble-reply-main {
+    position: relative;
+    z-index: 2;
+  }
+
+  .sully-bubble-tail-fill {
+    position: absolute;
+    display: block;
+    top: 1px;
+    right: 1px;
+    bottom: 1px;
+    left: 1px;
+    background: var(--sully-bubble-tail-fill, var(--sully-bubble-bg, #b8b8b8));
+    clip-path: polygon(100% 0, 100% 100%, 0 50%);
+  }
+
+  .sully-bubble-tail-ai {
+    right: auto;
+    /* 收进气泡本体一半；负层会被气泡盖住，只露出短尖。 */
+    left: -4px;
+    /* 基准三角的尖端朝左，角色气泡在左侧时不镜像。 */
+    transform: translateY(-50%);
+  }
+
+  .sully-bubble-tail-user {
+    /* 与角色侧相同，藏入本体一半，只露出短尖。 */
+    right: -4px;
+    left: auto;
+    /* 用户气泡在右侧，镜像后尖端朝右。 */
+    transform: translateY(-50%) scaleX(-1);
+  }
+
 }
