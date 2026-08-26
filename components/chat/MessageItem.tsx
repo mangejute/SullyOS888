@@ -3855,16 +3855,15 @@ const MessageItem = React.memo(({
                 <div className="relative z-10">
                     {voiceData?.url ? (
                         <div className="max-w-[260px] relative">
-                            {/* 复古微信 AI 小尾巴：作为 voice bar 框的子元素，z-index 3 在 voice bar stacking context 里最上层
-                               left: -10px（不是默认的 -12px），让 SVG 描边和 voice bar 1px 边框在 inner 区域重叠，无缝 */}
+                            {/* 复古微信 AI 小尾巴：SVG 折角，z-index 最高（10），覆盖在 voice bar 框上面，视觉无缝 */}
                             <span
                                 aria-hidden="true"
                                 className="sully-bubble-tail sully-bubble-tail-ai"
                                 style={{
                                     top: '50%',
-                                    left: '-11px',
+                                    left: '-12px',
                                     transform: 'translateY(-50%)',
-                                    zIndex: 3,
+                                    zIndex: 10,
                                     '--sully-bubble-tail-start': '#f7f7f7',
                                     '--sully-bubble-tail-end': '#d8d8d8',
                                 } as React.CSSProperties}
@@ -3887,15 +3886,19 @@ const MessageItem = React.memo(({
                             </span>
                             <button
                                 onClick={(e) => { e.stopPropagation(); e.preventDefault(); onPlayVoice?.(m.id); if (!isVoicePlaying) trackEvent('播放语音条'); }}
-                                className="group flex items-center gap-2 w-full h-7 px-2.5 rounded-[4px] transition-all duration-300 active:scale-[0.97] select-none"
+                                className="group flex items-center gap-2 w-full !h-7 px-2.5 rounded-[4px] transition-all duration-300 active:scale-[0.97] select-none"
                                 style={{
                                     background: isVoicePlaying
                                         ? (vbActiveBg || 'linear-gradient(#d8d8d8,#b8b8b8) 0 0/100% var(--sully-bubble-sheen,1.75rem) no-repeat,#b8b8b8')
                                         : (vbBg || 'linear-gradient(#f7f7f7,#d8d8d8) 0 0/100% var(--sully-bubble-sheen,1.75rem) no-repeat,#d8d8d8'),
-                                    border: isVoicePlaying
-                                        ? `1px solid ${vbBtn ? vbBtn + '33' : '#a8a8a8'}`
-                                        : (vbBtn ? `1px solid ${vbBtn}1a` : '1px solid #b8b8b8'),
-                                    boxShadow: 'inset 0 1px #fff, 0 1px 2px rgba(0,0,0,.18)',
+                                    border: 0,
+                                    boxShadow: isVoicePlaying
+                                        ? `inset 0 0 0 1px ${vbBtn ? vbBtn + '33' : '#a8a8a8'}, inset 0 1px #fff, 0 1px 2px rgba(0,0,0,.18)`
+                                        : (vbBtn ? `inset 0 0 0 1px ${vbBtn}1a, inset 0 1px #fff, 0 1px 2px rgba(0,0,0,.18)` : 'inset 0 0 0 1px #b8b8b8, inset 0 1px #fff, 0 1px 2px rgba(0,0,0,.18)'),
+                                    overflow: 'visible',
+                                    height: '28px',
+                                    maxHeight: '28px',
+                                    minHeight: '28px',
                                     color: '#222',
                                 }}
                             >
@@ -4007,16 +4010,15 @@ const MessageItem = React.memo(({
                            configured. Offer a 转文字 toggle here too so the text stays readable,
                            aligning fake voice messages with real ones. */
                         <div className="max-w-[260px] relative">
-                            {/* 复古微信 AI 小尾巴：作为 voice bar 框的子元素，z-index 3 在 voice bar stacking context 里最上层
-                               left: -10px（不是默认的 -12px），让 SVG 描边和 voice bar 1px 边框在 inner 区域重叠，无缝 */}
+                            {/* 复古微信 AI 小尾巴：SVG 折角，z-index 最高（10），覆盖在 voice bar 框上面，视觉无缝 */}
                             <span
                                 aria-hidden="true"
                                 className="sully-bubble-tail sully-bubble-tail-ai"
                                 style={{
                                     top: '50%',
-                                    left: '-11px',
+                                    left: '-12px',
                                     transform: 'translateY(-50%)',
-                                    zIndex: 3,
+                                    zIndex: 10,
                                     '--sully-bubble-tail-start': '#f7f7f7',
                                     '--sully-bubble-tail-end': '#d8d8d8',
                                 } as React.CSSProperties}
@@ -4038,8 +4040,8 @@ const MessageItem = React.memo(({
                                 </svg>
                             </span>
                             <div
-                                className="flex items-center gap-2 px-2.5 h-7 rounded-[4px]"
-                                style={{ background: 'linear-gradient(#f7f7f7,#d8d8d8) 0 0/100% var(--sully-bubble-sheen,1.75rem) no-repeat,#d8d8d8', border: '1px solid #b8b8b8', boxShadow: 'inset 0 1px #fff, 0 1px 2px rgba(0,0,0,.18)', color: '#222' }}
+                                className="flex items-center gap-2 px-2.5 !h-7 rounded-[4px]"
+                                style={{ background: 'linear-gradient(#f7f7f7,#d8d8d8) 0 0/100% var(--sully-bubble-sheen,1.75rem) no-repeat,#d8d8d8', border: 0, boxShadow: 'inset 0 0 0 1px #b8b8b8, inset 0 1px #fff, 0 1px 2px rgba(0,0,0,.18)', overflow: 'visible', height: '28px', maxHeight: '28px', minHeight: '28px', color: '#222' }}
                             >
                                 <button
                                     onClick={(e) => { e.stopPropagation(); e.preventDefault(); onPlayVoice?.(m.id); }}

@@ -36,8 +36,10 @@ function sendFile(filePath, res) {
 
     const ext = path.extname(filePath).toLowerCase();
     // 全部 no-cache：本地预览服务器本就应该每次拿到最新构建，避免任何缓存（浏览器/SW）
+    const stat = fs.statSync(filePath);
     res.writeHead(200, {
         'Content-Type': mimeTypes[ext] || 'application/octet-stream',
+        'Last-Modified': stat.mtime.toUTCString(),
         'Cache-Control': 'no-store, no-cache, must-revalidate',
     });
     res.end(data);
