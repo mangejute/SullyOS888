@@ -35,11 +35,10 @@ function sendFile(filePath, res) {
     }
 
     const ext = path.extname(filePath).toLowerCase();
-    // assets 目录永远 no-cache，避免 SW/浏览器缓存让用户看不到新版本
-    const isAsset = filePath.includes(`${path.sep}assets${path.sep}`) || ext === '.js' || ext === '.css' || ext === '.json';
+    // 全部 no-cache：本地预览服务器本就应该每次拿到最新构建，避免任何缓存（浏览器/SW）
     res.writeHead(200, {
         'Content-Type': mimeTypes[ext] || 'application/octet-stream',
-        ...(isAsset ? { 'Cache-Control': 'no-store, no-cache, must-revalidate' } : {}),
+        'Cache-Control': 'no-store, no-cache, must-revalidate',
     });
     res.end(data);
 });

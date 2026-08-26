@@ -3854,13 +3854,15 @@ const MessageItem = React.memo(({
                 return (
                 <div className="relative z-10">
                     {voiceData?.url ? (
-                        <div className="max-w-[260px] -ml-2 relative">
-                            {/* 复古微信 AI 小尾巴：作为 voice bar 框的子元素，z-index 3 在 voice bar stacking context 里最上层 */}
+                        <div className="max-w-[260px] relative">
+                            {/* 复古微信 AI 小尾巴：作为 voice bar 框的子元素，z-index 3 在 voice bar stacking context 里最上层
+                               left: -10px（不是默认的 -12px），让 SVG 描边和 voice bar 1px 边框在 inner 区域重叠，无缝 */}
                             <span
                                 aria-hidden="true"
                                 className="sully-bubble-tail sully-bubble-tail-ai"
                                 style={{
                                     top: '50%',
+                                    left: '-11px',
                                     transform: 'translateY(-50%)',
                                     zIndex: 3,
                                     '--sully-bubble-tail-start': '#f7f7f7',
@@ -4004,13 +4006,15 @@ const MessageItem = React.memo(({
                            pending (app restart / auto-TTS) or the character has no MiniMax voice
                            configured. Offer a 转文字 toggle here too so the text stays readable,
                            aligning fake voice messages with real ones. */
-                        <div className="max-w-[260px] -ml-2 relative">
-                            {/* 复古微信 AI 小尾巴：作为 voice bar 框的子元素，z-index 3 在 voice bar stacking context 里最上层 */}
+                        <div className="max-w-[260px] relative">
+                            {/* 复古微信 AI 小尾巴：作为 voice bar 框的子元素，z-index 3 在 voice bar stacking context 里最上层
+                               left: -10px（不是默认的 -12px），让 SVG 描边和 voice bar 1px 边框在 inner 区域重叠，无缝 */}
                             <span
                                 aria-hidden="true"
                                 className="sully-bubble-tail sully-bubble-tail-ai"
                                 style={{
                                     top: '50%',
+                                    left: '-11px',
                                     transform: 'translateY(-50%)',
                                     zIndex: 3,
                                     '--sully-bubble-tail-start': '#f7f7f7',
