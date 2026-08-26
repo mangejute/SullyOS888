@@ -154,17 +154,6 @@ const PRESETS: Preset[] = [
 .sully-chat-token{background:rgba(255,255,255,.14)!important;color:#f0e0ff!important;border-color:rgba(255,255,255,.25)!important;}`,
     },
     {
-        name: '极简白',
-        swatch: 'linear-gradient(135deg,#ffffff,#f3f4f6)',
-        code: `/* 极简白 */
-.sully-chat-header{background:#ffffff!important;border-bottom:1px solid #eef1f5!important;box-shadow:none!important;}
-.sully-chat-name{color:#1f2937!important;}
-.sully-chat-avatar{border:1.5px solid #e5e7eb!important;}
-.sully-chat-buffs button{background:#f5f6f8!important;color:#6b7280!important;border-color:#e5e7eb!important;}
-.sully-chat-trigger{color:#6366f1!important;}
-.sully-chat-token{background:#f5f6f8!important;color:#9ca3af!important;border-color:#e5e7eb!important;}`,
-    },
-    {
         name: '淡紫毛绒',
         swatch: 'radial-gradient(150% 120% at 50% -30%,#ddc9ff,#c9b2f4 45%,#bda0ee)',
         code: `/* ===== 淡紫毛绒 · 温柔风 ===== */
@@ -577,7 +566,7 @@ const ChromeCssEditor: React.FC<CssEditorProps> = ({ value, onChange, bubbleValu
             <div>
                 <div className="mb-2 text-[11px] font-bold text-slate-500">内置风格 <span className="font-normal text-slate-400">· 点一下套用</span></div>
                 <div className="flex flex-wrap gap-2">
-                    {PRESETS.filter((p) => p.name === '极简白' || p.name === '复古微信').map((p) => (
+                    {PRESETS.filter((p) => p.name === '复古微信').map((p) => (
                         <button key={p.name} onClick={() => onChange(p.code)} title={p.name} className={cardCls}>
                             <span className="absolute inset-0" style={{ background: p.swatch }} />
                             <span className={cardLabelCls} style={{ background: 'linear-gradient(to top, rgba(0,0,0,.5), transparent)' }}>{p.name}</span>

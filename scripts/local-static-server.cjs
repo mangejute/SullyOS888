@@ -35,11 +35,14 @@ function sendFile(filePath, res) {
     }
 
     const ext = path.extname(filePath).toLowerCase();
+    // assets 目录永远 no-cache，避免 SW/浏览器缓存让用户看不到新版本
+    const isAsset = filePath.includes(`${path.sep}assets${path.sep}`) || ext === '.js' || ext === '.css' || ext === '.json';
     res.writeHead(200, {
-      'Content-Type': mimeTypes[ext] || 'application/octet-stream',
+        'Content-Type': mimeTypes[ext] || 'application/octet-stream',
+        ...(isAsset ? { 'Cache-Control': 'no-store, no-cache, must-revalidate' } : {}),
     });
     res.end(data);
-  });
+});
 }
 
 const server = http.createServer((req, res) => {

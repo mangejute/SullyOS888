@@ -3840,66 +3840,99 @@ const MessageItem = React.memo(({
 
             {/* Layer 6: Voice Bar */}
             {(voiceData?.url || voiceLoading || hasVoiceTag) && !isUser && m.type === 'text' && (() => {
-                const vbBg = styleConfig.voiceBarBg;
-                const vbActiveBg = styleConfig.voiceBarActiveBg;
-                const vbBtn = styleConfig.voiceBarBtnColor;
-                const vbWave = styleConfig.voiceBarWaveColor;
-                const vbText = styleConfig.voiceBarTextColor;
+                // 统一强制走复古微信 voice bar 配色，无视 styleConfig.voiceBar*（用户之前用
+                // ThemeMaker 编辑过、保存到 IndexedDB 的 custom theme 里可能含 voiceBarBg 等
+                // 浅灰渐变值，会覆盖 inline fallback；让所有 voice bar 表现一致）。
+                const vbBg = undefined as string | undefined;
+                const vbActiveBg = undefined as string | undefined;
+                const vbBtn = undefined as string | undefined;
+                const vbWave = undefined as string | undefined;
+                const vbText = undefined as string | undefined;
                 // Voice-only mode: no visible text, voice bar is primary content.
                 // 外语语音消息顶部正文已隐藏（交给语音条渲染），同样按纯语音处理，去掉多余上间距。
                 const isVoiceOnly = !!voiceData?.url && (!displayContent || isForeignVoiceMsg);
                 return (
-                <div className={`relative z-10 ${isVoiceOnly ? '' : 'mt-2.5'}`}>
+                <div className="relative z-10">
                     {voiceData?.url ? (
-                        <div className="max-w-[260px]">
+                        <div className="max-w-[260px] -ml-2 relative">
+                            {/* 复古微信 AI 小尾巴：作为 voice bar 框的子元素，z-index 3 在 voice bar stacking context 里最上层 */}
+                            <span
+                                aria-hidden="true"
+                                className="sully-bubble-tail sully-bubble-tail-ai"
+                                style={{
+                                    top: '50%',
+                                    transform: 'translateY(-50%)',
+                                    zIndex: 3,
+                                    '--sully-bubble-tail-start': '#f7f7f7',
+                                    '--sully-bubble-tail-end': '#d8d8d8',
+                                } as React.CSSProperties}
+                            >
+                                <svg
+                                    className="sully-bubble-tail-svg sully-bubble-tail-svg-ai"
+                                    viewBox="0 0 12 12"
+                                    preserveAspectRatio="none"
+                                    focusable="false"
+                                >
+                                    <defs>
+                                        <linearGradient id={`voice-tail-${m.id}`} x1="0" y1="0" x2="0" y2="1">
+                                            <stop offset="0%" className="sully-bubble-tail-stop-start" />
+                                            <stop offset="100%" className="sully-bubble-tail-stop-end" />
+                                        </linearGradient>
+                                    </defs>
+                                    <path className="sully-bubble-tail-outline" d="M12 .5V11.5L.25 6Z" />
+                                    <path className="sully-bubble-tail-inner" d="M10.65 1.55V10.45L1.65 6Z" fill={`url(#voice-tail-${m.id})`} />
+                                </svg>
+                            </span>
                             <button
                                 onClick={(e) => { e.stopPropagation(); e.preventDefault(); onPlayVoice?.(m.id); if (!isVoicePlaying) trackEvent('播放语音条'); }}
-                                className="group flex items-center gap-2.5 w-full px-3 py-2 rounded-2xl transition-all duration-300 active:scale-[0.97] select-none"
+                                className="group flex items-center gap-2 w-full h-7 px-2.5 rounded-[4px] transition-all duration-300 active:scale-[0.97] select-none"
                                 style={{
                                     background: isVoicePlaying
-                                        ? (vbActiveBg || 'linear-gradient(135deg, rgba(16,185,129,0.12) 0%, rgba(52,211,153,0.08) 100%)')
-                                        : (vbBg || 'linear-gradient(135deg, rgba(0,0,0,0.03) 0%, rgba(0,0,0,0.06) 100%)'),
+                                        ? (vbActiveBg || 'linear-gradient(#d8d8d8,#b8b8b8) 0 0/100% var(--sully-bubble-sheen,1.75rem) no-repeat,#b8b8b8')
+                                        : (vbBg || 'linear-gradient(#f7f7f7,#d8d8d8) 0 0/100% var(--sully-bubble-sheen,1.75rem) no-repeat,#d8d8d8'),
                                     border: isVoicePlaying
-                                        ? `1px solid ${vbBtn ? vbBtn + '33' : 'rgba(16,185,129,0.2)'}`
-                                        : '1px solid rgba(0,0,0,0.05)',
+                                        ? `1px solid ${vbBtn ? vbBtn + '33' : '#a8a8a8'}`
+                                        : (vbBtn ? `1px solid ${vbBtn}1a` : '1px solid #b8b8b8'),
+                                    boxShadow: 'inset 0 1px #fff, 0 1px 2px rgba(0,0,0,.18)',
+                                    color: '#222',
                                 }}
                             >
-                                {/* Play/Pause circle */}
-                                <div className="shrink-0 w-7 h-7 rounded-full flex items-center justify-center transition-all duration-300"
+                                {/* Play/Pause circle — 复古微信风：未播白底深灰 ▶，播放中绿底白 ⏸ */}
+                                <div className="shrink-0 w-5 h-5 rounded-full flex items-center justify-center transition-all duration-300"
                                     style={{
-                                        backgroundColor: isVoicePlaying ? (vbBtn || '#10b981') : (vbBg ? 'rgba(255,255,255,0.25)' : 'rgba(148,163,184,0.2)'),
-                                        boxShadow: isVoicePlaying ? `0 2px 8px ${vbBtn ? vbBtn + '4D' : 'rgba(16,185,129,0.3)'}` : 'none',
+                                        backgroundColor: isVoicePlaying ? (vbBtn || '#10b981') : (vbBg ? 'rgba(255,255,255,0.4)' : 'rgba(255,255,255,0.7)'),
+                                        boxShadow: isVoicePlaying ? `0 2px 8px ${vbBtn ? vbBtn + '4D' : 'rgba(16,185,129,0.3)'}` : 'inset 0 1px rgba(255,255,255,.6), 0 1px 2px rgba(0,0,0,.18)',
                                     }}
                                 >
                                     {isVoicePlaying ? (
-                                        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-3 h-3 text-white"><path d="M5.75 3a.75.75 0 0 0-.75.75v12.5c0 .414.336.75.75.75h1.5a.75.75 0 0 0 .75-.75V3.75A.75.75 0 0 0 7.25 3h-1.5ZM12.75 3a.75.75 0 0 0-.75.75v12.5c0 .414.336.75.75.75h1.5a.75.75 0 0 0 .75-.75V3.75a.75.75 0 0 0-.75-.75h-1.5Z" /></svg>
+                                        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-2.5 h-2.5 text-white"><path d="M5.75 3a.75.75 0 0 0-.75.75v12.5c0 .414.336.75.75.75h1.5a.75.75 0 0 0 .75-.75V3.75A.75.75 0 0 0 7.25 3h-1.5ZM12.75 3a.75.75 0 0 0-.75.75v12.5c0 .414.336.75.75.75h1.5a.75.75 0 0 0 .75-.75V3.75a.75.75 0 0 0-.75-.75h-1.5Z" /></svg>
                                     ) : (
-                                        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill={vbBtn || '#64748b'} className="w-3 h-3 ml-0.5"><path d="M6.3 2.84A1.5 1.5 0 0 0 4 4.11v11.78a1.5 1.5 0 0 0 2.3 1.27l9.344-5.891a1.5 1.5 0 0 0 0-2.538L6.3 2.841Z" /></svg>
+                                        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill={vbBtn || '#222'} className="w-2.5 h-2.5 ml-px"><path d="M6.3 2.84A1.5 1.5 0 0 0 4 4.11v11.78a1.5 1.5 0 0 0 2.3 1.27l9.344-5.891a1.5 1.5 0 0 0 0-2.538L6.3 2.841Z" /></svg>
                                     )}
                                 </div>
-                                {/* Waveform bars */}
-                                <div className="flex-1 flex items-center gap-[3px] h-5 overflow-hidden">
+                                {/* Waveform bars — 默认灰系，播放时维持 vbWave 以便用户感知"有声" */}
+                                <div className="flex-1 flex items-center gap-[2px] h-3 overflow-hidden">
                                     {[4, 10, 6, 14, 8, 12, 5, 11, 7, 13, 4, 9, 6, 11, 5, 8, 10, 7, 12, 6].map((h, i) => (
                                         <div
                                             key={i}
-                                            className={`w-[2.5px] rounded-full transition-all duration-150 ${isVoicePlaying ? 'animate-pulse' : ''}`}
+                                            className={`w-[2px] rounded-full transition-all duration-150 ${isVoicePlaying ? 'animate-pulse' : ''}`}
                                             style={{
-                                                height: isVoicePlaying ? `${Math.max(3, h + Math.sin(i * 0.8) * 3)}px` : `${Math.max(2, h * 0.4)}px`,
+                                                height: isVoicePlaying ? `${Math.max(2, h * 0.5 + Math.sin(i * 0.8) * 1.5)}px` : `${Math.max(2, h * 0.3)}px`,
                                                 backgroundColor: isVoicePlaying
                                                     ? (vbWave || `rgba(16, 185, 129, ${0.4 + (h / 14) * 0.5})`)
-                                                    : (vbWave ? vbWave + '60' : `rgba(148, 163, 184, ${0.25 + (h / 14) * 0.35})`),
+                                                    : (vbWave ? vbWave + '60' : `rgba(80, 80, 80, ${0.25 + (h / 14) * 0.35})`),
                                                 animationDelay: `${i * 60}ms`,
                                                 animationDuration: `${600 + (i % 3) * 200}ms`,
                                             }}
                                         />
                                     ))}
                                 </div>
-                                {/* Text toggle button — always available so user can read the text */}
+                                {/* Text toggle button — 复古微信风：默认浅灰底深字，展开时稍深 */}
                                 <div
-                                    className={`shrink-0 ml-0.5 px-1.5 py-0.5 rounded-lg text-[9px] font-medium transition-all ${showVoiceText ? 'ring-1 ring-current/20' : ''}`}
+                                    className={`shrink-0 px-1.5 py-0.5 rounded-md text-[9px] font-medium transition-all ${showVoiceText ? 'ring-1 ring-current/20' : ''}`}
                                     style={{
-                                        color: vbText || 'rgba(100,116,139,0.7)',
-                                        backgroundColor: showVoiceText ? 'rgba(0,0,0,0.08)' : 'rgba(0,0,0,0.04)',
+                                        color: vbText || '#686868',
+                                        backgroundColor: showVoiceText ? (vbBtn ? vbBtn + '1f' : 'rgba(0,0,0,0.12)') : (vbBg ? vbBtn + '0d' : 'rgba(0,0,0,0.06)'),
                                     }}
                                     onClick={(e) => {
                                         e.stopPropagation();
@@ -3971,36 +4004,64 @@ const MessageItem = React.memo(({
                            pending (app restart / auto-TTS) or the character has no MiniMax voice
                            configured. Offer a 转文字 toggle here too so the text stays readable,
                            aligning fake voice messages with real ones. */
-                        <div className="max-w-[260px]">
+                        <div className="max-w-[260px] -ml-2 relative">
+                            {/* 复古微信 AI 小尾巴：作为 voice bar 框的子元素，z-index 3 在 voice bar stacking context 里最上层 */}
+                            <span
+                                aria-hidden="true"
+                                className="sully-bubble-tail sully-bubble-tail-ai"
+                                style={{
+                                    top: '50%',
+                                    transform: 'translateY(-50%)',
+                                    zIndex: 3,
+                                    '--sully-bubble-tail-start': '#f7f7f7',
+                                    '--sully-bubble-tail-end': '#d8d8d8',
+                                } as React.CSSProperties}
+                            >
+                                <svg
+                                    className="sully-bubble-tail-svg sully-bubble-tail-svg-ai"
+                                    viewBox="0 0 12 12"
+                                    preserveAspectRatio="none"
+                                    focusable="false"
+                                >
+                                    <defs>
+                                        <linearGradient id={`voice-tail-fake-${m.id}`} x1="0" y1="0" x2="0" y2="1">
+                                            <stop offset="0%" className="sully-bubble-tail-stop-start" />
+                                            <stop offset="100%" className="sully-bubble-tail-stop-end" />
+                                        </linearGradient>
+                                    </defs>
+                                    <path className="sully-bubble-tail-outline" d="M12 .5V11.5L.25 6Z" />
+                                    <path className="sully-bubble-tail-inner" d="M10.65 1.55V10.45L1.65 6Z" fill={`url(#voice-tail-fake-${m.id})`} />
+                                </svg>
+                            </span>
                             <div
-                                className="flex items-center gap-2 px-3 py-2 rounded-2xl"
-                                style={{ background: vbBg || 'linear-gradient(135deg, rgba(0,0,0,0.03) 0%, rgba(0,0,0,0.06) 100%)', border: '1px solid rgba(0,0,0,0.05)' }}
+                                className="flex items-center gap-2 px-2.5 h-7 rounded-[4px]"
+                                style={{ background: 'linear-gradient(#f7f7f7,#d8d8d8) 0 0/100% var(--sully-bubble-sheen,1.75rem) no-repeat,#d8d8d8', border: '1px solid #b8b8b8', boxShadow: 'inset 0 1px #fff, 0 1px 2px rgba(0,0,0,.18)', color: '#222' }}
                             >
                                 <button
                                     onClick={(e) => { e.stopPropagation(); e.preventDefault(); onPlayVoice?.(m.id); }}
-                                    className="shrink-0 w-7 h-7 rounded-full flex items-center justify-center active:scale-[0.92] transition-transform"
-                                    style={{ backgroundColor: vbBg ? 'rgba(255,255,255,0.25)' : 'rgba(148,163,184,0.2)' }}
+                                    className="shrink-0 w-5 h-5 rounded-full flex items-center justify-center active:scale-[0.92] transition-transform"
+                                    style={{ backgroundColor: 'rgba(255,255,255,0.7)', boxShadow: 'inset 0 1px rgba(255,255,255,.6), 0 1px 2px rgba(0,0,0,.18)' }}
                                 >
-                                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill={vbBtn || '#64748b'} className="w-3 h-3 ml-0.5"><path d="M6.3 2.84A1.5 1.5 0 0 0 4 4.11v11.78a1.5 1.5 0 0 0 2.3 1.27l9.344-5.891a1.5 1.5 0 0 0 0-2.538L6.3 2.841Z" /></svg>
+                                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="#222" className="w-2.5 h-2.5 ml-px"><path d="M6.3 2.84A1.5 1.5 0 0 0 4 4.11v11.78a1.5 1.5 0 0 0 2.3 1.27l9.344-5.891a1.5 1.5 0 0 0 0-2.538L6.3 2.841Z" /></svg>
                                 </button>
-                                <div className="flex-1 flex items-center gap-[3px] h-5 overflow-hidden">
+                                <div className="flex-1 flex items-center gap-[2px] h-3 overflow-hidden">
                                     {[4, 10, 6, 14, 8, 12, 5, 11, 7, 13, 4, 9, 6, 11, 5, 8, 10, 7, 12, 6].map((h, i) => (
-                                        <div key={i} className="w-[2.5px] rounded-full" style={{ height: `${Math.max(2, h * 0.4)}px`, backgroundColor: vbWave ? vbWave + '60' : `rgba(148, 163, 184, ${0.25 + (h / 14) * 0.35})` }} />
+                                        <div key={i} className="w-[2px] rounded-full" style={{ height: `${Math.max(2, h * 0.3)}px`, backgroundColor: `rgba(80, 80, 80, ${0.25 + (h / 14) * 0.35})` }} />
                                     ))}
                                 </div>
                                 {(voiceTagText || displayContent) ? (
                                     <div
-                                        className={`shrink-0 ml-0.5 px-1.5 py-0.5 rounded-lg text-[9px] font-medium transition-all ${showVoiceText ? 'ring-1 ring-current/20' : ''}`}
+                                        className={`shrink-0 px-1.5 py-0.5 rounded-md text-[9px] font-medium transition-all ${showVoiceText ? 'ring-1 ring-current/20' : ''}`}
                                         style={{
-                                            color: vbText || 'rgba(100,116,139,0.7)',
-                                            backgroundColor: showVoiceText ? 'rgba(0,0,0,0.08)' : 'rgba(0,0,0,0.04)',
+                                            color: '#686868',
+                                            backgroundColor: showVoiceText ? 'rgba(0,0,0,0.12)' : 'rgba(0,0,0,0.06)',
                                         }}
                                         onClick={(e) => { e.stopPropagation(); e.preventDefault(); setShowVoiceText(v => !v); if (!showVoiceText) trackEvent('把语音条转成文字'); }}
                                     >
                                         {showVoiceText ? '收起' : '转文字'}
                                     </div>
                                 ) : (
-                                    <span className="text-[9px] shrink-0" style={{ color: vbText || 'rgba(100,116,139,0.7)' }}>语音</span>
+                                    <span className="text-[9px] shrink-0" style={{ color: '#686868' }}>语音</span>
                                 )}
                             </div>
                             {showVoiceText && (voiceTagText || displayContent) && (
