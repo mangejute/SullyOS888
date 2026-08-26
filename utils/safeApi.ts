@@ -12,6 +12,7 @@
 // 后者的 meta 通过下面 safeFetchJson 的第 5 个参数挂到 __sullyMeta 上传出去。
 import { appendDevDebugApiLog, makeDebugLogger } from './devDebug';
 import { getApiCallAmbientContext, recordApiCall, type ApiCallMeta } from './apiCallLog';
+import { ApiMasterDisabledError, isApiMasterEnabled } from './apiMasterSwitch';
 
 const log = makeDebugLogger('api', 'SafeAPI');
 
@@ -352,6 +353,12 @@ export async function safeFetchJson(
     /** 可选：流式增量回调（请求体带 stream:true 时传入才有意义；响应不是 SSE 时静默不触发）。 */
     streamHooks?: StreamHooks,
 ): Promise<any> {
+    // API 总开关：关闭时直接 throw，让上层 try/catch 接住正常报错。
+    // 一个出口 = 一处拦截：LLM / TTS / 生图 / 识图 / 嵌入 / 联网代理
+    // 全部走 safeFetchJson，关闭这一把等于一键断网。
+    if (typeof window !== 'undefined' && !isApiMasterEnabled()) {
+        throw new ApiMasterDisabledError();
+    }
     const retryableStatuses = new Set([429, 500, 502, 503, 504]);
     let lastError: Error | null = null;
     const urlStr = String(url);

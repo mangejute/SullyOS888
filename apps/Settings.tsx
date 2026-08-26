@@ -41,6 +41,7 @@ import { fetchMiniMaxVoices } from '../utils/minimaxVoice';
 import { getBrowserNotificationPermission, isBackgroundKeepAliveEnabled, isBrowserNotificationsEnabled, requestBrowserNotifications, setBackgroundKeepAlive, setBrowserNotificationsEnabled, showCharacterNotification } from '../utils/browserFeatures';
 import { snapshotLocalStorageMirror } from '../utils/lsMirror';
 import { DEFAULT_SILICONFLOW_STT_MODEL, DEFAULT_SILICONFLOW_STT_URL, testSiliconFlowSttConnection } from '../utils/siliconFlowStt';
+import { isApiMasterEnabled, setApiMasterEnabled, onApiMasterChange } from '../utils/apiMasterSwitch';
 import type { APIConfig } from '../types';
 
 // hot_news（news.orz.ai）可选热榜平台。key 必须与 API 的 ?platform= 完全一致。
@@ -157,6 +158,95 @@ const SettingsSection: React.FC<{
             </div>
             {open && children}
         </section>
+    );
+};
+
+/**
+ * API 总开关卡片。
+ * 单行布局：左侧图标 + 标题，右侧大开关。开关颜色即状态。
+ * 拦截范围：所有 LLM / TTS / 生图 / 识图 / 嵌入 / 联网代理的请求（统一走 safeFetchJson）。
+ * 关闭时切到开需要二次确认——误关会让角色停摆、主动消息断流。
+ */
+const ApiMasterSwitchCard: React.FC = () => {
+    const [enabled, setEnabled] = useState<boolean>(() => isApiMasterEnabled());
+    const [confirmingDisable, setConfirmingDisable] = useState(false);
+
+    useEffect(() => {
+        // 监听当前标签页 change + 跨标签页 storage 同步
+        return onApiMasterChange(next => setEnabled(next));
+    }, []);
+
+    const handleToggle = (next: boolean) => {
+        if (next) {
+            // 开 → 直接生效
+            setApiMasterEnabled(true);
+            setEnabled(true);
+            setConfirmingDisable(false);
+        } else {
+            // 关 → 进二次确认态，不立刻写
+            setConfirmingDisable(true);
+        }
+    };
+
+    const confirmDisable = () => {
+        setApiMasterEnabled(false);
+        setEnabled(false);
+        setConfirmingDisable(false);
+    };
+
+    return (
+        <>
+            <label
+                className={`flex items-center gap-3 p-4 rounded-2xl border-2 cursor-pointer transition-colors ${
+                    enabled
+                        ? 'bg-emerald-50/80 border-emerald-200/80'
+                        : 'bg-rose-50/80 border-rose-300/80'
+                }`}
+            >
+                <div className={`p-2 rounded-xl ${enabled ? 'bg-emerald-100 text-emerald-600' : 'bg-rose-100 text-rose-600'}`}>
+                    <PlugsConnected size={18} weight="fill" />
+                </div>
+                <h2 className="text-sm font-semibold text-slate-700 tracking-wider flex-1 min-w-0">API 总开关</h2>
+                <input
+                    type="checkbox"
+                    checked={enabled}
+                    onChange={e => handleToggle(e.target.checked)}
+                    className="sr-only peer"
+                />
+                <span
+                    className={`w-11 h-6 rounded-full relative shrink-0 transition-colors after:content-[''] after:absolute after:w-4 after:h-4 after:bg-white after:rounded-full after:left-1 after:top-1 after:transition-transform ${
+                        enabled
+                            ? 'bg-emerald-500 peer-checked:after:translate-x-5'
+                            : 'bg-rose-500'
+                    }`}
+                />
+            </label>
+
+            {confirmingDisable && (
+                <div className="mt-3 p-3 bg-rose-100/70 border border-rose-200 rounded-xl">
+                    <p className="text-[11px] text-rose-700 font-semibold mb-2">确定要停用所有 API 调用吗？</p>
+                    <p className="text-[10px] text-rose-600/80 leading-relaxed mb-2">
+                        角色不会自动回消息、不会主动发消息、电话没声音。生图、识图、向量记忆也会全部停摆。
+                    </p>
+                    <div className="flex gap-2">
+                        <button
+                            type="button"
+                            onClick={confirmDisable}
+                            className="px-3 py-1.5 bg-rose-500 text-white text-[11px] font-bold rounded-lg active:scale-95 transition-transform"
+                        >
+                            确定停用
+                        </button>
+                        <button
+                            type="button"
+                            onClick={() => setConfirmingDisable(false)}
+                            className="px-3 py-1.5 bg-white text-slate-600 text-[11px] font-bold rounded-lg border border-slate-200 active:scale-95 transition-transform"
+                        >
+                            取消
+                        </button>
+                    </div>
+                </div>
+            )}
+        </>
     );
 };
 
@@ -2143,6 +2233,7 @@ const Settings: React.FC = () => {
       </div>
 
       <div className="flex-1 overflow-y-auto p-5 space-y-6 no-scrollbar pb-20">
+        <ApiMasterSwitchCard />
         <SettingsSection
             title="后台与通知"
             icon={<div className="p-2 bg-amber-100 rounded-xl text-amber-600"><Bell size={18} weight="fill" /></div>}

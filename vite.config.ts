@@ -72,6 +72,11 @@ export default defineConfig({
     drop: ['debugger'],
   },
   server: {
+    // 固定本地开发端口，strictPort 下被占用会直接报错而不是静默换端口，
+    // 保证预览地址永远不变（http://localhost:5173）。
+    host: '127.0.0.1',
+    port: 5173,
+    strictPort: true,
     proxy: {
       '/api/minimax/t2a': {
         target: 'https://api.minimaxi.com',
@@ -113,9 +118,21 @@ export default defineConfig({
       },
     }
   },
+  preview: {
+    // 固定构建产物预览端口，与 open-local-web.bat / local-static-server.cjs 保持一致
+    host: '127.0.0.1',
+    port: 4173,
+    strictPort: true,
+  },
   build: {
     outDir: 'dist',
     assetsDir: 'assets',
+    // 关闭 vite 的 emptyOutDir 行为。WorkBuddy 沙箱的 trash 包装（genie-safe-delete.cjs）
+    // 在 trash dist 下的 worker/JS bundle 时会偶发 abort 失败，让 vite 构建直接挂掉。
+    // 关闭后 vite 不再清空 dist，新文件直接覆盖、保留旧的 hash 化文件名；
+    // HTML 入口永远指向新 hash，旧文件残留但不再被引用，不影响功能。
+    // 想要彻底清理时手动 `Remove-Item dist -Recurse -Force`（一次性同意批量删除即可）。
+    emptyOutDir: false,
     chunkSizeWarningLimit: 2000,
     rollupOptions: {
       // 关键修复：将这些包排除在打包之外，让浏览器通过 index.html 的 importmap 加载
